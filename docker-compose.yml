@@ -5,6 +5,7 @@ services:
     build:
       context: ./backend
     environment:
+      TZ: Asia/Shanghai
       APP_ENV: production
       APP_DEBUG: "false"
       APP_LOG_LEVEL: INFO
@@ -12,6 +13,7 @@ services:
       APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-only-change-me}
       APP_DATABASE_URL: sqlite+aiosqlite:////data/app.db
       APP_DATA_DIR: /data
+      APP_MEDIA_ROOT: /media
       APP_CORS_ORIGINS: "[]"
       # The compose stack is served over plain HTTP locally; set true behind HTTPS.
       APP_AUTH_COOKIE_SECURE: ${APP_AUTH_COOKIE_SECURE:-false}
@@ -19,8 +21,12 @@ services:
       APP_DEEPSEEK_BASE_URL: ${APP_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       APP_DEEPSEEK_MODEL: ${APP_DEEPSEEK_MODEL:-deepseek-chat}
       APP_DAILY_BUDGET_USD: ${APP_DAILY_BUDGET_USD:-10}
+      # Optional error reporting: leave SENTRY_DSN empty to disable it.
+      SENTRY_DSN: ${SENTRY_DSN:-}
+      SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
     volumes:
       - app-data:/data
+      - media:/media
     restart: unless-stopped
     healthcheck:
       test:
@@ -33,9 +39,33 @@ services:
       retries: 3
       start_period: 10s
 
+  # Daily logical backup of SQLite into its own volume. Runs the online backup API while
+  # the API keeps writing; keeps BACKUP_RETENTION files (including the new one).
+  backup:
+    build:
+      context: ./backend
+    environment:
+      TZ: Asia/Shanghai
+      APP_DATABASE_URL: sqlite+aiosqlite:////data/app.db
+      BACKUP_DIR: /backups
+      BACKUP_RETENTION: ${BACKUP_RETENTION:-7}
+    volumes:
+      - app-data:/data
+      - backups:/backups
+    depends_on:
+      api:
+        condition: service_healthy
+    command:
+      - sh
+      - -c
+      - "while true; do python -m scripts.backup || true; sleep 86400; done"
+    restart: unless-stopped
+
   web:
     build:
       context: ./frontend
+    environment:
+      TZ: Asia/Shanghai
     ports:
       - "${WEB_PORT:-8080}:80"
     depends_on:
@@ -45,3 +75,5 @@ services:
 
 volumes:
   app-data:
+  media:
+  backups:

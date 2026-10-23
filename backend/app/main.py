@@ -24,6 +24,7 @@ from .modules.catalog.router import router as catalog_router
 from .modules.identity.router import router as identity_router
 from .modules.media.router import router as media_router
 from .modules.ops.router import router as ops_router
+from .modules.ops.sentry import init_sentry
 
 logger = logging.getLogger("app.main")
 
@@ -32,6 +33,8 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
     settings = settings or load_settings()
     adapters = adapters or build_production_adapters(settings)
     configure_logging(settings.log_level)
+    # No-op unless SENTRY_DSN is set; failures to import/init never block startup.
+    init_sentry(environment=settings.env)
 
     engine, sessionmaker = create_engine_and_sessionmaker(settings)
 
