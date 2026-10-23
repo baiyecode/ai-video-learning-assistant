@@ -1,0 +1,11 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans:
+    "Inter", "PingFang SC", "Microsoft YaHei", "Noto Sans SC", ui-sans-serif, system-ui,
+    sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}

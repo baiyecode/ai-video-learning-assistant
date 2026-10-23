@@ -1,0 +1,87 @@
+"""Application factory (composition root) and ASGI entrypoint.
+
+Later tickets never edit this file: they add routes to their module router and models to
+their module's ``models.py`` (registered in ``models_registry.py``).
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+
+from fastapi import APIRouter, FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from . import __version__
+from .config import Settings, load_settings
+from .container import Adapters, build_production_adapters
+from .db import create_engine_and_sessionmaker, init_db
+from .errors import register_exception_handlers
+from .logging_setup import RequestContextMiddleware, configure_logging
+from .modules.analysis.router import router as analysis_router
+from .modules.catalog.router import router as catalog_router
+from .modules.identity.router import router as identity_router
+from .modules.media.router import router as media_router
+from .modules.ops.router import router as ops_router
+
+logger = logging.getLogger("app.main")
+
+
+def create_app(settings: Settings | None = None, adapters: Adapters | None = None) -> FastAPI:
+    settings = settings or load_settings()
+    adapters = adapters or build_production_adapters(settings)
+    configure_logging(settings.log_level)
+
+    engine, sessionmaker = create_engine_and_sessionmaker(settings)
+
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+        settings.ensure_directories()
+        await init_db(engine)
+        logger.info("app_started", extra={"event": "app_started", "env": settings.env})
+        try:
+            yield
+        finally:
+            await engine.dispose()
+            logger.info("app_stopped", extra={"event": "app_stopped"})
+
+    app = FastAPI(
+        title=settings.app_name,
+        version=__version__,
+        lifespan=lifespan,
+        docs_url="/api/docs",
+        redoc_url=None,
+        openapi_url="/api/openapi.json",
+    )
+    app.state.settings = settings
+    app.state.adapters = adapters
+    app.state.engine = engine
+    app.state.sessionmaker = sessionmaker
+
+    if settings.cors_origins:
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=settings.cors_origins,
+            allow_credentials=True,
+            allow_methods=["*"],
+            allow_headers=["*"],
+            expose_headers=["X-Request-ID"],
+        )
+
+    register_exception_handlers(app)
+    # Added last so it is the outermost user middleware and sees every response.
+    app.add_middleware(RequestContextMiddleware)
+
+    api_router = APIRouter(prefix="/api")
+    api_router.include_router(catalog_router)
+    api_router.include_router(identity_router)
+    api_router.include_router(media_router)
+    api_router.include_router(analysis_router)
+    app.include_router(api_router)
+    app.include_router(ops_router)  # /health lives outside /api
+
+    return app
+
+
+app = create_app()

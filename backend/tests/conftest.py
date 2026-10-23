@@ -1,0 +1,46 @@
+from __future__ import annotations
+
+from collections.abc import AsyncIterator
+from pathlib import Path
+
+import httpx
+import pytest
+from app.config import Settings
+from app.container import Adapters
+from app.main import create_app
+from asgi_lifespan import LifespanManager
+from fastapi import FastAPI
+
+from tests.fakes import make_fake_adapters
+
+
+@pytest.fixture
+def settings(tmp_path: Path) -> Settings:
+    """Test settings: isolated SQLite file, no env file, no external services."""
+    return Settings(
+        _env_file=None,
+        env="test",
+        secret_key="test-only-secret",
+        database_url=f"sqlite+aiosqlite:///{(tmp_path / 'app.db').as_posix()}",
+        data_dir=tmp_path / "data",
+        log_level="WARNING",
+    )
+
+
+@pytest.fixture
+def adapters() -> Adapters:
+    return make_fake_adapters()
+
+
+@pytest.fixture
+def app(settings: Settings, adapters: Adapters) -> FastAPI:
+    return create_app(settings=settings, adapters=adapters)
+
+
+@pytest.fixture
+async def client(app: FastAPI) -> AsyncIterator[httpx.AsyncClient]:
+    """In-process HTTP client: no server, no sockets, but full lifespan."""
+    async with LifespanManager(app):
+        transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+            yield http_client
