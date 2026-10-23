@@ -50,10 +50,16 @@ class ResolvedVideo:
     thumbnail_url: str | None = None
     formats: tuple[VideoFormat, ...] = ()
     subtitles: tuple[SubtitleTrack, ...] = ()
+    is_drm: bool = False
+    is_members_only: bool = False
 
     @property
     def video_key(self) -> str:
         return f"{self.platform}:{self.platform_video_id}"
+
+
+class VideoUnavailableError(Exception):
+    """The Platform recognised the URL but the Video cannot be served (private/deleted)."""
 
 
 @dataclass(frozen=True, slots=True)
