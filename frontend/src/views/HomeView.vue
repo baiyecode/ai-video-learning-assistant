@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import ComplianceNotice from "@/components/ComplianceNotice.vue";
 import DownloadPanel from "@/components/DownloadPanel.vue";
 import SubtitlePanel from "@/components/SubtitlePanel.vue";
+import { acknowledgeCompliance, complianceMessageForCode } from "@/lib/compliance";
 import {
   formatDuration,
   formatFileSize,
@@ -17,6 +19,12 @@ const url = ref("");
 const result = computed(() => store.result);
 const error = computed(() => store.error);
 const canSubmit = computed(() => url.value.trim().length > 0 && !store.loading);
+const complianceHint = computed(() =>
+  error.value ? complianceMessageForCode(error.value.code) : null,
+);
+
+const complianceOpen = ref(false);
+let pendingDownload: (() => void) | null = null;
 
 function submit(): void {
   if (!canSubmit.value) return;
@@ -25,6 +33,25 @@ function submit(): void {
 
 function retry(): void {
   void store.retry();
+}
+
+/** DownloadPanel asks HomeView to gate the very first Download behind the notice. */
+function requireCompliance(startDownload: () => void): void {
+  pendingDownload = startDownload;
+  complianceOpen.value = true;
+}
+
+function confirmCompliance(): void {
+  acknowledgeCompliance();
+  complianceOpen.value = false;
+  const startDownload = pendingDownload;
+  pendingDownload = null;
+  startDownload?.();
+}
+
+function cancelCompliance(): void {
+  complianceOpen.value = false;
+  pendingDownload = null;
 }
 </script>
 
@@ -78,7 +105,7 @@ function retry(): void {
       role="alert"
       class="space-y-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
     >
-      <p class="font-medium">{{ error.message }}</p>
+      <p class="font-medium">{{ complianceHint ?? error.message }}</p>
       <div class="flex flex-wrap items-center gap-3 text-xs text-red-600">
         <span>错误代码：{{ error.code }}</span>
         <button
@@ -179,7 +206,12 @@ function retry(): void {
         <p v-else class="text-sm text-slate-500">暂无可下载格式。</p>
       </div>
 
-      <DownloadPanel :video="result.video" :formats="result.formats" />
+      <DownloadPanel
+        :video="result.video"
+        :formats="result.formats"
+        compliance-required
+        @compliance-required="requireCompliance"
+      />
 
       <SubtitlePanel :video-id="result.video.id" />
 
@@ -195,5 +227,11 @@ function retry(): void {
         <span class="text-xs text-slate-400">{{ result.resolve_notice }}</span>
       </div>
     </article>
+
+    <ComplianceNotice
+      :open="complianceOpen"
+      @confirm="confirmCompliance"
+      @cancel="cancelCompliance"
+    />
   </section>
 </template>
