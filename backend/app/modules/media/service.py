@@ -31,8 +31,8 @@ VISITOR_WINDOW = timedelta(hours=1)
 
 _MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
 _MESSAGE_FORMATS_EXPIRED = "格式信息已过期，请重新解析该视频"
-_MESSAGE_DRM = "该视频受 DRM 保护，无法下载"
-_MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，暂不支持下载"
+_MESSAGE_DRM = "该视频受 DRM 保护，本产品不提供绕过 DRM 的解析或下载"
+_MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，本产品不提供绕过会员权限的解析或下载"
 _MESSAGE_DOWNLOAD_NOT_FOUND = "下载任务不存在或已过期"
 _MESSAGE_NOT_READY = "文件尚未准备完成，请稍候"
 _MESSAGE_FILE_EXPIRED = "文件已过期，请重新发起下载"

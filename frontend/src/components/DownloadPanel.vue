@@ -9,11 +9,18 @@ import {
   isTerminalStatus,
   remainingSeconds,
 } from "@/lib/download";
+import { isComplianceAcknowledged } from "@/lib/compliance";
 import { formatFileSize } from "@/lib/video";
 import type { VideoDto, VideoFormatDto } from "@/lib/video";
 import { useDownloadStore } from "@/stores/download";
 
-const props = defineProps<{ video: VideoDto; formats: VideoFormatDto[] }>();
+const props = withDefaults(
+  defineProps<{ video: VideoDto; formats: VideoFormatDto[]; complianceRequired?: boolean }>(),
+  { complianceRequired: false },
+);
+// The compliance gate is owned by HomeView: it shows the notice and calls ``retry``
+// once the acknowledgement is persisted. Ticket #14 keeps this hook tiny on purpose.
+const emit = defineEmits<{ "compliance-required": [retry: () => void] }>();
 
 const store = useDownloadStore();
 const selectedFormatId = ref(props.formats[0]?.format_id ?? "");
@@ -57,6 +64,10 @@ function formatOptionLabel(format: VideoFormatDto): string {
 
 function startDownload(): void {
   if (!canStart.value) return;
+  if (props.complianceRequired && !isComplianceAcknowledged()) {
+    emit("compliance-required", startDownload);
+    return;
+  }
   void store.start(props.video.id, selectedFormatId.value);
 }
 

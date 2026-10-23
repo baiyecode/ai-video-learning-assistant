@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.modules.catalog.schemas import RETENTION_NOTICE
+
 
 class CreateDownloadRequest(BaseModel):
     video_id: str = Field(min_length=1, max_length=64)
@@ -38,3 +40,4 @@ class DownloadOut(BaseModel):
     can_retry: bool = False
     # 1-based FIFO position while ``queued``; ``None`` once running or terminal.
     queue_position: int | None = None
+    retention_notice: str = RETENTION_NOTICE
