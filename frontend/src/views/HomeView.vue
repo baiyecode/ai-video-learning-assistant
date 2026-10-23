@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import DownloadPanel from "@/components/DownloadPanel.vue";
 import {
   formatDuration,
   formatFileSize,
@@ -177,15 +178,9 @@ function retry(): void {
         <p v-else class="text-sm text-slate-500">暂无可下载格式。</p>
       </div>
 
+      <DownloadPanel :video="result.video" :formats="result.formats" />
+
       <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
-        <button
-          type="button"
-          class="rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
-          disabled
-          title="Download 功能即将上线"
-        >
-          下载（即将上线）
-        </button>
         <button
           type="button"
           class="rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
