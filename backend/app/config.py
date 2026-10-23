@@ -45,6 +45,11 @@ class Settings(BaseSettings):
     deepseek_model: str = "deepseek-chat"
     daily_budget_usd: float = 10.0
 
+    # Analysis (ticket #8): free Quota per Account per Asia/Shanghai day and the
+    # end-to-end generation timeout. #12 adds rate limits and budget policy.
+    analysis_daily_quota: int = 3
+    analysis_timeout_seconds: float = 120.0
+
     @property
     def media_dir(self) -> Path:
         return self.media_root if self.media_root is not None else self.data_dir / "media"

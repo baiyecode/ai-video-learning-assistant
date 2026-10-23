@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -124,19 +125,34 @@ class FakeMediaStore:
 
 @dataclass
 class FakeSummarizer:
-    """Streams scripted chunks; optionally raises on the first iteration."""
+    """Streams scripted chunks; scripts errors, partial failures, delays and hangs.
+
+    - ``error``: raised before the first chunk (or after ``error_after`` chunks).
+    - ``error_after``: emit this many chunks, then raise ``error``.
+    - ``delay_seconds``: sleep between chunks (keeps an Analysis in progress).
+    - ``hang_seconds``: sleep before yielding anything (exercises the timeout).
+    """
 
     chunks: list[str] = field(default_factory=lambda: ["这是", "一段", "摘要"])
     error: Exception | None = None
+    error_after: int | None = None
+    delay_seconds: float = 0.0
+    hang_seconds: float | None = None
     prompts: list[str] = field(default_factory=list)
 
     def stream(self, *, prompt: str) -> AsyncIterator[str]:
         self.prompts.append(prompt)
 
         async def _generate() -> AsyncIterator[str]:
-            if self.error is not None:
+            if self.hang_seconds is not None:
+                await asyncio.sleep(self.hang_seconds)
+            if self.error is not None and self.error_after is None:
                 raise self.error
-            for chunk in self.chunks:
+            for index, chunk in enumerate(self.chunks):
+                if self.error_after is not None and index >= self.error_after:
+                    raise self.error or RuntimeError("synthetic summarizer failure")
+                if self.delay_seconds:
+                    await asyncio.sleep(self.delay_seconds)
                 yield chunk
 
         return _generate()

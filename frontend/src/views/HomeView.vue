@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
+import { useRouter } from "vue-router";
 
 import DownloadPanel from "@/components/DownloadPanel.vue";
 import SubtitlePanel from "@/components/SubtitlePanel.vue";
+import { ApiError } from "@/lib/api";
 import {
   formatDuration,
   formatFileSize,
   platformLabel,
   subtitleSourceLabel,
 } from "@/lib/video";
+import { useAnalysisStore } from "@/stores/analysis";
+import { useAuthStore } from "@/stores/auth";
 import { useVideoStore } from "@/stores/video";
 
 const store = useVideoStore();
+const auth = useAuthStore();
+const analysisStore = useAnalysisStore();
+const router = useRouter();
 const url = ref("");
+const creatingAnalysis = ref(false);
+const analysisError = ref<{ code: string; message: string } | null>(null);
 
 const result = computed(() => store.result);
 const error = computed(() => store.error);
@@ -25,6 +34,30 @@ function submit(): void {
 
 function retry(): void {
   void store.retry();
+}
+
+async function startAnalysis(): Promise<void> {
+  const resolved = result.value;
+  if (!resolved || !resolved.can_analyze || creatingAnalysis.value) return;
+
+  if (!auth.isAuthenticated) {
+    await router.push({ name: "login", query: { next: "/" } });
+    return;
+  }
+
+  creatingAnalysis.value = true;
+  analysisError.value = null;
+  try {
+    const analysis = await analysisStore.create(resolved.video.id);
+    await router.push({ name: "analysis", params: { id: analysis.id } });
+  } catch (caught) {
+    analysisError.value =
+      caught instanceof ApiError
+        ? { code: caught.code, message: caught.message }
+        : { code: "network_error", message: "网络异常，请检查连接后重试" };
+  } finally {
+    creatingAnalysis.value = false;
+  }
 }
 </script>
 
@@ -186,12 +219,19 @@ function retry(): void {
       <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
         <button
           type="button"
-          class="rounded-lg bg-slate-200 px-4 py-2 text-sm font-medium text-slate-500"
-          disabled
-          title="AI 总结即将上线"
+          class="rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
+          :disabled="creatingAnalysis || !result.can_analyze"
+          :title="result.can_analyze ? '登录后可生成摘要' : '该视频没有可用字幕'"
+          @click="startAnalysis"
         >
-          AI 总结（即将上线）
+          {{ creatingAnalysis ? "正在创建…" : "AI 总结" }}
         </button>
+        <span v-if="!result.can_analyze" class="text-xs text-amber-700">
+          该视频没有可用字幕，暂不支持 AI 总结。
+        </span>
+        <span v-if="analysisError" role="alert" class="text-xs text-red-600">
+          {{ analysisError.message }}
+        </span>
         <span class="text-xs text-slate-400">{{ result.resolve_notice }}</span>
       </div>
     </article>
