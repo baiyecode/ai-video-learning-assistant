@@ -8,9 +8,11 @@ decisions (URL expiry, file retention) use the injected ``Clock``.
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+import math
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -25,6 +27,7 @@ from .schemas import DownloadErrorOut, DownloadOut
 from .signing import SIGNED_URL_TTL, signed_file_path, verify_signature
 
 MAX_RETRIES = 3
+VISITOR_WINDOW = timedelta(hours=1)
 
 _MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
 _MESSAGE_FORMATS_EXPIRED = "格式信息已过期，请重新解析该视频"
@@ -39,6 +42,7 @@ _MESSAGE_RETRY_EXHAUSTED = "重试次数已达上限，请重新发起下载"
 
 async def create_download(
     session: AsyncSession,
+    settings: Settings,
     clock: Clock,
     *,
     video_id: str,
@@ -46,7 +50,14 @@ async def create_download(
     visitor_ip: str | None,
     account_id: str | None,
 ) -> Download:
-    """Validate the format snapshot and persist a ``queued`` row (caller re-queues it)."""
+    """Validate the format snapshot and persist a ``queued`` row (caller re-queues it).
+
+    Resource boundaries are enforced before inserting anything: a Video longer than
+    ``download_max_duration_seconds`` or a format whose known size exceeds
+    ``download_max_file_size_bytes`` is rejected outright. The per-IP hourly cap is
+    the only limit that rejects with ``download_limit_reached``; concurrency caps
+    waiting elsewhere in the queue.
+    """
     video = await session.get(Video, video_id)
     if video is None:
         raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, _MESSAGE_VIDEO_NOT_FOUND)
@@ -55,12 +66,26 @@ async def create_download(
     if video.is_members_only:
         raise AppError(403, ErrorCode.MEMBERS_ONLY, _MESSAGE_MEMBERS_ONLY)
 
+    max_duration = settings.download_max_duration_seconds
+    if video.duration_seconds > max_duration:
+        raise AppError(
+            422,
+            ErrorCode.DOWNLOAD_TOO_LONG,
+            _too_long_message(max_duration),
+            {"duration_seconds": video.duration_seconds, "max_duration_seconds": max_duration},
+        )
+
     fetched_at = _as_aware(video.formats_fetched_at)
     stale = fetched_at is None or clock.now() - fetched_at >= FORMATS_TTL
-    known_format = any(
-        str(item.get("format_id")) == format_id for item in video.formats_json or []
+    known_format = next(
+        (
+            item
+            for item in video.formats_json or []
+            if str(item.get("format_id")) == format_id
+        ),
+        None,
     )
-    if stale or not known_format:
+    if stale or known_format is None:
         raise AppError(
             409,
             ErrorCode.FORMATS_EXPIRED,
@@ -68,7 +93,25 @@ async def create_download(
             {"video_id": video.id},
         )
 
+    max_size = settings.download_max_file_size_bytes
+    filesize = _known_filesize(known_format.get("filesize"))
+    if filesize is not None and filesize > max_size:
+        raise AppError(
+            422,
+            ErrorCode.DOWNLOAD_TOO_LARGE,
+            _too_large_message(max_size),
+            {"filesize": filesize, "max_file_size_bytes": max_size},
+        )
+
     now = clock.now()
+    if account_id is None and visitor_ip is not None:
+        await _enforce_visitor_hourly_cap(
+            session,
+            settings,
+            visitor_ip=visitor_ip,
+            now=now,
+        )
+
     download = Download(
         video_id=video.id,
         format_id=format_id,
@@ -83,6 +126,39 @@ async def create_download(
     session.add(download)
     await session.commit()
     return download
+
+
+async def _enforce_visitor_hourly_cap(
+    session: AsyncSession,
+    settings: Settings,
+    *,
+    visitor_ip: str,
+    now: datetime,
+) -> None:
+    """Visitors may create at most ``download_visitor_hourly_limit`` tasks per hour per IP."""
+    cutoff = now - VISITOR_WINDOW
+    recent = (
+        await session.scalars(
+            select(Download).where(
+                Download.account_id.is_(None),
+                Download.visitor_ip == visitor_ip,
+                Download.created_at > cutoff,
+            )
+        )
+    ).all()
+    limit = settings.download_visitor_hourly_limit
+    if len(recent) < limit:
+        return
+
+    oldest = min(_as_aware(row.created_at) or now for row in recent)
+    reset_at = oldest + VISITOR_WINDOW
+    retry_after = max(1, math.ceil((reset_at - now).total_seconds()))
+    raise AppError(
+        429,
+        ErrorCode.DOWNLOAD_LIMIT_REACHED,
+        f"访客每小时最多发起 {limit} 次下载，请稍后再试或登录后下载",
+        {"retry_after": retry_after, "reset_at": reset_at.isoformat(), "limit": limit},
+    )
 
 
 async def get_download(
@@ -180,6 +256,31 @@ def retry_allowed(download: Download) -> bool:
     return download.status in {DownloadStatus.FAILED, DownloadStatus.EXPIRED} and (
         download.attempts < MAX_RETRIES
     )
+
+
+def _known_filesize(value: object) -> int | None:
+    """Platform snapshots sometimes omit the size; only a positive known value counts."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return None
+    size = int(value)
+    return size if size > 0 else None
+
+
+def _too_long_message(max_duration_seconds: int) -> str:
+    hours = max_duration_seconds / 3600
+    label = f"{hours:g}"
+    return f"视频时长超过 {label} 小时上限，暂不支持下载"
+
+
+def _too_large_message(max_file_size_bytes: int) -> str:
+    return f"文件大小超过 {_size_label(max_file_size_bytes)} 上限，无法下载"
+
+
+def _size_label(size: int) -> str:
+    for unit, factor in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
+        if size >= factor:
+            return f"{size / factor:g}{unit}"
+    return f"{size}B"
 
 
 async def _load(session: AsyncSession, download_id: str) -> Download:

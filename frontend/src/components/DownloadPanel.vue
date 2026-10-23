@@ -5,6 +5,7 @@ import {
   downloadStatusLabel,
   formatCountdown,
   formatProgress,
+  formatQueuePosition,
   isTerminalStatus,
   remainingSeconds,
 } from "@/lib/download";
@@ -41,7 +42,9 @@ const failureMessage = computed(
   () => store.error?.message ?? download.value?.error?.message ?? "下载失败，请稍后重试",
 );
 const hint = computed(() => {
-  if (status.value === "queued") return "正在排队，请保持页面打开。";
+  if (status.value === "queued") {
+    return `正在排队${formatQueuePosition(download.value?.queue_position)}，请保持页面打开。`;
+  }
   if (status.value === "downloading") return "正在从平台下载文件…";
   if (status.value === "merging") return "正在合并音视频…";
   return "";
@@ -167,15 +170,16 @@ onBeforeUnmount(() => {
         <p class="text-red-700">{{ failureMessage }}</p>
         <div class="flex flex-wrap items-center gap-3">
           <button
-            v-if="download.can_retry"
             type="button"
             class="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-            :disabled="store.starting"
+            :disabled="!download.can_retry || store.starting"
             @click="retryDownload"
           >
             {{ store.starting ? "正在重试…" : "重试" }}
           </button>
-          <span v-else class="text-xs text-slate-500">重试次数已达上限，请重新发起下载。</span>
+          <span v-if="!download.can_retry" class="text-xs text-slate-500">
+            重试次数已达上限，请重新发起下载。
+          </span>
           <span v-if="download.error" class="text-xs text-slate-400">
             错误代码：{{ download.error.code }}
           </span>
