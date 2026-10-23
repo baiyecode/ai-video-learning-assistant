@@ -2,6 +2,7 @@
 import { computed, ref } from "vue";
 
 import DownloadPanel from "@/components/DownloadPanel.vue";
+import SubtitlePanel from "@/components/SubtitlePanel.vue";
 import {
   formatDuration,
   formatFileSize,
@@ -179,6 +180,8 @@ function retry(): void {
       </div>
 
       <DownloadPanel :video="result.video" :formats="result.formats" />
+
+      <SubtitlePanel :video-id="result.video.id" />
 
       <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
         <button
