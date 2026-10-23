@@ -189,7 +189,7 @@ onBeforeUnmount(() => {
             {{ store.starting ? "正在重试…" : "重试" }}
           </button>
           <span v-if="!download.can_retry" class="text-xs text-slate-500">
-            重试次数已达上限，请重新发起下载。
+            重试已达上限，请重新发起下载。
           </span>
           <span v-if="download.error" class="text-xs text-slate-400">
             错误代码：{{ download.error.code }}

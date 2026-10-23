@@ -288,3 +288,21 @@ async def test_analysis_rejections_before_creation_do_not_consume_the_creation_w
     video_id = await _resolve(client, adapters, "rlreject001")
     created = await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
     assert created.status_code == 201, created.text
+
+
+async def test_rate_limiter_prunes_keys_whose_window_elapsed(settings) -> None:
+    from app.ratelimit import RateLimiter, build_rules
+
+    from tests.fakes import FrozenClock
+
+    clock = FrozenClock()
+    limiter = RateLimiter(clock=clock, rules=build_rules(settings))
+    for index in range(50):
+        limiter.hit("downloads.create", f"198.51.100.{index}")
+    assert limiter.tracked_keys == 50
+
+    clock.advance(seconds=61)
+    limiter.hit("downloads.create", "203.0.113.1")
+
+    # Recording prunes every key whose whole window has elapsed.
+    assert limiter.tracked_keys == 1

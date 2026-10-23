@@ -116,7 +116,7 @@ async function confirmReanalyze(): Promise<void> {
 
     <header class="space-y-2">
       <h1 class="break-words text-2xl font-bold tracking-tight text-slate-900">
-        {{ store.video?.title ?? "AI 总结" }}
+        {{ store.video?.title ?? "AI 分析" }}
       </h1>
       <div class="flex flex-wrap items-center gap-2 text-xs">
         <span
@@ -190,7 +190,7 @@ async function confirmReanalyze(): Promise<void> {
       <p class="font-medium">{{ store.error.message }}</p>
       <div class="flex flex-wrap items-center gap-3 text-xs text-red-600">
         <span>错误代码：{{ store.error.code }}</span>
-        <span v-if="quotaReset" class="text-red-500">{{ quotaReset }}恢复额度</span>
+        <span v-if="quotaReset" class="text-red-500">{{ quotaReset }}，届时 Quota 恢复</span>
         <button
           v-if="canRetry"
           type="button"

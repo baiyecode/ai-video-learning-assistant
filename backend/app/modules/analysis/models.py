@@ -1,7 +1,9 @@
 """SQLAlchemy models for analysis: Analysis and daily QuotaUsage.
 
-An Analysis belongs to one Account and pins the Subtitle version it was generated
-from, so later Subtitle updates never rewrite an existing result (ADR-0002).
+An Analysis belongs to one Account and stores a full snapshot of the Subtitle text,
+cues and language it was generated from. Later Subtitle updates therefore never
+rewrite an existing result or its inputs (ADR-0002); only a forced new Analysis picks
+up the new content.
 
 Concurrency contract
 --------------------
@@ -15,9 +17,10 @@ from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from enum import StrEnum
+from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import Date, DateTime, ForeignKey, Index, String, Text, text
+from sqlalchemy import JSON, Date, DateTime, ForeignKey, Index, String, Text, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -68,9 +71,13 @@ class Analysis(Base):
     mindmap_markdown: Mapped[str] = mapped_column(Text, default="")
     error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 
-    # Snapshot of the Subtitle version used, so the UI can show 人工/自动 even if
-    # the Video's Subtitle is re-selected later.
+    # Immutable snapshot of the Subtitle version used. Generation reads these
+    # columns, never the mutable ``subtitles`` row, so replacing or editing a
+    # Subtitle cannot change an existing Analysis or its inputs.
     subtitle_source: Mapped[str] = mapped_column(String(16), default="manual")
+    subtitle_language: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    subtitle_text: Mapped[str] = mapped_column(Text, default="")
+    subtitle_cues: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     # True when the Subtitle exceeded the configured input budget and only chunks
     # spread across the timeline (first/middle/last) were summarised (ticket #9).
     truncated: Mapped[bool] = mapped_column(default=False)

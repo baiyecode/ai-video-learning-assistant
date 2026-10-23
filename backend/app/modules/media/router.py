@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.container import Adapters
 from app.deps import get_adapters, get_optional_account, get_rate_limiter, get_session, get_settings
+from app.http import client_ip
 from app.modules.identity.models import Account
 from app.ratelimit import RateLimiter
 
@@ -28,7 +29,11 @@ _MANAGER_STATE_KEY = "download_manager"
 
 
 def get_download_manager(request: Request) -> DownloadManager:
-    """Lazily attach the in-process queue to ``app.state`` (keeps ``main.py`` untouched)."""
+    """The manager started by the application lifespan.
+
+    The lazy fallback keeps lightweight unit tests working when they build an app
+    without running the lifespan; production always has the manager pre-started.
+    """
     manager: DownloadManager | None = getattr(request.app.state, _MANAGER_STATE_KEY, None)
     if manager is None:
         state = request.app.state
@@ -61,14 +66,15 @@ async def create_download(
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> DownloadOut:
     # Per-IP minute limit (#12) runs before #6's hourly/queue caps.
-    rate_limiter.hit("downloads.create", _client_ip(request))
+    visitor_ip = client_ip(request)
+    rate_limiter.hit("downloads.create", visitor_ip)
     download = await service.create_download(
         session,
         settings,
         adapters.clock,
         video_id=payload.video_id,
         format_id=payload.format_id,
-        visitor_ip=_client_ip(request),
+        visitor_ip=visitor_ip,
         account_id=account.id if account is not None else None,
     )
     # The freshly created row is not "interrupted work" from a previous process.
@@ -90,8 +96,16 @@ async def get_download(
     session: AsyncSession = Depends(get_session),
     adapters: Adapters = Depends(get_adapters),
     settings: Settings = Depends(get_settings),
+    account: Account | None = Depends(get_optional_account),
 ) -> DownloadOut:
-    out = await service.get_download(session, settings, adapters.clock, download_id)
+    out = await service.get_download(
+        session,
+        settings,
+        adapters.clock,
+        download_id,
+        account_id=account.id if account is not None else None,
+        visitor_ip=client_ip(request),
+    )
     manager: DownloadManager | None = getattr(request.app.state, _MANAGER_STATE_KEY, None)
     if manager is not None:
         out.queue_position = manager.queue_position(download_id)
@@ -104,8 +118,15 @@ async def retry_download(
     request: Request,
     session: AsyncSession = Depends(get_session),
     adapters: Adapters = Depends(get_adapters),
+    account: Account | None = Depends(get_optional_account),
 ) -> DownloadOut:
-    download = await service.prepare_retry(session, adapters.clock, download_id)
+    download = await service.prepare_retry(
+        session,
+        adapters.clock,
+        download_id,
+        account_id=account.id if account is not None else None,
+        visitor_ip=client_ip(request),
+    )
     manager = await _start_manager(request, exclude_ids=(download.id,))
     manager.submit(
         download.id,
@@ -140,14 +161,3 @@ async def download_file(
         filename=file_name,
         headers={"Cache-Control": "private, no-store"},
     )
-
-
-def _client_ip(request: Request) -> str | None:
-    """Honour the reverse proxy's first hop, fall back to the socket peer."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
-    client = request.client
-    return client.host if client is not None else None

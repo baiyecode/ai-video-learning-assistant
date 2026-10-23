@@ -23,6 +23,7 @@ from app.ports import ResolvedVideo
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import func, select
 
 from tests.fakes import make_fake_adapters, sample_video
 
@@ -49,8 +50,13 @@ async def _wait_idle(app: FastAPI) -> None:
     await asyncio.wait_for(manager.wait_idle(), timeout=5)
 
 
-async def _get(client: AsyncClient, download_id: str) -> dict:
-    response = await client.get(f"/api/downloads/{download_id}")
+async def _get(
+    client: AsyncClient,
+    download_id: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> dict:
+    response = await client.get(f"/api/downloads/{download_id}", headers=headers)
     assert response.status_code == 200, response.text
     return response.json()
 
@@ -60,20 +66,31 @@ async def _await_status(
     download_id: str,
     expected: set[str],
     *,
+    headers: dict[str, str] | None = None,
     wait_seconds: float = 3.0,
 ) -> dict:
     deadline = time.monotonic() + wait_seconds
     last: dict | None = None
     while time.monotonic() < deadline:
-        last = await _get(client, download_id)
+        last = await _get(client, download_id, headers=headers)
         if last["status"] in expected:
             return last
         await asyncio.sleep(0.005)
     raise AssertionError(f"status never reached {expected}; last={last}")
 
 
-async def _await_terminal(client: AsyncClient, download_id: str) -> dict:
-    return await _await_status(client, download_id, TERMINAL)
+async def _await_terminal(
+    client: AsyncClient,
+    download_id: str,
+    *,
+    headers: dict[str, str] | None = None,
+) -> dict:
+    return await _await_status(client, download_id, TERMINAL, headers=headers)
+
+
+async def _download_count(app: FastAPI) -> int:
+    async with app.state.sessionmaker() as session:
+        return int(await session.scalar(select(func.count()).select_from(Download)) or 0)
 
 
 def _parse(value: str) -> datetime:
@@ -221,7 +238,7 @@ async def test_signed_url_serves_file_and_stops_after_expiry(
 
     clock.advance(seconds=901)  # type: ignore[attr-defined]
     expired = await client.get(url)
-    assert expired.status_code == 403
+    assert expired.status_code == 410
     assert expired.json()["error"]["code"] == "file_expired"
 
     # A fresh status read re-signs a new URL while the file is still retained.
@@ -235,7 +252,7 @@ async def test_signed_url_serves_file_and_stops_after_expiry(
     assert gone.status_code == 410
     assert gone.json()["error"]["code"] == "file_expired"
     stale = await client.get(refreshed["download_url"])
-    assert stale.status_code == 403
+    assert stale.status_code == 410
     assert stale.json()["error"]["code"] == "file_expired"
 
 
@@ -282,7 +299,7 @@ async def test_create_rejects_unknown_format_and_stale_snapshot(
     error = stale.json()["error"]
     assert error["code"] == "formats_expired"
     assert error["details"]["video_id"] == video_id
-    assert getattr(app.state, "download_manager", None) is None
+    assert await _download_count(app) == 0
 
 
 async def test_retry_requeues_a_failed_download_then_succeeds(
@@ -350,7 +367,7 @@ async def test_logged_in_download_still_works_and_records_the_account(
 
     assert created.status_code == 202
     await _wait_idle(app)
-    await _await_terminal(client, created.json()["id"])
+    await _await_terminal(client, created.json()["id"], headers=headers)
     async with app.state.sessionmaker() as session:
         row = await session.get(Download, created.json()["id"])
         assert row is not None

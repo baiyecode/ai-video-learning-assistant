@@ -29,12 +29,24 @@ def build_production_adapters(
     optional only so type-checking tests can build the container without an engine.
     """
     from .adapters.db_budget import DbBudgetLedger
-    from .adapters.deepseek_summarizer import DeepSeekSummarizer
-    from .adapters.fs_media_store import FsMediaStore
     from .adapters.system_clock import SystemClock
-    from .adapters.ytdlp_source import YtDlpVideoSource
 
     clock = SystemClock()
+    if settings.fake_adapters:
+        from .adapters.demo import DemoMediaStore, DemoSummarizer, DemoVideoSource
+
+        return Adapters(
+            video_source=DemoVideoSource(),
+            media_store=DemoMediaStore(),
+            summarizer=DemoSummarizer(),
+            clock=clock,
+            budget_ledger=DbBudgetLedger(sessionmaker, clock, settings),
+        )
+
+    from .adapters.deepseek_summarizer import DeepSeekSummarizer
+    from .adapters.fs_media_store import FsMediaStore
+    from .adapters.ytdlp_source import YtDlpVideoSource
+
     return Adapters(
         video_source=YtDlpVideoSource(settings),
         media_store=FsMediaStore(settings),

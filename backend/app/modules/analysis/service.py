@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
@@ -20,6 +20,7 @@ from app.errors import AppError, ErrorCode
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import BudgetLedger, Clock
 from app.ratelimit import RateLimiter
+from app.timeutil import as_utc
 
 from . import generation, quota
 from .generation import MESSAGE_ANALYSIS_FAILED
@@ -33,11 +34,12 @@ MESSAGE_SUBTITLES_UNAVAILABLE = "该视频没有可用字幕，暂不支持 AI �
 MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
 MESSAGE_DRM_PROTECTED = "该视频受 DRM 保护，暂不支持 AI 分析"
 MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，暂不支持 AI 分析"
-MESSAGE_QUOTA_EXHAUSTED = "今日免费 AI 总结次数已用完，请明天再来"
+MESSAGE_QUOTA_EXHAUSTED = "今日免费 Analysis 的 Quota 已用完，请明天再来"
 MESSAGE_BUSY = "服务繁忙，请稍后重试"
 
 _MESSAGE_BY_ERROR_CODE = {
     ErrorCode.ANALYSIS_FAILED.value: MESSAGE_ANALYSIS_FAILED,
+    ErrorCode.BUDGET_EXHAUSTED.value: "今日 AI 预算已用完，请稍后再试",
 }
 
 _MAX_WRITE_ATTEMPTS = 3
@@ -50,15 +52,8 @@ class CreateResult:
     created: bool
 
 
-def _utc(value: datetime | None) -> datetime | None:
-    """SQLite round-trips timezone-aware datetimes as naive UTC values."""
-    if value is None:
-        return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
 def _iso(value: datetime | None) -> str | None:
-    aware = _utc(value)
+    aware = as_utc(value)
     return aware.isoformat() if aware is not None else None
 
 
@@ -146,9 +141,28 @@ async def _create_once(
         # idempotent retry (double click / two tabs), not a new-analysis attempt.
         rate_limiter.ensure("analyses.create", account_id)
     if budget_ledger is not None:
+        # Gate on every call this Analysis will make (chunks + final merge), not on
+        # one call: a map-reduce run that starts without its full budget would run
+        # out halfway and waste the calls already paid for.
+        try:
+            plan = generation.build_plan(
+                title=video.title,
+                duration_seconds=video.duration_seconds,
+                subtitle_source=subtitle.source_type,
+                cues=generation.cues_from_stored(
+                    subtitle.cues_json, fallback_text=subtitle.text
+                ),
+                chunk_chars=settings.analysis_chunk_chars,
+                max_input_chars=settings.analysis_max_input_chars,
+            )
+            planned_calls = generation.planned_call_count(plan)
+        except ValueError:
+            # Empty Subtitle content is settled by generation as analysis_failed;
+            # the cheapest possible plan is still one call.
+            planned_calls = 1
         await generation.ensure_budget(
             budget_ledger,
-            estimated_usd=settings.analysis_cost_per_call_usd,
+            estimated_usd=settings.analysis_cost_per_call_usd * planned_calls,
             clock=clock,
             daily_budget_usd=settings.daily_budget_usd,
         )
@@ -160,11 +174,15 @@ async def _create_once(
     analysis = Analysis(
         account_id=account_id,
         video_id=video_id,
+        # Traceability only; generation reads the snapshot below.
         subtitle_id=subtitle.id,
         status=AnalysisStatus.PENDING.value,
         summary_markdown="",
         mindmap_markdown="",
         subtitle_source=subtitle.source_type,
+        subtitle_language=subtitle.language,
+        subtitle_text=subtitle.text,
+        subtitle_cues=list(subtitle.cues_json or []),
         truncated=False,
         created_at=now,
         updated_at=now,

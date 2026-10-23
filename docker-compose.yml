@@ -64,6 +64,8 @@ services:
   web:
     build:
       context: ./frontend
+      args:
+        VITE_SENTRY_DSN: ${VITE_SENTRY_DSN:-}
     environment:
       TZ: Asia/Shanghai
     ports:

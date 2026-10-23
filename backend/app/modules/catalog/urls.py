@@ -12,15 +12,13 @@ comes from the adapter's ``ResolvedVideo``, so two wrappers of one Video dedupli
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import re
 import socket
-from collections.abc import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from app.errors import AppError, ErrorCode
-
-HostResolver = Callable[[str], set[str]]
 
 _YOUTUBE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _BILIBILI_BVID = re.compile(r"BV[0-9A-Za-z]{10}")
@@ -42,7 +40,7 @@ _MESSAGE_PLAYLIST = "暂不支持播放列表、合集或收藏夹，请提供�
 _MESSAGE_LIVE = "暂不支持直播链接，请提供已发布的单个视频"
 
 
-def normalize_video_url(raw: str, *, resolver: HostResolver | None = None) -> str:
+def normalize_video_url(raw: str) -> str:
     """Return the canonical single-video URL or raise :class:`AppError`.
 
     Canonical forms:
@@ -53,10 +51,10 @@ def normalize_video_url(raw: str, *, resolver: HostResolver | None = None) -> st
     Bilibili multi-part parameters (``p=``) are part of the same Platform video and are
     dropped: P1 treats one BV/av id as one Video.
 
-    SSRF hardening: only http(s) URLs on the Bilibili/YouTube hosts are accepted, with
-    no credentials and a standard port. IP literals and private name suffixes are
-    rejected outright; the allowed host is also resolved (best-effort, injectable via
-    ``resolver``) and any private/loopback/link-local answer is refused.
+    This is a pure, synchronous structural check: only http(s) URLs on the
+    Bilibili/YouTube hosts are accepted, with no credentials and a standard port, and
+    IP literals / private name suffixes are rejected outright. DNS is checked
+    separately by :func:`ensure_public_url` so the async request path never blocks.
     """
     text = (raw or "").strip()
     if not text:
@@ -83,17 +81,31 @@ def normalize_video_url(raw: str, *, resolver: HostResolver | None = None) -> st
         raise _unsupported()
     _reject_private_host(host)
 
-    resolve = resolver or _hostname_addresses
     if host in _YOUTUBE_HOSTS or host == "youtu.be":
-        _ensure_public_host(host, resolve)
         return _normalise_youtube(host, parsed.path, parsed.query)
     if host in _BILIBILI_SHORT_HOSTS:
-        _ensure_public_host(host, resolve)
         return _normalise_bilibili_short(parsed.path)
     if host in _BILIBILI_VIDEO_HOSTS or host.endswith(".bilibili.com"):
-        _ensure_public_host(host, resolve)
         return _normalise_bilibili(host, parsed.path, parsed.query)
     raise _unsupported()
+
+
+async def ensure_public_url(url: str) -> None:
+    """Resolve an already-normalised URL off the event loop and reject private answers.
+
+    DNS is best-effort: resolution failures fall through to the platform adapter, which
+    will fail later if the host is unusable. The lookup runs in a worker thread so a
+    slow resolver cannot stall every other request in the process.
+    """
+    host = (urlsplit(url).hostname or "").lower()
+    if not host:
+        raise _unsupported()
+    try:
+        addresses = await asyncio.to_thread(_hostname_addresses, host)
+    except (OSError, UnicodeError):
+        return
+    if any(_is_blocked_address(address) for address in addresses):
+        raise _unsupported()
 
 
 def _hostname_addresses(host: str) -> set[str]:
@@ -121,16 +133,6 @@ def _reject_private_host(host: str) -> None:
     except ValueError:
         return
     raise _unsupported()
-
-
-def _ensure_public_host(host: str, resolve: HostResolver) -> None:
-    try:
-        addresses = resolve(host)
-    except (OSError, UnicodeError):
-        # DNS is best-effort; the adapter will fail later if the host is unusable.
-        return
-    if any(_is_blocked_address(address) for address in addresses):
-        raise _unsupported()
 
 
 def _is_blocked_address(address: str) -> bool:

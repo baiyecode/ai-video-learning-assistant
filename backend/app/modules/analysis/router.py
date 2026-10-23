@@ -17,7 +17,6 @@ full. Disconnecting never cancels generation because it runs as its own task.
 
 from __future__ import annotations
 
-import asyncio
 import json
 from collections.abc import AsyncIterator
 
@@ -46,11 +45,13 @@ from .schemas import AnalysisHistoryItemOut, AnalysisOut, CreateAnalysisRequest
 router = APIRouter(prefix="/analyses", tags=["analysis"])
 
 _MANAGER_STATE_KEY = "analysis_manager"
-_POLL_INTERVAL_SECONDS = 0.05
 
 
 def get_analysis_manager(request: Request) -> AnalysisManager:
-    """Lazily attach the generation runner to ``app.state`` (keeps ``main.py`` untouched)."""
+    """The generation runner started by the application lifespan.
+
+    The lazy fallback only serves tests that build an app without a lifespan.
+    """
     manager: AnalysisManager | None = getattr(request.app.state, _MANAGER_STATE_KEY, None)
     if manager is None:
         state = request.app.state
@@ -120,7 +121,7 @@ async def stream_analysis(
 ) -> StreamingResponse:
     await service.get_analysis(session, account.id, analysis_id)
     return StreamingResponse(
-        _event_stream(request.app.state.sessionmaker, analysis_id),
+        _event_stream(request.app.state.sessionmaker, get_analysis_manager(request), analysis_id),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
@@ -134,12 +135,22 @@ def _event(name: str, payload: dict[str, object]) -> str:
     return f"event: {name}\ndata: {json.dumps(payload, ensure_ascii=False)}\n\n"
 
 
-async def _event_stream(sessionmaker, analysis_id: str) -> AsyncIterator[str]:
-    """Replay persisted state, then follow the row until it reaches a terminal status."""
+async def _event_stream(
+    sessionmaker, manager: AnalysisManager, analysis_id: str
+) -> AsyncIterator[str]:
+    """Replay persisted state, then follow the row until it reaches a terminal status.
+
+    Waiting is event-driven: the manager bumps a version counter after every commit,
+    so an idle connection costs no database polls. The timeout is only a keep-alive
+    re-read (and lets proxies notice a dead client).
+    """
     sent_meta = False
     sent_summary = 0
 
     while True:
+        # Capture before reading: a commit between these points increments the
+        # version, so the wait below returns immediately and re-reads.
+        version = manager.version
         async with sessionmaker() as session:
             analysis = await session.get(Analysis, analysis_id)
             if analysis is None:
@@ -180,4 +191,4 @@ async def _event_stream(sessionmaker, analysis_id: str) -> AsyncIterator[str]:
             yield _event("error", {"code": code, "message": service.error_message(code)})
             return
 
-        await asyncio.sleep(_POLL_INTERVAL_SECONDS)
+        await manager.wait_for_change(version)

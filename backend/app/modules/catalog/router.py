@@ -12,7 +12,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.container import Adapters
 from app.deps import get_adapters, get_rate_limiter, get_session
-from app.ratelimit import RateLimiter, client_ip
+from app.http import client_ip
+from app.ratelimit import RateLimiter
 
 from . import service, subtitles
 from .schemas import ResolveResponse, ResolveVideoRequest, VideoDetailResponse

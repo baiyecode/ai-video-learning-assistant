@@ -55,8 +55,8 @@ describe("sanitizeMindmapMarkdown", () => {
 });
 
 describe("buildMindmap", () => {
-  it("turns a nested Markdown list into branches", () => {
-    const { root } = buildMindmap(
+  it("turns a nested Markdown list into branches", async () => {
+    const { root } = await buildMindmap(
       ["- 主题", "  - 第一章", "    - 细节 A", "    - 细节 B", "  - 第二章"].join("\n"),
     );
 
@@ -75,8 +75,8 @@ describe("buildMindmap", () => {
     });
   });
 
-  it("never keeps executable markup in node labels", () => {
-    const { root } = buildMindmap(
+  it("never keeps executable markup in node labels", async () => {
+    const { root } = await buildMindmap(
       ["- 主题", "  - <script>alert(1)</script>章节", "  - <img src=x onerror=alert(2)>图片"].join(
         "\n",
       ),
@@ -89,8 +89,8 @@ describe("buildMindmap", () => {
     expect(shape(root).children.map((child) => child.label)).toEqual(["章节", "图片"]);
   });
 
-  it("drops javascript: links while keeping the label text", () => {
-    const { root } = buildMindmap("- 主题\n  - [点我](javascript:alert(1))");
+  it("drops javascript: links while keeping the label text", async () => {
+    const { root } = await buildMindmap("- 主题\n  - [点我](javascript:alert(1))");
     const serialized = JSON.stringify(root);
 
     expect(serialized).not.toMatch(/javascript:/i);

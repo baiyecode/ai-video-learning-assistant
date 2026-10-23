@@ -8,12 +8,13 @@ of another Account are unreachable by construction, even with a guessed id.
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.modules.catalog.models import Video
+from app.timeutil import as_utc
 
 from .models import Analysis
 from .schemas import AnalysisHistoryItemOut, AnalysisHistoryVideoOut
@@ -26,11 +27,8 @@ _WHITESPACE = re.compile(r"\s+")
 
 
 def _iso(value: datetime | None) -> str | None:
-    """SQLite round-trips timezone-aware datetimes as naive UTC values."""
-    if value is None:
-        return None
-    aware = value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-    return aware.isoformat()
+    aware = as_utc(value)
+    return aware.isoformat() if aware is not None else None
 
 
 def summary_snippet(markdown: str | None, *, limit: int = SNIPPET_MAX_CHARS) -> str:

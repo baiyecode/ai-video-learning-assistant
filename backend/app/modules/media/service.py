@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import math
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 from sqlalchemy import select
@@ -17,9 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import AppError, ErrorCode
+from app.formatting import format_file_size
 from app.modules.catalog.models import Video
 from app.modules.catalog.service import FORMATS_TTL
 from app.ports import Clock
+from app.timeutil import as_utc, required_utc
 
 from .manager import MESSAGE_DOWNLOAD_FAILED
 from .models import Download, DownloadStatus
@@ -37,7 +39,7 @@ _MESSAGE_DOWNLOAD_NOT_FOUND = "下载任务不存在或已过期"
 _MESSAGE_NOT_READY = "文件尚未准备完成，请稍候"
 _MESSAGE_FILE_EXPIRED = "文件已过期，请重新发起下载"
 _MESSAGE_RETRY_IN_PROGRESS = "任务仍在进行中，请稍候再试"
-_MESSAGE_RETRY_EXHAUSTED = "重试次数已达上限，请重新发起下载"
+_MESSAGE_RETRY_EXHAUSTED = "重试已达上限，请重新发起下载"
 
 
 async def create_download(
@@ -75,7 +77,7 @@ async def create_download(
             {"duration_seconds": video.duration_seconds, "max_duration_seconds": max_duration},
         )
 
-    fetched_at = _as_aware(video.formats_fetched_at)
+    fetched_at = as_utc(video.formats_fetched_at)
     stale = fetched_at is None or clock.now() - fetched_at >= FORMATS_TTL
     known_format = next(
         (
@@ -150,13 +152,13 @@ async def _enforce_visitor_hourly_cap(
     if len(recent) < limit:
         return
 
-    oldest = min(_as_aware(row.created_at) or now for row in recent)
+    oldest = min(as_utc(row.created_at) or now for row in recent)
     reset_at = oldest + VISITOR_WINDOW
     retry_after = max(1, math.ceil((reset_at - now).total_seconds()))
     raise AppError(
         429,
         ErrorCode.DOWNLOAD_LIMIT_REACHED,
-        f"访客每小时最多发起 {limit} 次下载，请稍后再试或登录后下载",
+        f"访客每小时最多发起 {limit} 个 Download，请稍后再试或登录后下载",
         {"retry_after": retry_after, "reset_at": reset_at.isoformat(), "limit": limit},
     )
 
@@ -166,16 +168,24 @@ async def get_download(
     settings: Settings,
     clock: Clock,
     download_id: str,
+    *,
+    account_id: str | None = None,
+    visitor_ip: str | None = None,
 ) -> DownloadOut:
-    """Current task state; ``ready`` tasks get a freshly signed 15-minute URL."""
+    """Current task state; ``ready`` tasks get a freshly signed 15-minute URL.
+
+    Account-owned Downloads are only visible to that Account; Visitor Downloads only
+    to the same ``visitor_ip``. A mismatch is indistinguishable from a missing row.
+    """
     download = await _load(session, download_id)
+    _ensure_owner(download, account_id=account_id, visitor_ip=visitor_ip)
     now = clock.now()
 
     if download.status == DownloadStatus.EXPIRED:
         raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
 
     if download.status == DownloadStatus.READY:
-        file_expires = _as_aware(download.file_expires_at)
+        file_expires = as_utc(download.file_expires_at)
         if download.file_path is None or file_expires is None or now >= file_expires:
             await _mark_expired(session, download, now)
             raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
@@ -189,9 +199,17 @@ async def get_download(
     return to_out(download, download_url=None)
 
 
-async def prepare_retry(session: AsyncSession, clock: Clock, download_id: str) -> Download:
+async def prepare_retry(
+    session: AsyncSession,
+    clock: Clock,
+    download_id: str,
+    *,
+    account_id: str | None = None,
+    visitor_ip: str | None = None,
+) -> Download:
     """Reset a failed/expired task to ``queued``; manual retries are capped at three."""
     download = await _load(session, download_id)
+    _ensure_owner(download, account_id=account_id, visitor_ip=visitor_ip)
     if download.status not in {DownloadStatus.FAILED, DownloadStatus.EXPIRED}:
         raise AppError(409, ErrorCode.DOWNLOAD_NOT_READY, _MESSAGE_RETRY_IN_PROGRESS)
     if download.attempts >= MAX_RETRIES:
@@ -235,19 +253,19 @@ async def resolve_file(
 
     download = await _load(session, download_id)
     if download.status == DownloadStatus.EXPIRED:
-        raise AppError(403, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
     if download.status != DownloadStatus.READY:
         raise AppError(409, ErrorCode.DOWNLOAD_NOT_READY, _MESSAGE_NOT_READY)
 
-    file_expires = _as_aware(download.file_expires_at)
+    file_expires = as_utc(download.file_expires_at)
     if download.file_path is None or file_expires is None or now >= file_expires:
         await _mark_expired(session, download, now)
-        raise AppError(403, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
 
     path = Path(download.file_path)
     if not await asyncio.to_thread(path.is_file):
         await _mark_expired(session, download, now)
-        raise AppError(403, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
 
     return path, download.file_name or path.name
 
@@ -273,14 +291,7 @@ def _too_long_message(max_duration_seconds: int) -> str:
 
 
 def _too_large_message(max_file_size_bytes: int) -> str:
-    return f"文件大小超过 {_size_label(max_file_size_bytes)} 上限，无法下载"
-
-
-def _size_label(size: int) -> str:
-    for unit, factor in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
-        if size >= factor:
-            return f"{size / factor:g}{unit}"
-    return f"{size}B"
+    return f"文件大小超过 {format_file_size(max_file_size_bytes)} 上限，无法下载"
 
 
 async def _load(session: AsyncSession, download_id: str) -> Download:
@@ -288,6 +299,18 @@ async def _load(session: AsyncSession, download_id: str) -> Download:
     if download is None:
         raise AppError(404, ErrorCode.DOWNLOAD_NOT_FOUND, _MESSAGE_DOWNLOAD_NOT_FOUND)
     return download
+
+
+def _ensure_owner(
+    download: Download, *, account_id: str | None, visitor_ip: str | None
+) -> None:
+    """Reject cross-owner access with the same 404 a missing Download returns."""
+    if download.account_id is not None:
+        allowed = account_id == download.account_id
+    else:
+        allowed = account_id is None and visitor_ip == download.visitor_ip
+    if not allowed:
+        raise AppError(404, ErrorCode.DOWNLOAD_NOT_FOUND, _MESSAGE_DOWNLOAD_NOT_FOUND)
 
 
 async def _mark_expired(session: AsyncSession, download: Download, now: datetime) -> None:
@@ -313,22 +336,11 @@ def to_out(download: Download, *, download_url: str | None) -> DownloadOut:
         attempts=int(download.attempts or 0),
         file_name=download.file_name,
         file_size=download.file_size,
-        created_at=_required_time(download.created_at),
-        updated_at=_required_time(download.updated_at),
-        ready_at=_as_aware(download.ready_at),
+        created_at=required_utc(download.created_at),
+        updated_at=required_utc(download.updated_at),
+        ready_at=as_utc(download.ready_at),
         download_url=download_url,
-        url_expires_at=_as_aware(download.url_expires_at),
-        file_expires_at=_as_aware(download.file_expires_at),
+        url_expires_at=as_utc(download.url_expires_at),
+        file_expires_at=as_utc(download.file_expires_at),
         can_retry=retry_allowed(download),
     )
-
-
-def _as_aware(value: datetime | None) -> datetime | None:
-    """SQLite round-trips timezone-aware datetimes as naive UTC values."""
-    if value is None:
-        return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def _required_time(value: datetime | None) -> datetime:
-    return _as_aware(value) or datetime.now(UTC)

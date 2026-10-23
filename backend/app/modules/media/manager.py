@@ -1,7 +1,8 @@
 """In-process Download dispatcher and worker pool.
 
-The manager lives on ``app.state.download_manager`` (created lazily by the router, so
-``main.py`` stays untouched). A single dispatcher drains a FIFO waiting list and
+The manager lives on ``app.state.download_manager`` and is started by the application
+lifespan, so restart recovery happens before the first request instead of lazily on
+the first Download. A single dispatcher drains a FIFO waiting list and
 launches one worker per job while the global, per-Account and per-visitor-IP caps
 allow. Work over a cap *waits*; it never fails. The hourly visitor creation cap is
 the only rejecting limit and lives in the service layer.
@@ -24,7 +25,6 @@ import re
 from collections import deque
 from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import select, update
@@ -33,8 +33,10 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.config import Settings
 from app.container import Adapters
 from app.errors import AppError, ErrorCode
+from app.formatting import format_file_size
 from app.modules.catalog.models import Video
 from app.ports import ResolvedVideo, VideoFormat
+from app.timeutil import as_utc
 
 from .models import Download, DownloadStatus
 from .signing import FILE_TTL, SIGNED_URL_TTL
@@ -106,6 +108,16 @@ class DownloadManager:
                 self._cleanup_task = asyncio.create_task(
                     self._cleanup_loop(interval), name="download-cleanup"
                 )
+
+    async def stop(self) -> None:
+        """Cancel background tasks; generation/download rows stay for recovery."""
+        tasks = [task for task in (self._cleanup_task, self._dispatcher) if task is not None]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._cleanup_task = None
+        self._dispatcher = None
 
     async def _recover_interrupted(self, exclude_ids: Collection[str]) -> None:
         """Rows still active at startup belong to a previous process; fail them."""
@@ -307,7 +319,7 @@ class DownloadManager:
             await self._mark_failed(
                 session,
                 download,
-                f"文件大小超过 {_size_label(max_size)} 上限，无法下载",
+                f"文件大小超过 {format_file_size(max_size)} 上限，无法下载",
                 code=ErrorCode.DOWNLOAD_TOO_LARGE,
             )
             return
@@ -361,7 +373,7 @@ class DownloadManager:
             expired = [
                 row
                 for row in rows
-                if (expires := _as_aware(row.file_expires_at)) is not None and expires <= now
+                if (expires := as_utc(row.file_expires_at)) is not None and expires <= now
             ]
             for download in expired:
                 if download.file_path:
@@ -458,15 +470,3 @@ def _remove_file(path: Path, root: Path) -> None:
         pass
 
 
-def _size_label(size: int) -> str:
-    for unit, factor in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
-        if size >= factor:
-            return f"{size / factor:g}{unit}"
-    return f"{size}B"
-
-
-def _as_aware(value: datetime | None) -> datetime | None:
-    """SQLite round-trips timezone-aware datetimes as naive UTC values."""
-    if value is None:
-        return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)

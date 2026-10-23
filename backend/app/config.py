@@ -6,6 +6,16 @@ from pathlib import Path
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Values that must never reach a production deployment.
+_DEV_SECRETS = {
+    "",
+    "dev-only-change-me",
+    "change-me",
+    "changeme",
+    "change-me-in-production",
+    "secret",
+}
+
 
 class Settings(BaseSettings):
     """Application configuration. Every field is overridable via ``APP_*`` env vars."""
@@ -74,6 +84,11 @@ class Settings(BaseSettings):
     rate_limit_login_per_15_minutes: int = 10
     rate_limit_register_per_hour: int = 5
     rate_limit_analysis_seconds: float = 10.0
+    rate_limit_report_per_hour: int = 5
+
+    # Deterministic in-process adapters (seeded demo video + canned Summarizer) for
+    # the Playwright golden path. Never enable this in production.
+    fake_adapters: bool = False
 
     @property
     def media_dir(self) -> Path:
@@ -99,6 +114,28 @@ class Settings(BaseSettings):
         """Create runtime directories. Called once on application startup."""
         self.data_dir.mkdir(parents=True, exist_ok=True)
         self.media_dir.mkdir(parents=True, exist_ok=True)
+
+    def validate_production_secrets(self) -> None:
+        """Refuse to start production with missing or development secrets.
+
+        File URLs are signed with ``secret_key`` and access tokens with
+        ``jwt_secret`` (falling back to ``secret_key``); shipping the development
+        defaults would let anyone forge either.
+        """
+        if not self.is_production:
+            return
+        if self.secret_key.strip().lower() in _DEV_SECRETS:
+            raise RuntimeError(
+                "APP_SECRET_KEY must be set to a strong, non-default value when "
+                "APP_ENV=production"
+            )
+        if self.jwt_secret.strip().lower() in _DEV_SECRETS and self.jwt_secret.strip():
+            raise RuntimeError(
+                "APP_JWT_SECRET must be empty (fallback to APP_SECRET_KEY) or a strong, "
+                "non-default value when APP_ENV=production"
+            )
+        if self.fake_adapters:
+            raise RuntimeError("APP_FAKE_ADAPTERS is a test-only switch and must be off in production")
 
 
 @lru_cache

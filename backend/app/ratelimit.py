@@ -16,8 +16,6 @@ import math
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
-from fastapi import Request
-
 from .config import Settings
 from .errors import AppError, ErrorCode
 from .ports import Clock
@@ -65,6 +63,12 @@ def build_rules(settings: Settings) -> dict[str, RateLimitRule]:
             int(settings.rate_limit_analysis_seconds > 0),
             settings.rate_limit_analysis_seconds,
             "AI 分析请求过于频繁，请 {retry_after} 秒后再试",
+        ),
+        "reports.create": RateLimitRule(
+            "reports.create",
+            settings.rate_limit_report_per_hour,
+            60 * 60.0,
+            "举报提交过于频繁，请 {retry_after} 秒后再试",
         ),
     }
 
@@ -126,6 +130,7 @@ class RateLimiter:
         self._hits[(scope, _key(key))] = hits
         if tag is not None:
             self._last_tag[(scope, _key(key))] = tag
+        self._prune(now)
 
     def last_tag(self, scope: str, key: str | None) -> str | None:
         """The tag passed to the most recent ``record`` for this key, if any."""
@@ -134,6 +139,25 @@ class RateLimiter:
     def reset(self) -> None:
         self._hits.clear()
         self._last_tag.clear()
+
+    @property
+    def tracked_keys(self) -> int:
+        """Number of live ``(scope, key)`` entries (diagnostics and tests)."""
+        return len(self._hits)
+
+    def _prune(self, now: datetime) -> None:
+        """Drop keys whose whole window has elapsed so memory stays bounded."""
+        for (scope, key), hits in list(self._hits.items()):
+            rule = self._rules.get(scope)
+            if rule is None:
+                continue
+            cutoff = now - timedelta(seconds=rule.window_seconds)
+            fresh = [hit for hit in hits if hit > cutoff]
+            if fresh:
+                self._hits[(scope, key)] = fresh
+            else:
+                del self._hits[(scope, key)]
+                self._last_tag.pop((scope, key), None)
 
     def _recent(
         self, rule: RateLimitRule, key: str | None, now: datetime
@@ -146,14 +170,3 @@ class RateLimiter:
 
 def _key(key: str | None) -> str:
     return key or "unknown"
-
-
-def client_ip(request: Request) -> str | None:
-    """Honour the reverse proxy's first hop, fall back to the socket peer."""
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
-    client = request.client
-    return client.host if client is not None else None

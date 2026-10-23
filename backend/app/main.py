@@ -1,7 +1,9 @@
 """Application factory (composition root) and ASGI entrypoint.
 
-Later tickets never edit this file: they add routes to their module router and models to
-their module's ``models.py`` (registered in ``models_registry.py``).
+Feature tickets add routes to their module router and models to their module's
+``models.py`` (registered in ``models_registry.py``). This file owns process
+lifecycle: configuration validation, database init, background managers and their
+restart recovery.
 """
 
 from __future__ import annotations
@@ -19,9 +21,11 @@ from .container import Adapters, build_production_adapters
 from .db import create_engine_and_sessionmaker, init_db
 from .errors import register_exception_handlers
 from .logging_setup import RequestContextMiddleware, configure_logging
+from .modules.analysis.manager import AnalysisManager
 from .modules.analysis.router import router as analysis_router
 from .modules.catalog.router import router as catalog_router
 from .modules.identity.router import router as identity_router
+from .modules.media.manager import DownloadManager
 from .modules.media.router import router as media_router
 from .modules.ops.router import router as ops_router
 from .modules.ops.sentry import init_sentry
@@ -31,6 +35,8 @@ logger = logging.getLogger("app.main")
 
 def create_app(settings: Settings | None = None, adapters: Adapters | None = None) -> FastAPI:
     settings = settings or load_settings()
+    # Fail before binding a port if production still carries development secrets.
+    settings.validate_production_secrets()
     # The engine exists before the adapters so the SQLite budget ledger can share it.
     engine, sessionmaker = create_engine_and_sessionmaker(settings)
     adapters = adapters or build_production_adapters(settings, sessionmaker)
@@ -39,13 +45,28 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
     init_sentry(environment=settings.env)
 
     @asynccontextmanager
-    async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.ensure_directories()
         await init_db(engine)
+        # Managers are process-wide singletons. Starting them here (not lazily on the
+        # first request) means a restart recovers interrupted Downloads/Analyses and
+        # releases their Quota before any traffic arrives.
+        download_manager = DownloadManager(
+            sessionmaker=sessionmaker, adapters=adapters, settings=settings
+        )
+        analysis_manager = AnalysisManager(
+            sessionmaker=sessionmaker, adapters=adapters, settings=settings
+        )
+        app.state.download_manager = download_manager
+        app.state.analysis_manager = analysis_manager
+        await download_manager.start()
+        await analysis_manager.start()
         logger.info("app_started", extra={"event": "app_started", "env": settings.env})
         try:
             yield
         finally:
+            await analysis_manager.stop()
+            await download_manager.stop()
             await engine.dispose()
             logger.info("app_stopped", extra={"event": "app_stopped"})
 

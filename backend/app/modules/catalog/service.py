@@ -8,7 +8,7 @@ authoritative ``(platform, platform_video_id)`` pair. Both are upserted into one
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import uuid4
 
@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.errors import AppError, ErrorCode
 from app.ports import Clock, ResolvedVideo, VideoSource, VideoUnavailableError
+from app.timeutil import as_utc
 
 from . import subtitles
 from .models import Video
@@ -31,7 +32,7 @@ from .schemas import (
     format_snapshot,
     subtitle_snapshot,
 )
-from .urls import normalize_video_url
+from .urls import ensure_public_url, normalize_video_url
 
 logger = logging.getLogger("app.catalog")
 
@@ -54,6 +55,7 @@ async def resolve_video(
     raw_url: str,
 ) -> ResolveResponse:
     normalized_url = normalize_video_url(raw_url)
+    await ensure_public_url(normalized_url)
     resolved = await _resolve_with_source(source, normalized_url)
 
     if resolved.is_drm:
@@ -84,7 +86,7 @@ async def get_video(session: AsyncSession, clock: Clock, video_id: str) -> Video
     if video is None:
         raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, _MESSAGE_VIDEO_NOT_FOUND)
 
-    fetched_at = _as_aware(video.formats_fetched_at)
+    fetched_at = as_utc(video.formats_fetched_at)
     if fetched_at is None or clock.now() - fetched_at >= FORMATS_TTL:
         details: dict[str, Any] = {"video_id": video.id}
         if fetched_at is not None:
@@ -206,10 +208,3 @@ def _resolve_response(video: Video, *, has_subtitle: bool) -> ResolveResponse:
         can_analyze=has_subtitle and not video.is_drm and not video.is_members_only,
         resolve_notice=LEGAL_NOTICE,
     )
-
-
-def _as_aware(value: datetime | None) -> datetime | None:
-    """SQLite round-trips timezone-aware datetimes as naive UTC values."""
-    if value is None:
-        return None
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)

@@ -51,7 +51,7 @@ async function renderMindmap(): Promise<void> {
 
   rendering.value = true;
   try {
-    const { root } = buildMindmap(props.markdown);
+    const { root } = await buildMindmap(props.markdown);
     const { Markmap } = await import("markmap-view");
     if (token !== renderToken || !svgElement.value) return;
 
