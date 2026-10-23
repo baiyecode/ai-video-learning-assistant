@@ -29,6 +29,14 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
 
+    # Authentication. ``jwt_secret`` falls back to ``secret_key`` when unset.
+    jwt_secret: str = ""
+    access_token_ttl_minutes: int = 15
+    refresh_token_ttl_days: int = 7
+    refresh_cookie_name: str = "refresh_token"
+    # ``None`` means: Secure in production, relaxed for local development/tests.
+    auth_cookie_secure: bool | None = None
+
     # Adapter configuration (consumed by the production adapters in later tickets).
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"
@@ -42,6 +50,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.env == "production"
+
+    @property
+    def jwt_signing_key(self) -> str:
+        """HMAC key for access tokens; a dedicated JWT secret wins over the app secret."""
+        return self.jwt_secret or self.secret_key
+
+    @property
+    def refresh_cookie_secure(self) -> bool:
+        """HttpOnly refresh cookie is Secure unless explicitly relaxed in development."""
+        if self.auth_cookie_secure is None:
+            return self.is_production
+        return self.auth_cookie_secure
 
     def ensure_directories(self) -> None:
         """Create runtime directories. Called once on application startup."""
