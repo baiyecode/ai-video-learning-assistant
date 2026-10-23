@@ -4,13 +4,13 @@ Reporting is open to Visitors and Accounts alike. Each submission becomes a trac
 row (id + created_at + received status) that operators can follow up on. The reason
 is a closed enum so reports stay filterable; URLs are only stored, never fetched.
 
-Rate limiting is ticket #12: ``_rate_limit_hook`` is the seam where that lands.
+The ``reports.create`` scope caps submissions per client IP (§rate limits).
 """
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 from enum import StrEnum
 from typing import Literal
 from urllib.parse import urlsplit
@@ -19,10 +19,13 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.deps import get_clock, get_optional_account, get_session
+from app.deps import get_clock, get_optional_account, get_rate_limiter, get_session
 from app.errors import AppError, ErrorCode
+from app.http import client_ip
 from app.modules.identity.models import Account
 from app.ports import Clock
+from app.ratelimit import RateLimiter
+from app.timeutil import as_utc
 
 from .models import Report
 
@@ -52,10 +55,6 @@ class ReportResponse(BaseModel):
     id: str
     created_at: datetime
     status: Literal["received"] = "received"
-
-
-def _rate_limit_hook(_request: Request) -> None:
-    """No-op until ticket #12 adds per-IP throttling for report submissions."""
 
 
 async def create_report(
@@ -93,16 +92,17 @@ async def submit_report(
     session: AsyncSession = Depends(get_session),
     clock: Clock = Depends(get_clock),
     account: Account | None = Depends(get_optional_account),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> ReportResponse:
-    _rate_limit_hook(request)
+    rate_limiter.hit("reports.create", client_ip(request))
     report = await create_report(
         session,
         clock,
         payload,
-        visitor_ip=_client_ip(request),
+        visitor_ip=client_ip(request),
         account_id=account.id if account is not None else None,
     )
-    return ReportResponse(id=report.id, created_at=_as_aware(report.created_at), status="received")
+    return ReportResponse(id=report.id, created_at=as_utc(report.created_at), status="received")
 
 
 def _validated_reason(value: str) -> ReportReason:
@@ -124,17 +124,3 @@ def _optional_text(value: str | None) -> str | None:
         return None
     trimmed = value.strip()
     return trimmed or None
-
-
-def _as_aware(value: datetime) -> datetime:
-    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
-
-
-def _client_ip(request: Request) -> str | None:
-    forwarded = request.headers.get("x-forwarded-for")
-    if forwarded:
-        first = forwarded.split(",")[0].strip()
-        if first:
-            return first
-    client = request.client
-    return client.host if client is not None else None

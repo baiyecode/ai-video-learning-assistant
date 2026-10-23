@@ -76,3 +76,68 @@ async def test_every_response_carries_a_request_id(client: AsyncClient, path: st
 async def test_inbound_request_id_is_preserved(client: AsyncClient) -> None:
     response = await client.get("/health", headers={"X-Request-ID": "abc123"})
     assert response.headers["x-request-id"] == "abc123"
+
+
+class _Value:
+    def __init__(self, value: str) -> None:
+        self._value = value
+
+    def scalar_one(self) -> str:
+        return self._value
+
+
+class _FlakySession:
+    def __init__(self, factory: _FlakySessionmaker) -> None:
+        self._factory = factory
+
+    async def __aenter__(self) -> _FlakySession:
+        return self
+
+    async def __aexit__(self, *args: object) -> None:
+        return None
+
+    async def execute(self, statement: object) -> _Value:
+        if self._factory.locked_attempts > 0:
+            self._factory.locked_attempts -= 1
+            from sqlalchemy.exc import OperationalError
+
+            raise OperationalError("PRAGMA", {}, Exception("database is locked"))
+        text = str(statement)
+        return _Value("ok" if "quick_check" in text else "wal")
+
+    async def rollback(self) -> None:
+        return None
+
+
+class _FlakySessionmaker:
+    def __init__(self, locked_attempts: int) -> None:
+        self.locked_attempts = locked_attempts
+        self.calls = 0
+
+    def __call__(self) -> _FlakySession:
+        self.calls += 1
+        return _FlakySession(self)
+
+
+async def test_health_retries_a_transient_writer_lock() -> None:
+    from app.modules.ops import health
+
+    factory = _FlakySessionmaker(locked_attempts=2)
+
+    result = await health.check_database(factory)  # type: ignore[arg-type]
+
+    assert result["ok"] is True
+    assert result["writable"] is True
+    assert factory.calls == 3
+
+
+async def test_health_reports_a_lock_that_never_clears() -> None:
+    from app.modules.ops import health
+
+    factory = _FlakySessionmaker(locked_attempts=99)
+
+    result = await health.check_database(factory)  # type: ignore[arg-type]
+
+    assert result["ok"] is False
+    assert result["error"] == "database_check_failed"
+    assert factory.calls == 3

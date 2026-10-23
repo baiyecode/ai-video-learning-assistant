@@ -201,7 +201,7 @@ function cancelCompliance(): void {
               {{ subtitle.name }} · {{ subtitleSourceLabel(subtitle.is_automatic) }}
             </span>
             <span v-if="result.subtitles.length === 0" class="text-xs text-amber-700">
-              该视频没有可用字幕，暂不支持 AI 总结。
+              该视频没有可用字幕，暂不支持 AI 分析。
             </span>
           </div>
         </div>
@@ -256,10 +256,10 @@ function cancelCompliance(): void {
           :title="result.can_analyze ? '登录后可生成摘要' : '该视频没有可用字幕'"
           @click="startAnalysis"
         >
-          {{ creatingAnalysis ? "正在创建…" : "AI 总结" }}
+          {{ creatingAnalysis ? "正在创建…" : "AI 分析" }}
         </button>
         <span v-if="!result.can_analyze" class="text-xs text-amber-700">
-          该视频没有可用字幕，暂不支持 AI 总结。
+          该视频没有可用字幕，暂不支持 AI 分析。
         </span>
         <span v-if="analysisError" role="alert" class="text-xs text-red-600">
           {{ analysisError.message }}

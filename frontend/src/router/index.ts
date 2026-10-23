@@ -17,7 +17,7 @@ export const router = createRouter({
       path: "/",
       name: "home",
       component: HomeView,
-      meta: { title: "视频下载与 AI 总结" },
+      meta: { title: "视频下载与 AI 分析" },
     },
     {
       path: "/login",
@@ -35,7 +35,7 @@ export const router = createRouter({
       path: "/analyses/:id",
       name: "analysis",
       component: () => import("@/views/AnalysisView.vue"),
-      meta: { title: "AI 总结", requiresAuth: true },
+      meta: { title: "AI 分析", requiresAuth: true },
     },
     {
       path: "/terms",

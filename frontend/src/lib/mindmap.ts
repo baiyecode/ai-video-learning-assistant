@@ -9,7 +9,7 @@
 
 import DOMPurify from "dompurify";
 import type { IPureNode } from "markmap-common";
-import { Transformer, type ITransformResult } from "markmap-lib";
+import type { ITransformResult, Transformer } from "markmap-lib";
 
 const SCRIPT_BLOCK = /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
@@ -266,15 +266,17 @@ export function downloadBlob(blob: Blob, filename: string): void {
   window.setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-let transformer: Transformer | null = null;
+let transformer: Promise<Transformer> | null = null;
 
 /**
  * Sanitize the Markdown, then let markmap build the node tree and sanitize every
- * label again. The transformer is stateless per call but not free to construct.
+ * label again. The transformer is stateless per call but not free to construct;
+ * markmap-lib is large, so it is loaded on demand rather than with the page.
  */
-export function buildMindmap(source: string): ITransformResult {
-  transformer ??= new Transformer();
-  const result = transformer.transform(sanitizeMindmapMarkdown(source));
+export async function buildMindmap(source: string): Promise<ITransformResult> {
+  transformer ??= import("markmap-lib").then(({ Transformer: Ctor }) => new Ctor());
+  const parser = await transformer;
+  const result = parser.transform(sanitizeMindmapMarkdown(source));
   sanitizeTree(result.root);
   return result;
 }

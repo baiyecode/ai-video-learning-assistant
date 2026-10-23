@@ -277,6 +277,11 @@ def build_plan(
     )
 
 
+def planned_call_count(plan: GenerationPlan) -> int:
+    """Every Summarizer call the plan will make: one per chunk plus the merge."""
+    return len(plan.chunk_prompts) + 1
+
+
 def build_merge_prompt(plan: GenerationPlan, *, partial_summaries: Sequence[str]) -> str:
     """Reduce the per-chunk summaries into the final summary + mindmap call."""
     if len(partial_summaries) != len(plan.segment_labels):

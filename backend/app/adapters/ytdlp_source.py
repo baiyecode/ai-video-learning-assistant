@@ -127,7 +127,8 @@ class YtDlpVideoSource:
                         "stderr": stderr.decode("utf-8", errors="replace")[-500:],
                     },
                 )
-                raise AppError(502, ErrorCode.SUBTITLES_UNAVAILABLE, _MESSAGE_SUBTITLE_FAILED)
+                # ``subtitles_unavailable`` always means HTTP 409, never 502.
+                raise AppError(409, ErrorCode.SUBTITLES_UNAVAILABLE, _MESSAGE_SUBTITLE_FAILED)
 
             cues = await _read_first_subtitle(Path(tmp_dir))
 

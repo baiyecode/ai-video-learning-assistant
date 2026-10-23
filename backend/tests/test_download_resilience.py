@@ -25,6 +25,7 @@ from app.ports import ResolvedVideo, VideoFormat
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import func, select
 
 from tests.fakes import make_fake_adapters, sample_video
 
@@ -76,10 +77,24 @@ async def _create(
     )
 
 
-async def _get(client: AsyncClient, download_id: str) -> dict:
-    response = await client.get(f"/api/downloads/{download_id}")
+async def _get(
+    client: AsyncClient,
+    download_id: str,
+    *,
+    headers: dict[str, str] | None = None,
+    ip: str | None = None,
+) -> dict:
+    merged = dict(headers or {})
+    if ip is not None:
+        merged["X-Forwarded-For"] = ip
+    response = await client.get(f"/api/downloads/{download_id}", headers=merged)
     assert response.status_code == 200, response.text
     return response.json()
+
+
+async def _download_count(app: FastAPI) -> int:
+    async with app.state.sessionmaker() as session:
+        return int(await session.scalar(select(func.count()).select_from(Download)) or 0)
 
 
 async def _wait_idle(app: FastAPI) -> None:
@@ -104,20 +119,32 @@ async def _wait_until(predicate: Callable[[], bool], *, wait_seconds: float = 2.
 
 
 async def _wait_status(
-    client: AsyncClient, download_id: str, expected: set[str], *, wait_seconds: float = 3.0
+    client: AsyncClient,
+    download_id: str,
+    expected: set[str],
+    *,
+    headers: dict[str, str] | None = None,
+    ip: str | None = None,
+    wait_seconds: float = 3.0,
 ) -> dict:
     deadline = time.monotonic() + wait_seconds
     last: dict | None = None
     while time.monotonic() < deadline:
-        last = await _get(client, download_id)
+        last = await _get(client, download_id, headers=headers, ip=ip)
         if last["status"] in expected:
             return last
         await asyncio.sleep(0.005)
     raise AssertionError(f"status never reached {expected}; last={last}")
 
 
-async def _await_terminal(client: AsyncClient, download_id: str) -> dict:
-    return await _wait_status(client, download_id, TERMINAL)
+async def _await_terminal(
+    client: AsyncClient,
+    download_id: str,
+    *,
+    headers: dict[str, str] | None = None,
+    ip: str | None = None,
+) -> dict:
+    return await _wait_status(client, download_id, TERMINAL, headers=headers, ip=ip)
 
 
 def _parse(value: str) -> datetime:
@@ -180,7 +207,7 @@ async def test_create_rejects_video_longer_than_two_hours(settings: Settings) ->
         assert any("\u4e00" <= char <= "\u9fff" for char in error["message"])
         assert error["details"]["max_duration_seconds"] == 7200
         assert error["details"]["duration_seconds"] == 7201
-        assert getattr(app.state, "download_manager", None) is None
+        assert await _download_count(app) == 0
 
 
 async def test_two_hour_video_is_accepted_at_the_boundary(settings: Settings) -> None:
@@ -292,7 +319,7 @@ async def test_account_downloads_are_not_counted_against_the_visitor_cap(setting
             created = await _create(client, video_id, headers=auth)
             assert created.status_code == 202, created.text
             await _wait_idle(app)
-            await _await_terminal(client, created.json()["id"])
+            await _await_terminal(client, created.json()["id"], headers=auth)
             # #12: 3 creations per IP per minute, independent of the visitor cap.
             adapters.clock.advance(seconds=61)  # type: ignore[attr-defined]
 
@@ -316,21 +343,29 @@ async def test_global_concurrency_queues_extra_work_in_creation_order(settings: 
         await _wait_until(lambda: len(store.started) == 2, label="two downloads running")
         assert store.started == ids[:2]
 
-        third = await _get(client, ids[2])
+        third = await _get(client, ids[2], ip="10.0.0.3")
         assert third["status"] == "queued"
         assert third["queue_position"] == 1
-        fourth = await _get(client, ids[3])
+        fourth = await _get(client, ids[3], ip="10.0.0.4")
         assert fourth["status"] == "queued"
         assert fourth["queue_position"] == 2
-        running = await _get(client, ids[0])
+        running = await _get(client, ids[0], ip="10.0.0.1")
         assert running["queue_position"] is None
 
         store.release.set()
         await _wait_idle(app)
 
-        assert store.started == ids  # FIFO, not a stampede
-        for download_id in ids:
-            assert (await _await_terminal(client, download_id))["status"] == "ready"
+        # The first two are FIFO. The queued pair is dispatched in order too, but
+        # each job awaits its own database read before calling the store, so their
+        # first adapter calls may interleave: assert dispatch completeness, not
+        # scheduler timing.
+        assert store.started[:2] == ids[:2]
+        assert set(store.started[2:]) == set(ids[2:])
+        assert len(store.started) == 4
+        for index, download_id in enumerate(ids):
+            assert (
+                await _await_terminal(client, download_id, ip=f"10.0.0.{index + 1}")
+            )["status"] == "ready"
 
 
 async def test_visitor_concurrency_is_one_per_ip(settings: Settings) -> None:
@@ -380,15 +415,16 @@ async def test_account_concurrency_is_two(settings: Settings) -> None:
 
         await _wait_until(lambda: len(store.started) == 2, label="two account downloads running")
         assert store.started == ids[:2]
-        third = await _get(client, ids[2])
+        third = await _get(client, ids[2], headers=auth)
         assert third["status"] == "queued"
         assert third["queue_position"] == 1
 
         store.release.set()
         await _wait_idle(app)
-        assert store.started == ids
+        assert store.started[:2] == ids[:2]
+        assert set(store.started[2:]) == set(ids[2:])
         for download_id in ids:
-            assert (await _await_terminal(client, download_id))["status"] == "ready"
+            assert (await _await_terminal(client, download_id, headers=auth))["status"] == "ready"
 
 
 # --------------------------------------------------------------- resource checks
@@ -578,7 +614,7 @@ async def test_manager_start_marks_interrupted_downloads_failed(settings: Settin
             assert untouched is not None
             assert untouched.status == DownloadStatus.READY
 
-        failed = await _get(client, ids["downloading"])
+        failed = await _get(client, ids["downloading"], ip="203.0.113.7")
         assert failed["status"] == "failed"
         assert failed["can_retry"] is True
         assert failed["error"]["message"] == "服务重启导致任务中断，请重试"

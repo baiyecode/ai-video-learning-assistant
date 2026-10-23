@@ -166,7 +166,7 @@ export function formatQuota(quota: QuotaDto | null | undefined): string {
   if (!quota) return "Quota 加载中";
   const limit = Math.max(0, quota.daily_limit);
   const remaining = Math.max(0, Math.min(quota.remaining, limit));
-  return `剩余 ${remaining} / ${limit} 次`;
+  return `Quota 剩余 ${remaining} / ${limit}`;
 }
 
 /** `2026-01-16T00:00:00+08:00` → `01-16 00:00` (always rendered in Asia/Shanghai). */
@@ -219,7 +219,7 @@ export function reanalysisAvailability(
       allowed: true,
       remaining: null,
       cost: REANALYSIS_COST,
-      message: "将消耗 1 次 Quota",
+      message: "将消耗 1 Quota",
       resetsAt: null,
     };
   }
@@ -240,7 +240,7 @@ export function reanalysisAvailability(
     allowed: true,
     remaining,
     cost: REANALYSIS_COST,
-    message: `将消耗 1 次 Quota，当前剩余 ${remaining} 次`,
+    message: `将消耗 1 Quota，当前剩余 ${remaining}`,
     resetsAt: null,
   };
 }

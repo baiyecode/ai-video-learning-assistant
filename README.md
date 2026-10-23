@@ -26,7 +26,7 @@ frontend/                Vue 3 + Vite + TypeScript + Tailwind + Pinia + vue-rout
   src/lib/api.ts         统一 fetch 封装（错误解析、401 刷新一次）
   src/lib/sse.ts         fetch 版 SSE 解析器 + 断线重连（带 Last-Event-ID）
   src/layouts/           共享布局；components/AppFooter.vue
-  e2e/                   Playwright 黄金路径骨架（默认跳过）
+  e2e/                   Playwright 黄金路径（默认跳过）
 docker-compose.yml       api + web（nginx 托管 SPA 并代理 /api、/health）
 ```
 
@@ -69,12 +69,13 @@ cd frontend && npm run test:unit -- --run
 cd frontend && npm run build
 ```
 
-Playwright 黄金路径默认跳过（需要浏览器与两个 dev server，且后续 ticket 才把步骤补全）：
+Playwright 黄金路径默认跳过。设置 `PLAYWRIGHT_E2E=1` 时它会用假适配器自动启动后端与前端 dev server，
+完整跑通「访客解析 → 导出字幕 → 服务端下载 → 注册 → 流式 Analysis 与思维导图」：
 
 ```bash
 cd frontend
 npx playwright install chromium          # 首次
-PLAYWRIGHT_E2E=1 npx playwright test     # 后端 + 前端 dev server 运行中时
+PLAYWRIGHT_E2E=1 npx playwright test
 ```
 
 ## Docker Compose
@@ -94,7 +95,7 @@ docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 - 日志以单行 JSON 输出到 stdout：`timestamp`、`level`、`logger`、`message`、`request_id`，请求期间还包括 `method`、`path`、`status`、`duration_ms`，错误日志带 `error_code`。
 - 每个请求都会获得 `X-Request-ID`（合法的入站值会被沿用），响应头与错误响应体 `error.request_id` 都返回该值。
 - 定位一次失败请求：`docker compose logs api | grep <request_id>`，可看到 `request_completed` 与对应的 `app_error` / `unhandled_exception`。
-- Sentry 可选：设置 `SENTRY_DSN` 后自动初始化（事件带 `request_id` tag）；为空则完全禁用，不发送任何数据。`SENTRY_TRACES_SAMPLE_RATE` 控制性能采样率。
+- Sentry 可选：后端设置 `SENTRY_DSN` 后自动初始化（事件带 `request_id` tag），`SENTRY_TRACES_SAMPLE_RATE` 控制性能采样率；前端在构建时读取 `VITE_SENTRY_DSN`。任一为空则完全禁用，不发送任何数据。
 
 ### 健康检查
 

@@ -45,4 +45,5 @@ def verify_signature(
     if not signature or not hmac.compare_digest(expected, signature):
         raise AppError(403, ErrorCode.INVALID_SIGNATURE, _MESSAGE_INVALID_SIGNATURE)
     if expires_at <= int(now.timestamp()):
-        raise AppError(403, ErrorCode.FILE_EXPIRED, _MESSAGE_LINK_EXPIRED)
+        # ``file_expired`` always means HTTP 410 Gone, never 403.
+        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_LINK_EXPIRED)

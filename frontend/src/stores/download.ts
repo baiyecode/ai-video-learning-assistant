@@ -87,8 +87,9 @@ export const useDownloadStore = defineStore("download", {
       } catch (caught) {
         if (this.download?.id !== id) return;
         this.error = toUiError(caught);
-        // Transient failures keep the countdown alive; a 410 file_expired is terminal.
-        if (caught instanceof ApiError && caught.code === "file_expired") return;
+        // A 4xx (e.g. 404 not_found, 410 file_expired) will not heal by polling again;
+        // 5xx and network failures are transient and keep the countdown alive.
+        if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) return;
         this.schedulePoll();
       }
     },

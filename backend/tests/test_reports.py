@@ -13,6 +13,7 @@ from uuid import uuid4
 import pytest
 from app.container import Adapters
 from app.modules.catalog.models import Video
+from app.modules.media.models import Download
 from app.modules.ops.models import Report
 from app.ports import Clock
 from fastapi import FastAPI
@@ -34,6 +35,12 @@ def _parse(value: str) -> datetime:
 async def _report_count(app: FastAPI) -> int:
     async with app.state.sessionmaker() as session:
         stmt = select(func.count()).select_from(Report)
+        return int((await session.execute(stmt)).scalar_one())
+
+
+async def _download_count(app: FastAPI) -> int:
+    async with app.state.sessionmaker() as session:
+        stmt = select(func.count()).select_from(Download)
         return int((await session.execute(stmt)).scalar_one())
 
 
@@ -158,7 +165,7 @@ async def test_download_refuses_stored_drm_and_members_content(
     error = response.json()["error"]
     assert error["code"] == code
     assert phrase in error["message"]
-    assert getattr(app.state, "download_manager", None) is None
+    assert await _download_count(app) == 0
 
 
 async def test_retention_policy_is_visible_in_api_copy(
@@ -206,3 +213,16 @@ async def _seed_protected_video(
         session.add(video)
         await session.commit()
     return video.id
+
+
+async def test_report_submissions_are_rate_limited_per_ip(client: AsyncClient) -> None:
+    for _ in range(5):
+        accepted = await client.post("/api/reports", json={"reason": "other"})
+        assert accepted.status_code == 201, accepted.text
+
+    rejected = await client.post("/api/reports", json={"reason": "other"})
+    assert rejected.status_code == 429, rejected.text
+    error = rejected.json()["error"]
+    assert error["code"] == "too_many_requests"
+    assert error["details"]["scope"] == "reports.create"
+    assert rejected.headers["retry-after"] == str(error["details"]["retry_after"])

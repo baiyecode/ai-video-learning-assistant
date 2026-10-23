@@ -236,3 +236,52 @@ async def test_db_budget_ledger_accumulates_per_shanghai_day(tmp_path) -> None:
         assert await ledger.can_spend(0.5) is True
     finally:
         await engine.dispose()
+
+
+async def test_creation_gates_on_every_planned_summarizer_call(settings: Settings) -> None:
+    """A map-reduce Analysis is refused up front unless the whole run is affordable."""
+    tuned = settings.model_copy(
+        update={"analysis_chunk_chars": 40, "analysis_max_input_chars": 10_000}
+    )
+    summarizer = FakeSummarizer(
+        responder=lambda prompt: (
+            "要点" if "字幕片段：" in prompt else "## 摘要\n内容\n## 思维导图\n- 主题"
+        )
+    )
+    ledger = FakeBudgetLedger(budget_usd=0.025)  # two calls fit, the third does not
+    adapters = make_fake_adapters(summarizer=summarizer, budget_ledger=ledger)
+    app, transport = _client_for(tuned, adapters)
+    async with LifespanManager(app):
+        async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+            headers = await _register(client)
+            key = "budgetchun2"
+            url = _url(key)
+            adapters.video_source.videos[url] = sample_video(platform_video_id=key)  # type: ignore[attr-defined]
+            adapters.video_source.subtitles[(key, "zh-Hans")] = SubtitlePayload(  # type: ignore[attr-defined]
+                track=sample_subtitle_track(),
+                cues=[
+                    (0.0, 2.0, "第一段内容比较长需要独立成块"),
+                    (2.0, 4.0, "第二段内容也比较长需要独立成块"),
+                    (4.0, 6.0, "第三段内容同样比较长需要独立成块"),
+                ],
+                text="",
+            )
+            resolved = await client.post("/api/videos/resolve", json={"url": url})
+            assert resolved.status_code == 200, resolved.text
+            video_id = resolved.json()["video"]["id"]
+
+            blocked = await client.post(
+                "/api/analyses", json={"video_id": video_id}, headers=headers
+            )
+            assert blocked.status_code == 429, blocked.text
+            assert blocked.json()["error"]["code"] == "budget_exhausted"
+            # Nothing was called and no Quota unit was reserved.
+            assert summarizer.prompts == []
+            assert (await _quota(client, headers))["used"] == 0
+            assert ledger.can_spend_calls[-1] >= 0.03
+
+            ledger.budget_usd = 10.0
+            accepted = await client.post(
+                "/api/analyses", json={"video_id": video_id}, headers=headers
+            )
+            assert accepted.status_code == 201, accepted.text

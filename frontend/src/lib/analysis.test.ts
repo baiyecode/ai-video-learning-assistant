@@ -96,7 +96,7 @@ describe("summary and quota presentation", () => {
 
   it("formats remaining quota", () => {
     expect(formatQuota({ daily_limit: 3, used: 1, remaining: 2, resets_at: "" })).toBe(
-      "剩余 2 / 3 次",
+      "Quota 剩余 2 / 3",
     );
     expect(formatQuota(null)).toBe("Quota 加载中");
   });
@@ -128,8 +128,8 @@ describe("reanalysis availability", () => {
     expect(availability.allowed).toBe(true);
     expect(availability.cost).toBe(1);
     expect(availability.remaining).toBe(2);
-    expect(availability.message).toContain("将消耗 1 次 Quota");
-    expect(availability.message).toContain("剩余 2 次");
+    expect(availability.message).toContain("将消耗 1 Quota");
+    expect(availability.message).toContain("当前剩余 2");
     expect(availability.resetsAt).toBeNull();
   });
 
@@ -152,6 +152,6 @@ describe("reanalysis availability", () => {
 
     expect(availability.allowed).toBe(true);
     expect(availability.remaining).toBeNull();
-    expect(availability.message).toBe("将消耗 1 次 Quota");
+    expect(availability.message).toBe("将消耗 1 Quota");
   });
 });

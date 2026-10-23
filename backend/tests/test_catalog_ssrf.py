@@ -7,6 +7,7 @@ credentials, non-http(s) schemes and non-standard ports are rejected with the st
 
 from __future__ import annotations
 
+import httpx
 import pytest
 from app.errors import AppError
 from app.modules.catalog import urls
@@ -37,33 +38,36 @@ def test_private_and_unsupported_targets_are_rejected(raw: str) -> None:
     assert any("\u4e00" <= char <= "\u9fff" for char in raised.value.message)
 
 
-def test_host_resolving_to_a_private_address_is_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_host_resolving_to_a_private_address_is_rejected(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr(urls, "_hostname_addresses", lambda host: {"10.0.0.5"})
 
     with pytest.raises(AppError) as raised:
-        normalize_video_url(YOUTUBE_URL)
+        await urls.ensure_public_url(YOUTUBE_URL)
 
     assert raised.value.code == "unsupported_url"
 
 
-def test_metadata_and_link_local_dns_answers_are_rejected(
+async def test_metadata_and_link_local_dns_answers_are_rejected(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(urls, "_hostname_addresses", lambda host: {"169.254.169.254"})
 
     with pytest.raises(AppError) as raised:
-        normalize_video_url(YOUTUBE_URL)
+        await urls.ensure_public_url(YOUTUBE_URL)
 
     assert raised.value.code == "unsupported_url"
 
 
-def test_public_dns_answers_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_public_dns_answers_are_accepted(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(urls, "_hostname_addresses", lambda host: {"93.184.216.34"})
 
     assert normalize_video_url(YOUTUBE_URL) == YOUTUBE_URL
+    await urls.ensure_public_url(YOUTUBE_URL)
 
 
-def test_dns_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_dns_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:
     def _broken(host: str) -> set[str]:
         raise OSError("dns unavailable")
 
@@ -71,6 +75,7 @@ def test_dns_failure_is_best_effort(monkeypatch: pytest.MonkeyPatch) -> None:
 
     # Resolution failures fall through to the platform adapter; they are not SSRF evidence.
     assert normalize_video_url(YOUTUBE_URL) == YOUTUBE_URL
+    await urls.ensure_public_url(YOUTUBE_URL)
 
 
 def test_plain_bilibili_url_is_still_allowed() -> None:
@@ -78,3 +83,14 @@ def test_plain_bilibili_url_is_still_allowed() -> None:
         normalize_video_url("https://www.bilibili.com/video/BV1xx411c7mD?t=1")
         == "https://www.bilibili.com/video/BV1xx411c7mD"
     )
+
+
+async def test_resolve_endpoint_rejects_host_with_private_dns(
+    client: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr(urls, "_hostname_addresses", lambda host: {"10.0.0.5"})
+
+    response = await client.post("/api/videos/resolve", json={"url": YOUTUBE_URL})
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "unsupported_url"

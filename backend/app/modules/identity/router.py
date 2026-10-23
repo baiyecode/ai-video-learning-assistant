@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.deps import get_clock, get_current_account, get_rate_limiter, get_session, get_settings
 from app.errors import AppError, ErrorCode
+from app.http import client_ip
 from app.modules.analysis import quota as analysis_quota
 from app.modules.analysis.schemas import QuotaOut
 from app.modules.identity.models import Account, Session
@@ -35,7 +36,7 @@ from app.modules.identity.security import (
     verify_password,
 )
 from app.ports import Clock
-from app.ratelimit import RateLimiter, client_ip
+from app.ratelimit import RateLimiter
 
 router = APIRouter(tags=["identity"])
 
