@@ -7,6 +7,7 @@ import {
   analysisStatusLabel,
   formatQuota,
   formatQuotaReset,
+  reanalysisAvailability,
   visibleSummary,
 } from "@/lib/analysis";
 import { ApiError } from "@/lib/api";
@@ -19,6 +20,9 @@ const router = useRouter();
 const store = useAnalysisStore();
 const retrying = ref(false);
 const retryError = ref<string | null>(null);
+const confirmOpen = ref(false);
+const reanalyzing = ref(false);
+const reanalyzeError = ref<string | null>(null);
 
 const analysisId = computed(() => String(route.params.id ?? ""));
 const statusLabel = computed(() => analysisStatusLabel(store.status));
@@ -30,6 +34,12 @@ const summaryHtml = computed(() => renderMarkdown(summaryMarkdown.value));
 const quotaLabel = computed(() => (store.quota ? formatQuota(store.quota) : ""));
 const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
 const canRetry = computed(() => store.status === "failed" && store.videoId !== null);
+const canReanalyze = computed(() => store.status === "completed" && store.videoId !== null);
+const reanalysis = computed(() => reanalysisAvailability(store.quota));
+const reanalysisBlockedReason = computed(() => {
+  if (reanalysis.value.allowed) return "";
+  return quotaReset.value ? `${reanalysis.value.message}，${quotaReset.value}` : reanalysis.value.message;
+});
 const videoMeta = computed(() => {
   if (!store.video) return "";
   return `${platformLabel(store.video.platform)} · ${analysisStatusLabel(store.status)}`;
@@ -57,6 +67,37 @@ async function retry(): Promise<void> {
       caught instanceof ApiError ? caught.message : "重新分析失败，请稍后重试";
   } finally {
     retrying.value = false;
+  }
+}
+
+function openReanalyzeConfirm(): void {
+  if (!canReanalyze.value || !reanalysis.value.allowed) return;
+  reanalyzeError.value = null;
+  confirmOpen.value = true;
+}
+
+function closeReanalyzeConfirm(): void {
+  if (reanalyzing.value) return;
+  confirmOpen.value = false;
+}
+
+async function confirmReanalyze(): Promise<void> {
+  if (!reanalysis.value.allowed || reanalyzing.value) return;
+  reanalyzing.value = true;
+  reanalyzeError.value = null;
+  try {
+    const newId = await store.reanalyze();
+    confirmOpen.value = false;
+    if (newId) await router.push({ name: "analysis", params: { id: newId } });
+  } catch (caught) {
+    reanalyzeError.value =
+      caught instanceof ApiError ? caught.message : "重新分析失败，请稍后重试";
+    // A rejected re-analysis often means the Quota snapshot was stale.
+    if (caught instanceof ApiError && caught.code === "quota_exhausted") {
+      void store.loadQuota();
+    }
+  } finally {
+    reanalyzing.value = false;
   }
 }
 </script>
@@ -110,6 +151,21 @@ async function retry(): Promise<void> {
         </span>
       </div>
     </header>
+
+    <div v-if="canReanalyze" class="flex flex-wrap items-center gap-3">
+      <button
+        type="button"
+        class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-white disabled:cursor-not-allowed disabled:border-slate-200 disabled:text-slate-400"
+        :disabled="!reanalysis.allowed"
+        :title="reanalysis.allowed ? reanalysis.message : reanalysisBlockedReason"
+        @click="openReanalyzeConfirm"
+      >
+        重新分析
+      </button>
+      <span v-if="!reanalysis.allowed" class="text-xs text-slate-500">
+        {{ reanalysisBlockedReason }}
+      </span>
+    </div>
 
     <p
       v-if="store.truncated"
@@ -188,6 +244,48 @@ async function retry(): Promise<void> {
     <p v-if="store.streaming" class="text-xs text-slate-400">
       关闭页面不会中断生成；重新打开会从已生成的内容继续。
     </p>
+
+    <div
+      v-if="confirmOpen"
+      class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4"
+      @click.self="closeReanalyzeConfirm"
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reanalyze-title"
+        aria-describedby="reanalyze-cost"
+        class="w-full max-w-md space-y-4 rounded-xl bg-white p-5 shadow-xl"
+      >
+        <h2 id="reanalyze-title" class="text-lg font-semibold text-slate-900">重新分析</h2>
+        <p class="text-sm text-slate-600">
+          将重新生成摘要与思维导图。原结果会保留在历史记录中，可随时回访。
+        </p>
+        <p id="reanalyze-cost" class="rounded-lg bg-amber-50 p-3 text-sm text-amber-800">
+          {{ reanalysis.message }}
+          <span v-if="reanalysis.resetsAt && quotaReset">，{{ quotaReset }}</span>
+        </p>
+        <p v-if="reanalyzeError" class="text-xs text-red-600">{{ reanalyzeError }}</p>
+        <div class="flex justify-end gap-2">
+          <button
+            type="button"
+            class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:border-slate-400 disabled:cursor-not-allowed disabled:text-slate-400"
+            :disabled="reanalyzing"
+            @click="closeReanalyzeConfirm"
+          >
+            取消
+          </button>
+          <button
+            type="button"
+            class="rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            :disabled="reanalyzing || !reanalysis.allowed"
+            @click="confirmReanalyze"
+          >
+            {{ reanalyzing ? "正在创建…" : "确认重新分析" }}
+          </button>
+        </div>
+      </div>
+    </div>
   </section>
 </template>
 

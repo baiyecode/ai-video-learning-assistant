@@ -42,6 +42,30 @@ class AnalysisOut(BaseModel):
     video: AnalysisVideoOut | None = None
 
 
+class AnalysisHistoryVideoOut(BaseModel):
+    """Video metadata needed to render one history row."""
+
+    id: str
+    title: str
+    platform: str
+    thumbnail_url: str | None = None
+
+
+class AnalysisHistoryItemOut(BaseModel):
+    """One row of ``GET /api/analyses`` (never includes the full summary)."""
+
+    id: str
+    video_id: str
+    status: Literal["pending", "streaming", "completed", "failed"]
+    subtitle_source: Literal["manual", "auto"]
+    truncated: bool
+    summary_snippet: str
+    error_code: str | None = None
+    created_at: str
+    completed_at: str | None = None
+    video: AnalysisHistoryVideoOut | None = None
+
+
 class QuotaOut(BaseModel):
     daily_limit: int
     used: int

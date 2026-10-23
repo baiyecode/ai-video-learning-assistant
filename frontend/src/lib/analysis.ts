@@ -193,3 +193,54 @@ export function formatQuotaReset(resetsAt: string | null | undefined): string {
   const label = formatShanghaiDateTime(resetsAt);
   return label ? `将于 ${label} 重置` : "";
 }
+
+/** One re-analysis always consumes exactly one Quota unit. */
+export const REANALYSIS_COST = 1;
+
+export interface ReanalysisAvailability {
+  allowed: boolean;
+  remaining: number | null;
+  cost: number;
+  /** Confirmation copy stating the cost (or why the action is blocked). */
+  message: string;
+  /** Only set when the daily Quota is exhausted: when it comes back. */
+  resetsAt: string | null;
+}
+
+/**
+ * Decide whether "重新分析" can proceed and what the confirmation must say.
+ * An unknown Quota (still loading) allows the attempt; the server remains authoritative.
+ */
+export function reanalysisAvailability(
+  quota: QuotaDto | null | undefined,
+): ReanalysisAvailability {
+  if (!quota) {
+    return {
+      allowed: true,
+      remaining: null,
+      cost: REANALYSIS_COST,
+      message: "将消耗 1 次 Quota",
+      resetsAt: null,
+    };
+  }
+
+  const limit = Math.max(0, quota.daily_limit);
+  const remaining = Math.max(0, Math.min(quota.remaining, limit));
+  if (remaining < REANALYSIS_COST) {
+    return {
+      allowed: false,
+      remaining,
+      cost: REANALYSIS_COST,
+      message: "今日 Quota 已用完，无法重新分析",
+      resetsAt: quota.resets_at,
+    };
+  }
+
+  return {
+    allowed: true,
+    remaining,
+    cost: REANALYSIS_COST,
+    message: `将消耗 1 次 Quota，当前剩余 ${remaining} 次`,
+    resetsAt: null,
+  };
+}

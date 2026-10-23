@@ -8,6 +8,7 @@ import {
   formatQuotaReset,
   formatShanghaiDateTime,
   initialStreamState,
+  reanalysisAvailability,
   visibleSummary,
 } from "@/lib/analysis";
 import type { SseMessage } from "@/lib/sse";
@@ -112,5 +113,45 @@ describe("summary and quota presentation", () => {
     expect(analysisStatusLabel("streaming")).toBe("生成中");
     expect(analysisStatusLabel("completed")).toBe("已完成");
     expect(analysisStatusLabel("failed")).toBe("生成失败");
+  });
+});
+
+describe("reanalysis availability", () => {
+  it("states the one-Unit cost and the remaining Quota", () => {
+    const availability = reanalysisAvailability({
+      daily_limit: 3,
+      used: 1,
+      remaining: 2,
+      resets_at: "2026-01-16T00:00:00+08:00",
+    });
+
+    expect(availability.allowed).toBe(true);
+    expect(availability.cost).toBe(1);
+    expect(availability.remaining).toBe(2);
+    expect(availability.message).toContain("将消耗 1 次 Quota");
+    expect(availability.message).toContain("剩余 2 次");
+    expect(availability.resetsAt).toBeNull();
+  });
+
+  it("blocks reanalysis when the daily Quota is exhausted and shows the reset time", () => {
+    const availability = reanalysisAvailability({
+      daily_limit: 3,
+      used: 3,
+      remaining: 0,
+      resets_at: "2026-01-16T00:00:00+08:00",
+    });
+
+    expect(availability.allowed).toBe(false);
+    expect(availability.remaining).toBe(0);
+    expect(availability.message).toContain("Quota 已用完");
+    expect(availability.resetsAt).toBe("2026-01-16T00:00:00+08:00");
+  });
+
+  it("allows the attempt when Quota is still loading, stating the cost", () => {
+    const availability = reanalysisAvailability(null);
+
+    expect(availability.allowed).toBe(true);
+    expect(availability.remaining).toBeNull();
+    expect(availability.message).toBe("将消耗 1 次 Quota");
   });
 });

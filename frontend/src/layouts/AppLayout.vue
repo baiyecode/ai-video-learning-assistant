@@ -23,6 +23,12 @@ async function logout(): Promise<void> {
         <nav class="flex items-center gap-4 text-sm text-slate-600">
           <RouterLink to="/" class="transition-colors hover:text-slate-900">首页</RouterLink>
           <template v-if="auth.isAuthenticated">
+            <RouterLink
+              to="/analyses"
+              class="transition-colors hover:text-slate-900"
+            >
+              我的分析
+            </RouterLink>
             <span class="max-w-48 truncate text-slate-500" :title="auth.account?.email">
               {{ auth.account?.email }}
             </span>
