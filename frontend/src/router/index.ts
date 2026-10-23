@@ -1,6 +1,14 @@
 import { createRouter, createWebHistory } from "vue-router";
 
+import { useAuthStore } from "@/stores/auth";
 import HomeView from "@/views/HomeView.vue";
+
+declare module "vue-router" {
+  interface RouteMeta {
+    title?: string;
+    requiresAuth?: boolean;
+  }
+}
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -10,6 +18,18 @@ export const router = createRouter({
       name: "home",
       component: HomeView,
       meta: { title: "视频下载与 AI 总结" },
+    },
+    {
+      path: "/login",
+      name: "login",
+      component: () => import("@/views/LoginView.vue"),
+      meta: { title: "登录" },
+    },
+    {
+      path: "/analyses",
+      name: "analyses",
+      component: () => import("@/views/AnalysesView.vue"),
+      meta: { title: "我的 Analysis", requiresAuth: true },
     },
     {
       path: "/terms",
@@ -28,6 +48,16 @@ export const router = createRouter({
     if (to.hash) return { el: to.hash, behavior: "smooth" };
     return { top: 0 };
   },
+});
+
+router.beforeEach(async (to) => {
+  if (to.meta.requiresAuth !== true) return true;
+
+  const auth = useAuthStore();
+  if (!auth.restored) await auth.bootstrap();
+  if (auth.isAuthenticated) return true;
+
+  return { name: "login", query: { next: to.fullPath } };
 });
 
 router.afterEach((to) => {
