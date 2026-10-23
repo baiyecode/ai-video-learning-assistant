@@ -2,7 +2,8 @@
 
 Video identity is global: ``(platform, platform_video_id)`` is unique, so every URL
 variant of one Platform video resolves to the same row. The formats/subtitles columns
-are point-in-time snapshots; subtitle *content* is owned by ticket #4.
+are point-in-time snapshots of what the Platform offered. The selected Subtitle
+content lives in the ``subtitles`` table (one current selection per Video).
 """
 
 from __future__ import annotations
@@ -11,7 +12,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, String, UniqueConstraint
+from sqlalchemy import JSON, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -48,8 +49,34 @@ class Video(Base):
     # Point-in-time snapshot of the Platform's format list (10-minute TTL).
     formats_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
     formats_fetched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    # Subtitle availability only (language + source type); #4 stores the content.
+    # Subtitle availability only (language + source type); content lives in ``subtitles``.
     subtitles_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )
+
+
+class Subtitle(Base):
+    """The one current Subtitle selection for a Video.
+
+    ``source_type`` is ``manual`` or ``auto``. ``cues_json`` holds normalised
+    ``{"start", "end", "text"}`` dictionaries; ``text`` is the display text derived
+    from them, so every export stays consistent with what the UI shows.
+    """
+
+    __tablename__ = "subtitles"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True, default=_new_id)
+    video_id: Mapped[str] = mapped_column(
+        ForeignKey("videos.id", ondelete="CASCADE"), unique=True, index=True
+    )
+
+    language: Mapped[str] = mapped_column(String(32))
+    source_type: Mapped[str] = mapped_column(String(16))
+    text: Mapped[str] = mapped_column(Text, default="")
+    cues_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(

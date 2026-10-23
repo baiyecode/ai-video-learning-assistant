@@ -8,9 +8,13 @@ All failure modes are mapped to stable ``AppError`` codes or ``VideoUnavailableE
 from __future__ import annotations
 
 import asyncio
+import html
 import json
 import logging
+import re
 import shutil
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from app.config import Settings
@@ -20,6 +24,7 @@ from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
 logger = logging.getLogger("app.adapters.ytdlp")
 
 _EXTRACT_TIMEOUT_SECONDS = 60.0
+_SUBTITLE_TIMEOUT_SECONDS = 90.0
 _MAX_LABEL_NOTE = 40
 _NON_SUBTITLE_LANGUAGES = {"live_chat", "danmaku"}
 
@@ -27,6 +32,10 @@ _MESSAGE_MEMBERS_HINT = "会员专属"
 _MESSAGE_RESOLVE_FAILED = "视频解析失败，请稍后重试"
 _MESSAGE_SERVICE_UNAVAILABLE = "解析服务暂时不可用，请稍后再试"
 _MESSAGE_TIMEOUT = "解析超时，请稍后重试"
+_MESSAGE_SUBTITLE_FAILED = "字幕获取失败，请稍后重试"
+
+_HTML_TAG = re.compile(r"<[^>]+>")
+_TIMESTAMP_LINE = re.compile(r"^\s*(\S+)\s*-->\s*(\S+)")
 
 
 class YtDlpVideoSource:
@@ -73,7 +82,62 @@ class YtDlpVideoSource:
         )
 
     async def fetch_subtitle(self, video: ResolvedVideo, track: SubtitleTrack) -> SubtitlePayload:
-        raise NotImplementedError("YtDlpVideoSource.fetch_subtitle is implemented in ticket #4")
+        executable = shutil.which("yt-dlp")
+        if executable is None:
+            raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_SERVICE_UNAVAILABLE)
+
+        with tempfile.TemporaryDirectory(prefix="subtitle-") as tmp_dir:
+            args = [
+                executable,
+                "--skip-download",
+                "--no-playlist",
+                "--no-warnings",
+                "--no-progress",
+                "--write-auto-subs" if track.is_automatic else "--write-subs",
+                "--sub-langs",
+                track.language,
+                "--sub-format",
+                "json3/vtt/srt/best",
+                "--socket-timeout",
+                "15",
+                "-o",
+                str(Path(tmp_dir) / "subtitle.%(ext)s"),
+                video.webpage_url,
+            ]
+            process = await asyncio.create_subprocess_exec(
+                *args,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            try:
+                _, stderr = await asyncio.wait_for(
+                    process.communicate(), timeout=_SUBTITLE_TIMEOUT_SECONDS
+                )
+            except TimeoutError as exc:
+                process.kill()
+                await process.wait()
+                raise AppError(504, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_TIMEOUT) from exc
+
+            if process.returncode != 0:
+                logger.warning(
+                    "ytdlp_subtitle_failed",
+                    extra={
+                        "event": "ytdlp_subtitle_failed",
+                        "language": track.language,
+                        "stderr": stderr.decode("utf-8", errors="replace")[-500:],
+                    },
+                )
+                raise AppError(502, ErrorCode.SUBTITLES_UNAVAILABLE, _MESSAGE_SUBTITLE_FAILED)
+
+            cues = await _read_first_subtitle(Path(tmp_dir))
+
+        if not cues:
+            raise AppError(409, ErrorCode.SUBTITLES_UNAVAILABLE, _MESSAGE_SUBTITLE_FAILED)
+        return SubtitlePayload(
+            track=track,
+            cues=cues,
+            text="\n".join(text for _, _, text in cues),
+        )
 
     async def _extract_info(self, url: str) -> dict[str, Any]:
         executable = shutil.which("yt-dlp")
@@ -246,3 +310,134 @@ def _first_str(*values: Any) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+async def _read_first_subtitle(directory: Path) -> list[tuple[float, float, str]]:
+    """yt-dlp writes one file per requested language; take the first parseable one."""
+    return await asyncio.to_thread(_read_first_subtitle_sync, directory)
+
+
+def _read_first_subtitle_sync(directory: Path) -> list[tuple[float, float, str]]:
+    known = {".json3", ".json", ".vtt", ".srt"}
+    candidates = sorted(
+        (path for path in directory.iterdir() if path.is_file()),
+        key=lambda path: (path.suffix.lower() not in known, path.name),
+    )
+    for path in candidates:
+        cues = _parse_subtitle_file(path)
+        if cues:
+            return cues
+    return []
+
+
+def _parse_subtitle_file(path: Path) -> list[tuple[float, float, str]]:
+    try:
+        raw = path.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return []
+    suffix = path.suffix.lower()
+    if suffix in {".json3", ".json"}:
+        return _parse_json_subtitle(raw)
+    if suffix in {".vtt", ".srt"}:
+        return _parse_timed_blocks(raw)
+    return []
+
+
+def _parse_json_subtitle(raw: str) -> list[tuple[float, float, str]]:
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(data, dict):
+        return []
+    events = data.get("events")
+    if isinstance(events, list):
+        return _parse_youtube_events(events)
+    body = data.get("body")
+    if isinstance(body, list):
+        return _parse_bilibili_body(body)
+    return []
+
+
+def _parse_youtube_events(events: list[Any]) -> list[tuple[float, float, str]]:
+    cues: list[tuple[float, float, str]] = []
+    for event in events:
+        if not isinstance(event, dict):
+            continue
+        segments = event.get("segs")
+        if not isinstance(segments, list):
+            continue
+        text = " ".join(
+            str(segment.get("utf8") or "")
+            for segment in segments
+            if isinstance(segment, dict)
+        ).strip()
+        start_ms = _float_or_none(event.get("tStartMs"))
+        duration_ms = _float_or_none(event.get("dDurationMs")) or 0.0
+        if not text or start_ms is None:
+            continue
+        start = start_ms / 1000
+        end = max(start + 0.001, (start_ms + duration_ms) / 1000)
+        cues.append((start, end, _clean_cue_text(text)))
+    return cues
+
+
+def _parse_bilibili_body(body: list[Any]) -> list[tuple[float, float, str]]:
+    cues: list[tuple[float, float, str]] = []
+    for item in body:
+        if not isinstance(item, dict):
+            continue
+        start = _float_or_none(item.get("from"))
+        end = _float_or_none(item.get("to"))
+        text = _clean_cue_text(str(item.get("content") or ""))
+        if start is None or end is None or not text:
+            continue
+        cues.append((start, max(start, end), text))
+    return cues
+
+
+def _parse_timed_blocks(raw: str) -> list[tuple[float, float, str]]:
+    """Parse both WebVTT and SRT: blocks of ``[index] timing text...``."""
+    cues: list[tuple[float, float, str]] = []
+    for block in re.split(r"\r?\n\s*\r?\n", raw.strip()):
+        lines = block.splitlines()
+        for index, line in enumerate(lines):
+            match = _TIMESTAMP_LINE.match(line)
+            if match is None:
+                continue
+            start = _parse_timestamp(match.group(1))
+            end = _parse_timestamp(match.group(2))
+            if start is None or end is None:
+                break
+            text = " ".join(_clean_cue_text(part) for part in lines[index + 1 :]).strip()
+            if text:
+                cues.append((start, max(start, end), text))
+            break
+    return cues
+
+
+def _parse_timestamp(value: str) -> float | None:
+    pieces = value.strip().replace(",", ".").split(":")
+    try:
+        if len(pieces) == 3:
+            hours, minutes, seconds = pieces
+            return int(hours) * 3600 + int(minutes) * 60 + float(seconds)
+        if len(pieces) == 2:
+            minutes, seconds = pieces
+            return int(minutes) * 60 + float(seconds)
+    except ValueError:
+        return None
+    return None
+
+
+def _clean_cue_text(value: str) -> str:
+    return html.unescape(_HTML_TAG.sub("", value)).strip()
+
+
+def _float_or_none(value: Any) -> float | None:
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
