@@ -158,6 +158,8 @@ export async function apiFetch<T>(path: string, options: ApiRequestOptions = {})
     const refreshed = await refreshSession();
     if (refreshed) {
       response = await send(path, { ...options, retryOn401: false });
+      // The Session may have been revoked between refresh and retry.
+      if (response.status === 401) unauthorizedHandler?.();
     } else {
       unauthorizedHandler?.();
     }
