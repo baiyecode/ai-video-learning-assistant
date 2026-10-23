@@ -115,7 +115,7 @@ async function retry(): Promise<void> {
       v-if="store.truncated"
       class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800"
     >
-      字幕内容较长，本次结果基于部分内容生成。
+      字幕内容较长，本次结果基于截断内容生成，可能未覆盖完整视频。
     </p>
 
     <div

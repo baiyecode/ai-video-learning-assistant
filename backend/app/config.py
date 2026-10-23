@@ -59,6 +59,11 @@ class Settings(BaseSettings):
     # end-to-end generation timeout. #12 adds rate limits and budget policy.
     analysis_daily_quota: int = 3
     analysis_timeout_seconds: float = 120.0
+    # Long-Subtitle chunking (ticket #9): per-chunk character budget (splits only at
+    # cue boundaries) and the total input budget. Beyond it chunks distributed across
+    # the timeline are kept and the Analysis is flagged ``truncated``.
+    analysis_chunk_chars: int = 6000
+    analysis_max_input_chars: int = 120_000
 
     @property
     def media_dir(self) -> Path:

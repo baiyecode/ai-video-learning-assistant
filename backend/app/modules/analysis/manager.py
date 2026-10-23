@@ -51,11 +51,11 @@ class AnalysisManager:
 
     async def _run(self, analysis_id: str) -> None:
         try:
-            prompt = await self._prepare(analysis_id)
-            if prompt is None:
+            plan = await self._prepare(analysis_id)
+            if plan is None:
                 return
             await generation.ensure_budget(self._adapters.budget_ledger)
-            await self._generate(analysis_id, prompt)
+            await self._generate(analysis_id, plan)
         except asyncio.CancelledError:
             raise
         except Exception:  # noqa: BLE001 - a crash must still settle the row and Quota
@@ -65,8 +65,8 @@ class AnalysisManager:
             )
             await self._fail(analysis_id)
 
-    async def _prepare(self, analysis_id: str) -> str | None:
-        """Build the prompt and move the row to ``streaming``."""
+    async def _prepare(self, analysis_id: str) -> generation.GenerationPlan | None:
+        """Plan cue-aware chunks and move the row to ``streaming``."""
         async with self._sessionmaker() as session:
             analysis = await session.get(Analysis, analysis_id)
             if analysis is None or analysis.status != AnalysisStatus.PENDING.value:
@@ -81,22 +81,56 @@ class AnalysisManager:
                 await self._fail_in_session(session, analysis)
                 return None
 
-            prompt = generation.build_prompt(
-                title=video.title,
-                duration_seconds=video.duration_seconds,
-                subtitle_source=analysis.subtitle_source,
-                subtitle_text=subtitle.text,
-            )
+            try:
+                plan = generation.build_plan(
+                    title=video.title,
+                    duration_seconds=video.duration_seconds,
+                    subtitle_source=analysis.subtitle_source,
+                    cues=generation.cues_from_stored(
+                        subtitle.cues_json, fallback_text=subtitle.text
+                    ),
+                    chunk_chars=self._settings.analysis_chunk_chars,
+                    max_input_chars=self._settings.analysis_max_input_chars,
+                )
+            except ValueError:
+                # Subtitle content was empty: fail the Analysis instead of crashing.
+                await self._fail_in_session(session, analysis)
+                return None
             analysis.status = AnalysisStatus.STREAMING.value
+            # Visible in the ``meta`` SSE event before the first delta: the UI can
+            # warn that the result is based on truncated input from the start.
+            analysis.truncated = plan.truncated
             analysis.updated_at = self._clock.now()
             await session.commit()
-            return prompt
+            logger.info(
+                "analysis_generation_planned",
+                extra={
+                    "event": "analysis_generation_planned",
+                    "analysis_id": analysis_id,
+                    "chunks": len(plan.chunk_prompts) or 1,
+                    "truncated": plan.truncated,
+                },
+            )
+            return plan
 
-    async def _generate(self, analysis_id: str, prompt: str) -> None:
+    async def _generate(self, analysis_id: str, plan: generation.GenerationPlan) -> None:
         splitter = generation.OutputSplitter()
         failure: BaseException | None = None
         try:
+            # One budget for the whole map-reduce run: partial summaries must leave
+            # enough time for the final merge call.
             async with asyncio.timeout(self._settings.analysis_timeout_seconds):
+                prompt = plan.direct_prompt
+                if plan.needs_merge:
+                    partials = [
+                        await self._partial_summary(chunk_prompt)
+                        for chunk_prompt in plan.chunk_prompts
+                    ]
+                    prompt = generation.build_merge_prompt(plan, partial_summaries=partials)
+                if prompt is None:
+                    raise RuntimeError("generation plan has no prompt")
+                # Only the final (or single) call is streamed and persisted; the map
+                # calls produce intermediate summaries that are never shown.
                 async for chunk in self._adapters.summarizer.stream(prompt=prompt):
                     if splitter.feed(chunk):
                         await self._persist_summary(analysis_id, splitter.summary)
@@ -120,6 +154,14 @@ class AnalysisManager:
 
         summary, mindmap = splitter.finish()
         await self._complete(analysis_id, summary, mindmap)
+
+    async def _partial_summary(self, prompt: str) -> str:
+        """Consume one map call whole; an empty result means the model failed."""
+        parts = [chunk async for chunk in self._adapters.summarizer.stream(prompt=prompt)]
+        text = "".join(parts).strip()
+        if not text:
+            raise RuntimeError("empty partial summary")
+        return text
 
     async def _persist_summary(self, analysis_id: str, summary: str) -> None:
         async with self._sessionmaker() as session:
