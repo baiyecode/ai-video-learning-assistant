@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from "vue";
 
+import SubtitlePanel from "@/components/SubtitlePanel.vue";
 import {
   formatDuration,
   formatFileSize,
@@ -176,6 +177,8 @@ function retry(): void {
         </div>
         <p v-else class="text-sm text-slate-500">暂无可下载格式。</p>
       </div>
+
+      <SubtitlePanel :video-id="result.video.id" />
 
       <div class="flex flex-wrap items-center gap-2 border-t border-slate-100 pt-4">
         <button

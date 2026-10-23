@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.errors import AppError, ErrorCode
 from app.ports import Clock, ResolvedVideo, VideoSource, VideoUnavailableError
 
+from . import subtitles
 from .models import Video
 from .schemas import (
     LEGAL_NOTICE,
@@ -74,7 +75,8 @@ async def resolve_video(
         platform_video_id=platform_video_id,
         clock=clock,
     )
-    return _resolve_response(video)
+    has_subtitle = await subtitles.sync_selection(session, source, video, resolved)
+    return _resolve_response(video, has_subtitle=has_subtitle)
 
 
 async def get_video(session: AsyncSession, clock: Clock, video_id: str) -> VideoDetailResponse:
@@ -89,7 +91,9 @@ async def get_video(session: AsyncSession, clock: Clock, video_id: str) -> Video
             details["formats_fetched_at"] = fetched_at.isoformat()
         raise AppError(409, ErrorCode.FORMATS_EXPIRED, _MESSAGE_FORMATS_EXPIRED, details)
 
-    base = _resolve_response(video)
+    base = _resolve_response(
+        video, has_subtitle=await subtitles.has_subtitle(session, video.id)
+    )
     return VideoDetailResponse(
         **base.model_dump(),
         formats_fetched_at=fetched_at,
@@ -181,7 +185,7 @@ def _apply_resolution(
     video.formats_fetched_at = fetched_at
 
 
-def _resolve_response(video: Video) -> ResolveResponse:
+def _resolve_response(video: Video, *, has_subtitle: bool) -> ResolveResponse:
     formats = [VideoFormatOut.from_snapshot(item) for item in video.formats_json or []]
     subtitles = [SubtitleOut.from_snapshot(item) for item in video.subtitles_json or []]
     return ResolveResponse(
@@ -199,7 +203,7 @@ def _resolve_response(video: Video) -> ResolveResponse:
         ),
         formats=formats,
         subtitles=subtitles,
-        can_analyze=bool(subtitles) and not video.is_drm and not video.is_members_only,
+        can_analyze=has_subtitle and not video.is_drm and not video.is_members_only,
         resolve_notice=LEGAL_NOTICE,
     )
 

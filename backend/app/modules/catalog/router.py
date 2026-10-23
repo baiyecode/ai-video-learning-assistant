@@ -1,17 +1,19 @@
-"""Catalog HTTP routes: Video resolve and cached metadata.
+"""Catalog HTTP routes: Video resolve, cached metadata and Subtitle access.
 
-Routes here are mounted under ``/api``. Ticket #4 adds Subtitle endpoints.
+Routes here are mounted under ``/api``.
 """
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from typing import Literal
+
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.container import Adapters
 from app.deps import get_adapters, get_session
 
-from . import service
+from . import service, subtitles
 from .schemas import ResolveResponse, ResolveVideoRequest, VideoDetailResponse
 
 router = APIRouter(prefix="/videos", tags=["catalog"])
@@ -33,3 +35,21 @@ async def get_video(
     adapters: Adapters = Depends(get_adapters),
 ) -> VideoDetailResponse:
     return await service.get_video(session, adapters.clock, video_id)
+
+
+@router.get("/{video_id}/subtitles", response_model=None)
+async def get_subtitles(
+    video_id: str,
+    format: Literal["srt", "vtt", "txt"] | None = Query(default=None),
+    session: AsyncSession = Depends(get_session),
+):
+    """Return the selected Subtitle as JSON, or download it as SRT/VTT/TXT."""
+    if format is None:
+        return await subtitles.get_subtitle(session, video_id)
+
+    export = await subtitles.export_subtitle(session, video_id, format)
+    return Response(
+        content=export.content,
+        media_type=export.media_type,
+        headers={"Content-Disposition": f'attachment; filename="{export.filename}"'},
+    )

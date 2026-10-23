@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -101,6 +101,22 @@ class ResolveResponse(BaseModel):
 class VideoDetailResponse(ResolveResponse):
     formats_fetched_at: datetime
     formats_expired: bool = False
+
+
+class SubtitleCueOut(BaseModel):
+    start: float
+    end: float
+    text: str
+
+
+class SubtitleDetailResponse(BaseModel):
+    """The selected Subtitle for a Video, as shown in the UI and exported as files."""
+
+    language: str
+    source_type: Literal["manual", "auto"]
+    text: str
+    cues: list[SubtitleCueOut]
+    can_analyze: bool = True
 
 
 def _resolution_label(fmt: VideoFormat) -> str:
