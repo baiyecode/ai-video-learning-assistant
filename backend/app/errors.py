@@ -41,6 +41,7 @@ class ErrorCode(StrEnum):
     DOWNLOAD_FAILED = "download_failed"
     DOWNLOAD_LIMIT_REACHED = "download_limit_reached"
     FILE_EXPIRED = "file_expired"
+    INVALID_SIGNATURE = "invalid_signature"
     TOO_MANY_REQUESTS = "too_many_requests"
     BUDGET_EXHAUSTED = "budget_exhausted"
     QUOTA_EXHAUSTED = "quota_exhausted"
