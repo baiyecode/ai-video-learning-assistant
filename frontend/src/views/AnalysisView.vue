@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
+import MindmapPanel from "@/components/MindmapPanel.vue";
 import {
   analysisStatusLabel,
   formatQuota,
@@ -29,9 +30,6 @@ const summaryHtml = computed(() => renderMarkdown(summaryMarkdown.value));
 const quotaLabel = computed(() => (store.quota ? formatQuota(store.quota) : ""));
 const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
 const canRetry = computed(() => store.status === "failed" && store.videoId !== null);
-const mindmapLines = computed(() =>
-  store.mindmap ? store.mindmap.split("\n").filter((line) => line.trim().length > 0).length : 0,
-);
 const videoMeta = computed(() => {
   if (!store.video) return "";
   return `${platformLabel(store.video.platform)} · ${analysisStatusLabel(store.status)}`;
@@ -181,21 +179,11 @@ async function retry(): Promise<void> {
       正在生成摘要…
     </div>
 
-    <section
+    <MindmapPanel
       v-if="store.mindmap || store.status === 'completed'"
-      class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
-      aria-labelledby="mindmap-heading"
-    >
-      <h2 id="mindmap-heading" class="text-sm font-semibold text-slate-900">思维导图</h2>
-      <div
-        class="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-4 text-sm text-slate-500"
-      >
-        <template v-if="store.mindmap">
-          思维导图已生成（{{ mindmapLines }} 个节点），交互式可视化即将上线。
-        </template>
-        <template v-else>本次生成没有返回思维导图。</template>
-      </div>
-    </section>
+      :markdown="store.mindmap"
+      :title="store.video?.title ?? ''"
+    />
 
     <p v-if="store.streaming" class="text-xs text-slate-400">
       关闭页面不会中断生成；重新打开会从已生成的内容继续。
