@@ -21,13 +21,12 @@ from app.config import Settings
 from app.deps import get_clock, get_current_account, get_rate_limiter, get_session, get_settings
 from app.errors import AppError, ErrorCode
 from app.http import client_ip
-from app.modules.analysis import quota as analysis_quota
+from app.modules.analysis import service as analysis_service
 from app.modules.analysis.schemas import QuotaOut
 from app.modules.identity.models import Account, Session
 from app.modules.identity.security import (
     clear_refresh_cookie,
     encode_access_token,
-    ensure_utc,
     hash_password,
     hash_refresh_token,
     new_refresh_token,
@@ -37,6 +36,7 @@ from app.modules.identity.security import (
 )
 from app.ports import Clock
 from app.ratelimit import RateLimiter
+from app.timeutil import required_utc
 
 router = APIRouter(tags=["identity"])
 
@@ -75,7 +75,7 @@ def _account_out(account: Account) -> AccountOut:
     return AccountOut(
         id=account.id,
         email=account.email,
-        created_at=ensure_utc(account.created_at).isoformat(),
+        created_at=required_utc(account.created_at).isoformat(),
     )
 
 
@@ -227,7 +227,7 @@ async def refresh(
 
     record = await _find_session(db, raw_token)
     now = clock.now()
-    if record is None or record.revoked_at is not None or ensure_utc(record.expires_at) <= now:
+    if record is None or record.revoked_at is not None or required_utc(record.expires_at) <= now:
         raise _session_invalid()
 
     account = await db.get(Account, record.account_id)
@@ -290,15 +290,7 @@ async def me(
     settings: Settings = Depends(get_settings),
     clock: Clock = Depends(get_clock),
 ) -> dict:
-    snapshot = await analysis_quota.usage(
-        db, account.id, clock, settings.analysis_daily_quota
-    )
     return {
         "account": _account_out(account),
-        "quota": QuotaOut(
-            daily_limit=snapshot.daily_limit,
-            used=snapshot.used,
-            remaining=snapshot.remaining,
-            resets_at=snapshot.resets_at.isoformat(),
-        ),
+        "quota": await analysis_service.daily_quota(db, account.id, clock, settings),
     }

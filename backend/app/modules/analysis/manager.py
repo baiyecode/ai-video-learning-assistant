@@ -24,6 +24,7 @@ from app.container import Adapters
 from app.errors import AppError, ErrorCode
 from app.modules.catalog.models import Video
 from app.ports import Clock
+from app.timeutil import shanghai_day
 
 from . import generation, quota
 from .models import ACTIVE_STATUSES, Analysis, AnalysisStatus
@@ -80,7 +81,7 @@ class AnalysisManager:
                 await quota.release(
                     session,
                     analysis.account_id,
-                    quota.quota_day(analysis.created_at),
+                    shanghai_day(analysis.created_at),
                 )
             if rows:
                 await session.commit()
@@ -323,7 +324,7 @@ class AnalysisManager:
             analysis.completed_at = now
             analysis.updated_at = now
             await quota.consume(
-                session, analysis.account_id, quota.quota_day(analysis.created_at)
+                session, analysis.account_id, shanghai_day(analysis.created_at)
             )
             await session.commit()
             completed = True
@@ -349,7 +350,7 @@ class AnalysisManager:
         analysis.error_code = code.value
         analysis.completed_at = now
         analysis.updated_at = now
-        await quota.release(session, analysis.account_id, quota.quota_day(analysis.created_at))
+        await quota.release(session, analysis.account_id, shanghai_day(analysis.created_at))
         await session.commit()
         await self._notify()
 

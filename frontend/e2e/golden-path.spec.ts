@@ -19,14 +19,14 @@ test.describe("golden path", () => {
   }) => {
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴视频链接");
-    await expect(page.getByLabel("视频链接")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴视频地址");
+    await expect(page.getByLabel("视频地址")).toBeVisible();
     await expect(
       page.getByText("仅限个人备份或已获授权内容，不支持播放列表、直播与 DRM 内容。"),
     ).toBeVisible();
 
     // --- Visitor: resolve ---------------------------------------------------
-    await page.getByLabel("视频链接").fill(VIDEO_URL);
+    await page.getByLabel("视频地址").fill(VIDEO_URL);
     await page.getByRole("button", { name: "解析视频" }).click();
 
     await expect(page.getByRole("heading", { level: 2, name: VIDEO_TITLE })).toBeVisible();
@@ -79,5 +79,8 @@ test.describe("golden path", () => {
 
     // The fresh Account still has two of its three daily Quota units.
     await expect(page.getByText("Quota 剩余 2 / 3")).toBeVisible();
+
+    // ADR-0005: private Analysis pages are never indexed.
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex,nofollow");
   });
 });

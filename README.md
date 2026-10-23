@@ -2,7 +2,7 @@
 
 解析公开视频、下载文件、导出字幕，并基于字幕生成简体中文摘要与思维导图的单上下文产品。
 
-当前状态：**Ticket #2 工程骨架**。前后端可运行、测试接缝就绪；业务功能由后续 ticket 逐步填充。
+当前状态：**P1 已完成**（GitHub issues #2–#14）。访客可解析、导出字幕、服务端下载；账号可流式生成摘要与思维导图，并受每日 Quota、限流与 AI 预算约束。P2（VIP Membership 等）尚未开始。
 
 ## 目录结构
 
@@ -13,13 +13,16 @@ backend/                 FastAPI 模块化单体（Python 3.12+，uv 管理）
     config.py            pydantic-settings（APP_ 环境变量前缀）
     db.py                SQLAlchemy 2 async + SQLite WAL、init_db()
     errors.py            AppError + 统一错误响应 + 异常处理器
+    messages.py          跨模块共用的用户可见文案（同一条件同一句话）
+    timeutil.py          UTC 规范化与 Asia/Shanghai 日历日/次日零点
+    ratelimit.py         内存滑动窗口限流（429 + Retry-After）
     logging_setup.py     JSON 日志 + request_id 中间件/contextvar
     ports.py             VideoSource / MediaStore / Summarizer / Clock / BudgetLedger
     container.py         Adapters 容器与 build_production_adapters()
     deps.py              get_settings / get_adapters / get_session / get_clock
-    adapters/            生产适配器（未实现的在调用时抛 NotImplementedError）
-    modules/             catalog / identity / media / analysis / ops 的空路由器
-    modules/ops/         /health 检查、Sentry 初始化
+    adapters/            生产适配器：yt-dlp 解析、文件系统媒体、DeepSeek 摘要、系统时钟、SQLite 预算账本
+    modules/             catalog（Video/Subtitle）、identity（Account/Session）、media（Download）、analysis（Analysis/Quota）、ops（/health、举报、Sentry）
+    modules/*/manager.py 下载队列与分析生成两条后台链路，由 main.py 的 lifespan 启动与停止
   scripts/backup.py      SQLite 在线备份 + 保留策略
   tests/                 HTTP 接缝测试、fakes.py 测试替身
 frontend/                Vue 3 + Vite + TypeScript + Tailwind + Pinia + vue-router
@@ -139,11 +142,14 @@ docker compose start api backup
   `{"error": {"code", "message", "details", "request_id"}}`；未处理异常返回 `internal_error` 且不泄露堆栈。
   stable code 见 `app/errors.py::ErrorCode`。
 - **适配器**：业务模块只依赖 `app/ports.py` 的 Protocol；测试用 `tests/fakes.py` 的假实现，经 `create_app(settings, adapters)` 注入。
-- **测试**：`tests/conftest.py` 的 `client` fixture 使用临时 SQLite + `httpx.ASGITransport` + `asgi-lifespan`；不得访问真实网络或外部 SDK。
-- **时间**：`Clock.today()` 是 Asia/Shanghai 日历日（Quota）；`now()` 是 UTC 感知时间。
+  例外：bcrypt、PyJWT、sentry_sdk、yt-dlp 客户端等**基础设施库**可以直接 import 使用——端口只覆盖需要按环境替换的跨进程副作用（平台解析、媒体存储、AI 调用、时钟、预算账本），把哈希或签名也做成端口只会增加一层无实现的转发。
+- **后台任务**：`DownloadManager` 与 `AnalysisManager` 只由 `main.py` 的 lifespan 创建并 `start()`，路由一律通过 `app.state.download_manager` / `app.state.analysis_manager` 取用。不要在路由里惰性自建实例：那样会绕过重启恢复与配额释放。
+- **测试**：`tests/conftest.py` 的 `client` fixture 使用临时 SQLite + `httpx.ASGITransport` + `asgi-lifespan`；不得访问真实网络或外部 SDK。需要自定义 settings/adapters 时同样必须包 `LifespanManager`，否则拿不到 manager。
+- **时间**：`Clock.today()` 是 Asia/Shanghai 日历日（Quota）；`now()` 是 UTC 感知时间。时区换算只走 `app/timeutil.py`（`as_utc` / `required_utc` / `shanghai_day` / `next_shanghai_midnight`），不要在模块里再建 `ZoneInfo` 或复制次日零点算法。
+- **文案**：同一条件在多个模块出现的用户可见文案集中在 `app/messages.py`，模块独有的文案留在模块内；用词遵守 `GLOSSARY.md`（Video 叫「视频」，提交的地址叫「页面地址」，不叫「视频链接」）。
 
-## 已知占位
+## 尚未实现
 
-- `build_production_adapters()` 返回的 yt-dlp / 文件系统 / DeepSeek / 预算适配器在**调用时**抛 `NotImplementedError`（各自 ticket 实现），不影响导入与启动。
-- 前端 `stores/auth.ts` 的会话恢复与登录页由 ticket #7 完成；`lib/api.ts` 已提供 401 刷新钩子。
-- `/terms` 为占位页面，正式条款与举报入口由 ticket #14 完成。
+- VIP Membership（订阅后 Analysis 不受 Quota 限制）属于 P2，`Quota` 目前对所有 Account 一视同仁。
+- ADR-0005 的营销页构建期预渲染与 sitemap 属于 P3；当前只在路由层为私有页面下发 `noindex`（见 `src/router/index.ts`）。
+- 没有 CI 流水线：`backend` 的 pytest/ruff 与 `frontend` 的 vitest/build/Playwright 需按上面的命令手动执行。

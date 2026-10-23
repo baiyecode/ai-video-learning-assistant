@@ -1,9 +1,8 @@
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
-from zoneinfo import ZoneInfo
 
-SHANGHAI = ZoneInfo("Asia/Shanghai")
+from app.timeutil import shanghai_day
 
 
 class SystemClock:
@@ -13,4 +12,4 @@ class SystemClock:
         return datetime.now(UTC)
 
     def today(self) -> date:
-        return self.now().astimezone(SHANGHAI).date()
+        return shanghai_day(self.now())

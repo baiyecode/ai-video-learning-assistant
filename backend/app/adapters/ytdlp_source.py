@@ -17,6 +17,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat, VideoUnavailableError
@@ -29,7 +30,6 @@ _MAX_LABEL_NOTE = 40
 _NON_SUBTITLE_LANGUAGES = {"live_chat", "danmaku"}
 
 _MESSAGE_MEMBERS_HINT = "会员专属"
-_MESSAGE_RESOLVE_FAILED = "视频解析失败，请稍后重试"
 _MESSAGE_SERVICE_UNAVAILABLE = "解析服务暂时不可用，请稍后再试"
 _MESSAGE_TIMEOUT = "解析超时，请稍后重试"
 _MESSAGE_SUBTITLE_FAILED = "字幕获取失败，请稍后重试"
@@ -46,7 +46,7 @@ class YtDlpVideoSource:
         info = await self._extract_info(url)
 
         if info.get("_type") == "playlist":
-            raise AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, "暂不支持播放列表，请提供单个视频链接")
+            raise AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, messages.PLAYLIST_NOT_SUPPORTED)
         if info.get("is_live") or info.get("live_status") in {"is_live", "is_upcoming"}:
             raise AppError(422, ErrorCode.UNSUPPORTED_URL, "暂不支持直播链接，请提供已发布的单个视频")
 
@@ -59,7 +59,7 @@ class YtDlpVideoSource:
         platform = _platform_of(info)
         video_id = str(info.get("id") or "").strip()
         if not video_id:
-            raise AppError(502, ErrorCode.RESOLVE_FAILED, _MESSAGE_RESOLVE_FAILED)
+            raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED)
 
         duration = _int_or_none(info.get("duration")) or 0
         webpage_url = str(info.get("webpage_url") or url)
@@ -181,10 +181,10 @@ class YtDlpVideoSource:
             payload = json.loads(stdout.decode("utf-8", errors="replace"))
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             logger.warning("ytdlp_bad_json", extra={"event": "ytdlp_bad_json"})
-            raise AppError(502, ErrorCode.RESOLVE_FAILED, _MESSAGE_RESOLVE_FAILED) from exc
+            raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED) from exc
 
         if not isinstance(payload, dict):
-            raise AppError(502, ErrorCode.RESOLVE_FAILED, _MESSAGE_RESOLVE_FAILED)
+            raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED)
         return payload
 
 
@@ -195,17 +195,17 @@ def _raise_for_stderr(stderr: str) -> None:
         extra={"event": "ytdlp_extract_failed", "stderr": stderr[-500:]},
     )
     if "playlist" in lowered:
-        raise AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, "暂不支持播放列表，请提供单个视频链接")
+        raise AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, messages.PLAYLIST_NOT_SUPPORTED)
     if "drm" in lowered:
-        raise AppError(403, ErrorCode.DRM_PROTECTED, "该视频受 DRM 保护，无法解析")
+        raise AppError(403, ErrorCode.DRM_PROTECTED, messages.DRM_PROTECTED)
     if _MESSAGE_MEMBERS_HINT in stderr or "members-only" in lowered or "premium" in lowered:
-        raise AppError(403, ErrorCode.MEMBERS_ONLY, "该视频为会员专属内容，暂不支持解析")
+        raise AppError(403, ErrorCode.MEMBERS_ONLY, messages.MEMBERS_ONLY)
     if any(
         marker in lowered
         for marker in ("unavailable", "private", "removed", "deleted", "not available", "404")
     ):
         raise VideoUnavailableError(stderr[-200:])
-    raise AppError(502, ErrorCode.RESOLVE_FAILED, _MESSAGE_RESOLVE_FAILED)
+    raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED)
 
 
 def _platform_of(info: dict[str, Any]) -> str:
@@ -214,7 +214,7 @@ def _platform_of(info: dict[str, Any]) -> str:
         return "bilibili"
     if "youtube" in extractor:
         return "youtube"
-    raise AppError(422, ErrorCode.UNSUPPORTED_URL, "暂不支持该平台，请提供 B 站或 YouTube 的单个视频链接")
+    raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_PLATFORM)
 
 
 def _has_drm(info: dict[str, Any]) -> bool:

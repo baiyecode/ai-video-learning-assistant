@@ -7,6 +7,8 @@ declare module "vue-router" {
   interface RouteMeta {
     title?: string;
     requiresAuth?: boolean;
+    /** ADR-0005: private pages stay out of search engines; only marketing pages are indexable. */
+    noindex?: boolean;
   }
 }
 
@@ -29,13 +31,13 @@ export const router = createRouter({
       path: "/analyses",
       name: "analyses",
       component: () => import("@/views/AnalysesView.vue"),
-      meta: { title: "我的 Analysis", requiresAuth: true },
+      meta: { title: "我的 Analysis", requiresAuth: true, noindex: true },
     },
     {
       path: "/analyses/:id",
       name: "analysis",
       component: () => import("@/views/AnalysisView.vue"),
-      meta: { title: "AI 分析", requiresAuth: true },
+      meta: { title: "AI 分析", requiresAuth: true, noindex: true },
     },
     {
       path: "/terms",
@@ -69,4 +71,16 @@ router.beforeEach(async (to) => {
 router.afterEach((to) => {
   const title = typeof to.meta.title === "string" ? to.meta.title : null;
   document.title = title ? `${title} · AI 视频学习助手` : "AI 视频学习助手";
+  applyRobots(to.meta.noindex === true);
 });
+
+/** The SPA shell is one HTML document, so robots directives are swapped per route. */
+function applyRobots(noindex: boolean): void {
+  let tag = document.head.querySelector<HTMLMetaElement>('meta[name="robots"]');
+  if (!tag) {
+    tag = document.createElement("meta");
+    tag.name = "robots";
+    document.head.append(tag);
+  }
+  tag.content = noindex ? "noindex,nofollow" : "index,follow";
+}

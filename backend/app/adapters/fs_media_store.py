@@ -17,6 +17,7 @@ import shutil
 from collections.abc import Callable
 from pathlib import Path
 
+from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.ports import ResolvedVideo
@@ -29,8 +30,6 @@ _MERGE_MARKERS = ("[Merger]", "[ffmpeg]")
 _MEDIA_SUFFIXES = frozenset({".mp4", ".mkv", ".webm", ".mov", ".m4a", ".mp3"})
 
 _MESSAGE_UNAVAILABLE = "下载服务暂时不可用，请稍后再试"
-_MESSAGE_FAILED = "下载失败，请稍后重试"
-_MESSAGE_TIMEOUT = "下载超时，请稍后重试"
 
 
 class FsMediaStore:
@@ -84,14 +83,14 @@ class FsMediaStore:
         except TimeoutError as exc:
             process.kill()
             await process.wait()
-            raise AppError(504, ErrorCode.DOWNLOAD_FAILED, _MESSAGE_TIMEOUT) from exc
+            raise AppError(504, ErrorCode.DOWNLOAD_FAILED, messages.DOWNLOAD_TIMEOUT) from exc
 
         if returncode != 0:
             logger.warning(
                 "ytdlp_download_failed",
                 extra={"event": "ytdlp_download_failed", "returncode": returncode},
             )
-            raise AppError(502, ErrorCode.DOWNLOAD_FAILED, _MESSAGE_FAILED)
+            raise AppError(502, ErrorCode.DOWNLOAD_FAILED, messages.DOWNLOAD_FAILED)
 
         on_progress("merging", 1.0)
         return await asyncio.to_thread(_largest_media_file, destination)
@@ -121,5 +120,5 @@ def _largest_media_file(directory: Path) -> Path:
         if path.is_file() and path.suffix.lower() in _MEDIA_SUFFIXES
     ]
     if not candidates:
-        raise AppError(502, ErrorCode.DOWNLOAD_FAILED, _MESSAGE_FAILED)
+        raise AppError(502, ErrorCode.DOWNLOAD_FAILED, messages.DOWNLOAD_FAILED)
     return max(candidates, key=lambda path: path.stat().st_size)

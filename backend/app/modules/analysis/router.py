@@ -44,24 +44,10 @@ from .schemas import AnalysisHistoryItemOut, AnalysisOut, CreateAnalysisRequest
 
 router = APIRouter(prefix="/analyses", tags=["analysis"])
 
-_MANAGER_STATE_KEY = "analysis_manager"
-
 
 def get_analysis_manager(request: Request) -> AnalysisManager:
-    """The generation runner started by the application lifespan.
-
-    The lazy fallback only serves tests that build an app without a lifespan.
-    """
-    manager: AnalysisManager | None = getattr(request.app.state, _MANAGER_STATE_KEY, None)
-    if manager is None:
-        state = request.app.state
-        manager = AnalysisManager(
-            sessionmaker=state.sessionmaker,
-            adapters=state.adapters,
-            settings=state.settings,
-        )
-        setattr(state, _MANAGER_STATE_KEY, manager)
-    return manager
+    """The generation runner the application lifespan started and is shutting down."""
+    return request.app.state.analysis_manager
 
 
 @router.post("", response_model=AnalysisOut, status_code=201)

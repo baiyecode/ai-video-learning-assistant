@@ -15,6 +15,7 @@ from pathlib import Path
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.formatting import format_file_size
@@ -23,7 +24,6 @@ from app.modules.catalog.service import FORMATS_TTL
 from app.ports import Clock
 from app.timeutil import as_utc, required_utc
 
-from .manager import MESSAGE_DOWNLOAD_FAILED
 from .models import Download, DownloadStatus
 from .schemas import DownloadErrorOut, DownloadOut
 from .signing import SIGNED_URL_TTL, signed_file_path, verify_signature
@@ -31,10 +31,6 @@ from .signing import SIGNED_URL_TTL, signed_file_path, verify_signature
 MAX_RETRIES = 3
 VISITOR_WINDOW = timedelta(hours=1)
 
-_MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
-_MESSAGE_FORMATS_EXPIRED = "格式信息已过期，请重新解析该视频"
-_MESSAGE_DRM = "该视频受 DRM 保护，本产品不提供绕过 DRM 的解析或下载"
-_MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，本产品不提供绕过会员权限的解析或下载"
 _MESSAGE_DOWNLOAD_NOT_FOUND = "下载任务不存在或已过期"
 _MESSAGE_NOT_READY = "文件尚未准备完成，请稍候"
 _MESSAGE_FILE_EXPIRED = "文件已过期，请重新发起下载"
@@ -62,11 +58,11 @@ async def create_download(
     """
     video = await session.get(Video, video_id)
     if video is None:
-        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, _MESSAGE_VIDEO_NOT_FOUND)
+        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, messages.VIDEO_NOT_FOUND)
     if video.is_drm:
-        raise AppError(403, ErrorCode.DRM_PROTECTED, _MESSAGE_DRM)
+        raise AppError(403, ErrorCode.DRM_PROTECTED, messages.DRM_PROTECTED)
     if video.is_members_only:
-        raise AppError(403, ErrorCode.MEMBERS_ONLY, _MESSAGE_MEMBERS_ONLY)
+        raise AppError(403, ErrorCode.MEMBERS_ONLY, messages.MEMBERS_ONLY)
 
     max_duration = settings.download_max_duration_seconds
     if video.duration_seconds > max_duration:
@@ -91,7 +87,7 @@ async def create_download(
         raise AppError(
             409,
             ErrorCode.FORMATS_EXPIRED,
-            _MESSAGE_FORMATS_EXPIRED,
+            messages.FORMATS_EXPIRED,
             {"video_id": video.id},
         )
 
@@ -324,7 +320,7 @@ def to_out(download: Download, *, download_url: str | None) -> DownloadOut:
     if download.error_code and download.status in {DownloadStatus.FAILED, DownloadStatus.EXPIRED}:
         error = DownloadErrorOut(
             code=download.error_code,
-            message=download.error_message or MESSAGE_DOWNLOAD_FAILED,
+            message=download.error_message or messages.DOWNLOAD_FAILED,
         )
     return DownloadOut(
         id=download.id,

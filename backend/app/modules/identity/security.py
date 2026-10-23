@@ -102,13 +102,6 @@ def decode_access_token(token: str, settings: Settings, *, now: datetime) -> str
     return subject
 
 
-def ensure_utc(value: datetime) -> datetime:
-    """SQLite drops tzinfo; treat stored values as UTC and normalise for comparisons."""
-    if value.tzinfo is None:
-        return value.replace(tzinfo=UTC)
-    return value.astimezone(UTC)
-
-
 def set_refresh_cookie(response: Response, token: str, settings: Settings) -> None:
     response.set_cookie(
         key=settings.refresh_cookie_name,
@@ -136,7 +129,6 @@ __all__ = [
     "clear_refresh_cookie",
     "decode_access_token",
     "encode_access_token",
-    "ensure_utc",
     "hash_password",
     "hash_refresh_token",
     "new_refresh_token",

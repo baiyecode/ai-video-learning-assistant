@@ -20,11 +20,10 @@ import sys
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
+from app.timeutil import SHANGHAI
 from sqlalchemy.engine import make_url
 
-SHANGHAI = ZoneInfo("Asia/Shanghai")
 DEFAULT_DATABASE_URL = "sqlite+aiosqlite:///./data/app.db"
 DEFAULT_BACKUP_DIR = "./data/backups"
 DEFAULT_RETENTION = 7

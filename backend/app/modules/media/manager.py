@@ -30,6 +30,7 @@ from pathlib import Path
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app import messages
 from app.config import Settings
 from app.container import Adapters
 from app.errors import AppError, ErrorCode
@@ -43,9 +44,6 @@ from .signing import FILE_TTL, SIGNED_URL_TTL
 
 logger = logging.getLogger("app.modules.media")
 
-MESSAGE_DOWNLOAD_FAILED = "下载失败，请稍后重试"
-MESSAGE_RESTART_INTERRUPTED = "服务重启导致任务中断，请重试"
-_MESSAGE_TIMEOUT = "下载超时，请稍后重试"
 _MESSAGE_VIDEO_GONE = "视频信息不存在，请重新解析后再试"
 _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _MAX_STEM_LENGTH = 80
@@ -128,7 +126,7 @@ class DownloadManager:
             .values(
                 status=DownloadStatus.FAILED.value,
                 error_code=ErrorCode.DOWNLOAD_FAILED.value,
-                error_message=MESSAGE_RESTART_INTERRUPTED,
+                error_message=messages.DOWNLOAD_INTERRUPTED,
                 updated_at=now,
             )
         )
@@ -446,10 +444,10 @@ def _file_name(title: str, path: Path) -> str:
 
 def _failure_message(error: Exception | None) -> str:
     if isinstance(error, TimeoutError):
-        return _MESSAGE_TIMEOUT
+        return messages.DOWNLOAD_TIMEOUT
     if isinstance(error, AppError):
         return error.message
-    return MESSAGE_DOWNLOAD_FAILED
+    return messages.DOWNLOAD_FAILED
 
 
 def _remove_file(path: Path, root: Path) -> None:

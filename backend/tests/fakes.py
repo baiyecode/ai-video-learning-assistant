@@ -7,12 +7,10 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 from app.container import Adapters
 from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
-
-SHANGHAI = ZoneInfo("Asia/Shanghai")
+from app.timeutil import shanghai_day
 
 
 def sample_subtitle_track(language: str = "zh-Hans", *, automatic: bool = False) -> SubtitleTrack:
@@ -56,7 +54,7 @@ class FrozenClock:
         return self.instant
 
     def today(self) -> date:
-        return self.instant.astimezone(SHANGHAI).date()
+        return shanghai_day(self.instant)
 
     def advance(self, *, seconds: float = 0, days: int = 0) -> datetime:
         self.instant = self.instant + timedelta(seconds=seconds, days=days)

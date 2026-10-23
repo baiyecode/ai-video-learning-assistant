@@ -15,14 +15,13 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
-from zoneinfo import ZoneInfo
 
 from app.errors import AppError, ErrorCode
 from app.ports import BudgetLedger, Clock
+from app.timeutil import next_shanghai_midnight
 
-SHANGHAI = ZoneInfo("Asia/Shanghai")
 MINDMAP_MARKER = "## 思维导图"
 MESSAGE_ANALYSIS_FAILED = "AI 生成失败，请稍后重试"
 MESSAGE_BUDGET_EXHAUSTED = "今日 AI 预算已用完，请于 {reset}（北京时间）后再试"
@@ -316,10 +315,8 @@ def build_merge_prompt(plan: GenerationPlan, *, partial_summaries: Sequence[str]
 
 
 def budget_reset_at(clock: Clock) -> datetime:
-    """Next Asia/Shanghai midnight as a timezone-aware instant."""
-    local = clock.now().astimezone(SHANGHAI)
-    next_day = local.date() + timedelta(days=1)
-    return datetime(next_day.year, next_day.month, next_day.day, tzinfo=SHANGHAI)
+    """When the daily AI budget renews: the next Asia/Shanghai midnight."""
+    return next_shanghai_midnight(clock.now())
 
 
 async def ensure_budget(

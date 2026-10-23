@@ -15,6 +15,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.modules.catalog.models import Subtitle, Video
@@ -25,16 +26,14 @@ from app.timeutil import as_utc
 from . import generation, quota
 from .generation import MESSAGE_ANALYSIS_FAILED
 from .models import ACTIVE_STATUSES, Analysis, AnalysisStatus
-from .schemas import AnalysisErrorOut, AnalysisOut, AnalysisVideoOut
+from .schemas import AnalysisErrorOut, AnalysisOut, AnalysisVideoOut, QuotaOut
 
 logger = logging.getLogger("app.modules.analysis")
 
 MESSAGE_ANALYSIS_NOT_FOUND = "分析不存在或已失效"
-MESSAGE_SUBTITLES_UNAVAILABLE = "该视频没有可用字幕，暂不支持 AI 分析"
-MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
 MESSAGE_DRM_PROTECTED = "该视频受 DRM 保护，暂不支持 AI 分析"
 MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，暂不支持 AI 分析"
-MESSAGE_QUOTA_EXHAUSTED = "今日免费 Analysis 的 Quota 已用完，请明天再来"
+MESSAGE_QUOTA_EXHAUSTED = "今日 Analysis Quota 已用完，请于 {reset}（北京时间）后再试"
 MESSAGE_BUSY = "服务繁忙，请稍后重试"
 
 _MESSAGE_BY_ERROR_CODE = {
@@ -59,15 +58,16 @@ def _iso(value: datetime | None) -> str | None:
 
 def _quota_exhausted(clock: Clock, settings: Settings) -> AppError:
     limit = settings.analysis_daily_quota
+    resets_at = quota.next_reset_at(clock)
     return AppError(
         429,
         ErrorCode.QUOTA_EXHAUSTED,
-        MESSAGE_QUOTA_EXHAUSTED,
+        MESSAGE_QUOTA_EXHAUSTED.format(reset=resets_at.strftime("%Y-%m-%d %H:%M")),
         {
             "daily_limit": limit,
             "used": limit,
             "remaining": 0,
-            "resets_at": quota.next_reset_at(clock).isoformat(),
+            "resets_at": resets_at.isoformat(),
         },
     )
 
@@ -94,12 +94,12 @@ async def _create_once(
     account_id: str,
     video_id: str,
     force: bool,
-    rate_limiter: RateLimiter | None = None,
-    budget_ledger: BudgetLedger | None = None,
+    rate_limiter: RateLimiter,
+    budget_ledger: BudgetLedger,
 ) -> CreateResult:
     video = await session.get(Video, video_id)
     if video is None:
-        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, MESSAGE_VIDEO_NOT_FOUND)
+        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, messages.VIDEO_NOT_FOUND)
     if video.is_drm:
         raise AppError(403, ErrorCode.DRM_PROTECTED, MESSAGE_DRM_PROTECTED)
     if video.is_members_only:
@@ -110,7 +110,7 @@ async def _create_once(
         raise AppError(
             409,
             ErrorCode.SUBTITLES_UNAVAILABLE,
-            MESSAGE_SUBTITLES_UNAVAILABLE,
+            messages.SUBTITLES_UNAVAILABLE,
             {"video_id": video_id},
         )
 
@@ -134,38 +134,35 @@ async def _create_once(
     # Gates for a genuinely new Analysis only: reusing an in-progress or completed
     # result above costs neither rate-limit budget nor Quota. Both run before the
     # Quota reservation, so a rejection never consumes Quota.
-    if rate_limiter is not None and (
-        force or rate_limiter.last_tag("analyses.create", account_id) != video_id
-    ):
+    if force or rate_limiter.last_tag("analyses.create", account_id) != video_id:
         # A repeated *non-force* request for the Video that just started is an
         # idempotent retry (double click / two tabs), not a new-analysis attempt.
         rate_limiter.ensure("analyses.create", account_id)
-    if budget_ledger is not None:
-        # Gate on every call this Analysis will make (chunks + final merge), not on
-        # one call: a map-reduce run that starts without its full budget would run
-        # out halfway and waste the calls already paid for.
-        try:
-            plan = generation.build_plan(
-                title=video.title,
-                duration_seconds=video.duration_seconds,
-                subtitle_source=subtitle.source_type,
-                cues=generation.cues_from_stored(
-                    subtitle.cues_json, fallback_text=subtitle.text
-                ),
-                chunk_chars=settings.analysis_chunk_chars,
-                max_input_chars=settings.analysis_max_input_chars,
-            )
-            planned_calls = generation.planned_call_count(plan)
-        except ValueError:
-            # Empty Subtitle content is settled by generation as analysis_failed;
-            # the cheapest possible plan is still one call.
-            planned_calls = 1
-        await generation.ensure_budget(
-            budget_ledger,
-            estimated_usd=settings.analysis_cost_per_call_usd * planned_calls,
-            clock=clock,
-            daily_budget_usd=settings.daily_budget_usd,
+    # Gate on every call this Analysis will make (chunks + final merge), not on
+    # one call: a map-reduce run that starts without its full budget would run
+    # out halfway and waste the calls already paid for.
+    try:
+        plan = generation.build_plan(
+            title=video.title,
+            duration_seconds=video.duration_seconds,
+            subtitle_source=subtitle.source_type,
+            cues=generation.cues_from_stored(
+                subtitle.cues_json, fallback_text=subtitle.text
+            ),
+            chunk_chars=settings.analysis_chunk_chars,
+            max_input_chars=settings.analysis_max_input_chars,
         )
+        planned_calls = generation.planned_call_count(plan)
+    except ValueError:
+        # Empty Subtitle content is settled by generation as analysis_failed;
+        # the cheapest possible plan is still one call.
+        planned_calls = 1
+    await generation.ensure_budget(
+        budget_ledger,
+        estimated_usd=settings.analysis_cost_per_call_usd * planned_calls,
+        clock=clock,
+        daily_budget_usd=settings.daily_budget_usd,
+    )
 
     if not await quota.reserve(session, account_id, clock.today(), settings.analysis_daily_quota):
         raise _quota_exhausted(clock, settings)
@@ -202,8 +199,7 @@ async def _create_once(
 
     # Only a committed new row consumes the per-Account creation slot; the winner of
     # a concurrent race records here and the loser above never does.
-    if rate_limiter is not None:
-        rate_limiter.record("analyses.create", account_id, tag=video_id)
+    rate_limiter.record("analyses.create", account_id, tag=video_id)
     return CreateResult(analysis, video, True)
 
 
@@ -214,9 +210,9 @@ async def create_analysis(
     *,
     account_id: str,
     video_id: str,
+    rate_limiter: RateLimiter,
+    budget_ledger: BudgetLedger,
     force: bool = False,
-    rate_limiter: RateLimiter | None = None,
-    budget_ledger: BudgetLedger | None = None,
 ) -> CreateResult:
     """Create or reuse an Analysis. Only a genuinely new row starts generation."""
     for attempt in range(_MAX_WRITE_ATTEMPTS):
@@ -244,6 +240,23 @@ async def create_analysis(
             # WAL writers are serialised; retry reads the winner's row and reuses it.
             await asyncio.sleep(0.02 * (attempt + 1))
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+async def daily_quota(
+    session: AsyncSession, account_id: str, clock: Clock, settings: Settings
+) -> QuotaOut:
+    """This Account's Quota for the current day.
+
+    The Quota counters belong to this module: callers that only need to *show* them
+    (``/api/me``) read them here instead of digging through :mod:`.quota`.
+    """
+    snapshot = await quota.usage(session, account_id, clock, settings.analysis_daily_quota)
+    return QuotaOut(
+        daily_limit=snapshot.daily_limit,
+        used=snapshot.used,
+        remaining=snapshot.remaining,
+        resets_at=snapshot.resets_at.isoformat(),
+    )
 
 
 async def get_analysis(

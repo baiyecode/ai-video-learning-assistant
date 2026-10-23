@@ -5,12 +5,10 @@ import sqlite3
 from contextlib import closing
 from datetime import datetime
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pytest
+from app.timeutil import SHANGHAI
 from scripts.backup import create_backup, database_path_from_url, main
-
-SHANGHAI = ZoneInfo("Asia/Shanghai")
 
 
 def _make_database(path: Path) -> None:

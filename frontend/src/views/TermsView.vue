@@ -113,13 +113,13 @@ onMounted(async () => {
       <div class="space-y-1">
         <h2 class="text-xl font-semibold text-slate-900">五、举报方式</h2>
         <p class="text-sm text-slate-600">
-          提交后会生成可追踪的举报编号。请尽量提供具体链接与说明；联系方式仅用于核实，不会公开展示。
+          提交后会生成可追踪的举报编号。请尽量提供具体视频地址与说明；联系方式仅用于核实，不会公开展示。
         </p>
       </div>
 
       <form class="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" @submit.prevent="submitReport">
         <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
-          视频链接（可选）
+          视频地址（可选）
           <input
             v-model="form.url"
             type="text"

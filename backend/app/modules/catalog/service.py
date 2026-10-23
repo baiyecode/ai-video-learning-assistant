@@ -16,6 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.errors import AppError, ErrorCode
 from app.ports import Clock, ResolvedVideo, VideoSource, VideoUnavailableError
 from app.timeutil import as_utc
@@ -40,12 +41,6 @@ FORMATS_TTL = timedelta(minutes=10)
 SUPPORTED_PLATFORMS = frozenset({"youtube", "bilibili"})
 
 _MESSAGE_VIDEO_UNAVAILABLE = "视频不可用，可能已被删除、设为私密或受地区限制"
-_MESSAGE_DRM = "该视频受 DRM 保护，本产品不提供绕过 DRM 的解析或下载"
-_MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，本产品不提供绕过会员权限的解析或下载"
-_MESSAGE_RESOLVE_FAILED = "视频解析失败，请稍后重试"
-_MESSAGE_PLATFORM_UNSUPPORTED = "暂不支持该平台，请提供 B 站或 YouTube 的单个视频链接"
-_MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
-_MESSAGE_FORMATS_EXPIRED = "格式信息已过期，请重新解析该视频"
 
 
 async def resolve_video(
@@ -59,16 +54,16 @@ async def resolve_video(
     resolved = await _resolve_with_source(source, normalized_url)
 
     if resolved.is_drm:
-        raise AppError(403, ErrorCode.DRM_PROTECTED, _MESSAGE_DRM)
+        raise AppError(403, ErrorCode.DRM_PROTECTED, messages.DRM_PROTECTED)
     if resolved.is_members_only:
-        raise AppError(403, ErrorCode.MEMBERS_ONLY, _MESSAGE_MEMBERS_ONLY)
+        raise AppError(403, ErrorCode.MEMBERS_ONLY, messages.MEMBERS_ONLY)
 
     platform = resolved.platform.strip().lower()
     platform_video_id = resolved.platform_video_id.strip()
     if platform not in SUPPORTED_PLATFORMS:
-        raise AppError(422, ErrorCode.UNSUPPORTED_URL, _MESSAGE_PLATFORM_UNSUPPORTED)
+        raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_PLATFORM)
     if not platform_video_id:
-        raise AppError(502, ErrorCode.RESOLVE_FAILED, _MESSAGE_RESOLVE_FAILED)
+        raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED)
 
     video = await _upsert_video(
         session,
@@ -84,14 +79,14 @@ async def resolve_video(
 async def get_video(session: AsyncSession, clock: Clock, video_id: str) -> VideoDetailResponse:
     video = await session.get(Video, video_id)
     if video is None:
-        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, _MESSAGE_VIDEO_NOT_FOUND)
+        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, messages.VIDEO_NOT_FOUND)
 
     fetched_at = as_utc(video.formats_fetched_at)
     if fetched_at is None or clock.now() - fetched_at >= FORMATS_TTL:
         details: dict[str, Any] = {"video_id": video.id}
         if fetched_at is not None:
             details["formats_fetched_at"] = fetched_at.isoformat()
-        raise AppError(409, ErrorCode.FORMATS_EXPIRED, _MESSAGE_FORMATS_EXPIRED, details)
+        raise AppError(409, ErrorCode.FORMATS_EXPIRED, messages.FORMATS_EXPIRED, details)
 
     base = _resolve_response(
         video, has_subtitle=await subtitles.has_subtitle(session, video.id)
@@ -115,7 +110,7 @@ async def _resolve_with_source(source: VideoSource, url: str) -> ResolvedVideo:
             "video_resolve_failed",
             extra={"event": "video_resolve_failed", "error_type": type(exc).__name__},
         )
-        raise AppError(502, ErrorCode.RESOLVE_FAILED, _MESSAGE_RESOLVE_FAILED) from exc
+        raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED) from exc
 
 
 async def _upsert_video(

@@ -25,25 +25,10 @@ from .schemas import CreateDownloadRequest, DownloadOut
 
 router = APIRouter(prefix="/downloads", tags=["media"])
 
-_MANAGER_STATE_KEY = "download_manager"
-
 
 def get_download_manager(request: Request) -> DownloadManager:
-    """The manager started by the application lifespan.
-
-    The lazy fallback keeps lightweight unit tests working when they build an app
-    without running the lifespan; production always has the manager pre-started.
-    """
-    manager: DownloadManager | None = getattr(request.app.state, _MANAGER_STATE_KEY, None)
-    if manager is None:
-        state = request.app.state
-        manager = DownloadManager(
-            sessionmaker=state.sessionmaker,
-            adapters=state.adapters,
-            settings=state.settings,
-        )
-        setattr(state, _MANAGER_STATE_KEY, manager)
-    return manager
+    """The queue the application lifespan started and is shutting down."""
+    return request.app.state.download_manager
 
 
 async def _start_manager(
@@ -106,9 +91,7 @@ async def get_download(
         account_id=account.id if account is not None else None,
         visitor_ip=client_ip(request),
     )
-    manager: DownloadManager | None = getattr(request.app.state, _MANAGER_STATE_KEY, None)
-    if manager is not None:
-        out.queue_position = manager.queue_position(download_id)
+    out.queue_position = get_download_manager(request).queue_position(download_id)
     return out
 
 

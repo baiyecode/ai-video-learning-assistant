@@ -21,6 +21,7 @@ from typing import Any, Literal
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.errors import AppError, ErrorCode
 from app.ports import ResolvedVideo, SubtitleTrack, VideoSource
 
@@ -35,8 +36,6 @@ SubtitleFormat = Literal["srt", "vtt", "txt"]
 
 PREFERRED_LANGUAGES = ("zh-Hans", "zh", "en")
 
-_MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
-_MESSAGE_SUBTITLES_UNAVAILABLE = "该视频没有可用字幕，暂不支持 AI 分析"
 
 _MEDIA_TYPES: dict[str, str] = {
     "srt": "application/x-subrip",
@@ -184,13 +183,13 @@ async def has_subtitle(session: AsyncSession, video_id: str) -> bool:
 async def _require_subtitle(session: AsyncSession, video_id: str) -> tuple[Video, Subtitle]:
     video = await session.get(Video, video_id)
     if video is None:
-        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, _MESSAGE_VIDEO_NOT_FOUND)
+        raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, messages.VIDEO_NOT_FOUND)
     subtitle = await _find(session, video_id)
     if subtitle is None:
         raise AppError(
             409,
             ErrorCode.SUBTITLES_UNAVAILABLE,
-            _MESSAGE_SUBTITLES_UNAVAILABLE,
+            messages.SUBTITLES_UNAVAILABLE,
             {"video_id": video_id},
         )
     return video, subtitle

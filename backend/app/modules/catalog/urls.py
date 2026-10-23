@@ -18,6 +18,7 @@ import re
 import socket
 from urllib.parse import parse_qs, urlsplit
 
+from app import messages
 from app.errors import AppError, ErrorCode
 
 _YOUTUBE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
@@ -34,10 +35,6 @@ _YOUTUBE_HOSTS = {
 }
 _BILIBILI_VIDEO_HOSTS = {"bilibili.com", "m.bilibili.com"}
 _BILIBILI_SHORT_HOSTS = {"b23.tv"}
-
-_MESSAGE_UNSUPPORTED = "暂不支持该链接，请提供 B 站或 YouTube 的单个视频链接"
-_MESSAGE_PLAYLIST = "暂不支持播放列表、合集或收藏夹，请提供单个视频链接"
-_MESSAGE_LIVE = "暂不支持直播链接，请提供已发布的单个视频"
 
 
 def normalize_video_url(raw: str) -> str:
@@ -161,7 +158,7 @@ def _normalise_youtube(host: str, path: str, query: str) -> str:
     if clean_path in {"/playlist", "/playlist/"}:
         raise _playlist()
     if clean_path.startswith("/live/"):
-        raise AppError(422, ErrorCode.UNSUPPORTED_URL, _MESSAGE_LIVE)
+        raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.LIVE_NOT_SUPPORTED)
     if clean_path.startswith("/@"):
         raise _unsupported()
 
@@ -198,7 +195,7 @@ def _normalise_bilibili(host: str, path: str, query: str) -> str:
     clean_path = path.rstrip("/") or "/"
 
     if host == "live.bilibili.com" or clean_path.startswith("/live/"):
-        raise AppError(422, ErrorCode.UNSUPPORTED_URL, _MESSAGE_LIVE)
+        raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.LIVE_NOT_SUPPORTED)
     if clean_path.startswith(("/bangumi/", "/read/", "/opus/", "/festival/")):
         raise _unsupported()
     if host == "space.bilibili.com":
@@ -227,8 +224,8 @@ def _youtube_watch_url(video_id: str) -> str:
 
 
 def _unsupported() -> AppError:
-    return AppError(422, ErrorCode.UNSUPPORTED_URL, _MESSAGE_UNSUPPORTED)
+    return AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_URL)
 
 
 def _playlist() -> AppError:
-    return AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, _MESSAGE_PLAYLIST)
+    return AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, messages.PLAYLIST_NOT_SUPPORTED)
