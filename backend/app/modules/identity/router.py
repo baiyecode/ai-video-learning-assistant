@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.deps import get_clock, get_current_account, get_session, get_settings
 from app.errors import AppError, ErrorCode
+from app.modules.analysis import quota as analysis_quota
+from app.modules.analysis.schemas import QuotaOut
 from app.modules.identity.models import Account, Session
 from app.modules.identity.security import (
     clear_refresh_cookie,
@@ -64,8 +66,7 @@ class AuthResponse(BaseModel):
 
 class MeResponse(BaseModel):
     account: AccountOut
-    # Quota fields arrive with ticket #8; the contract already reserves the slot.
-    quota: None = None
+    quota: QuotaOut
 
 
 def _account_out(account: Account) -> AccountOut:
@@ -279,5 +280,21 @@ async def logout(
 
 
 @router.get("/me", response_model=MeResponse, summary="Current Account and quota")
-async def me(account: Account = Depends(get_current_account)) -> dict:
-    return {"account": _account_out(account), "quota": None}
+async def me(
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    clock: Clock = Depends(get_clock),
+) -> dict:
+    snapshot = await analysis_quota.usage(
+        db, account.id, clock, settings.analysis_daily_quota
+    )
+    return {
+        "account": _account_out(account),
+        "quota": QuotaOut(
+            daily_limit=snapshot.daily_limit,
+            used=snapshot.used,
+            remaining=snapshot.remaining,
+            resets_at=snapshot.resets_at.isoformat(),
+        ),
+    }

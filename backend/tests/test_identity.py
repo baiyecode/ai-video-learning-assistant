@@ -50,7 +50,12 @@ async def test_register_login_and_me_round_trip(client: AsyncClient) -> None:
     me = await client.get("/api/me", headers=bearer(response))
     assert me.status_code == 200
     assert me.json()["account"]["email"] == "learner@example.com"
-    assert me.json()["quota"] is None
+    assert me.json()["quota"] == {
+        "daily_limit": 3,
+        "used": 0,
+        "remaining": 3,
+        "resets_at": "2026-01-16T00:00:00+08:00",
+    }
 
     # Email is normalised, so logging in with different casing works.
     login = await client.post(

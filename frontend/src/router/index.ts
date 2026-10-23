@@ -32,6 +32,12 @@ export const router = createRouter({
       meta: { title: "我的 Analysis", requiresAuth: true },
     },
     {
+      path: "/analyses/:id",
+      name: "analysis",
+      component: () => import("@/views/AnalysisView.vue"),
+      meta: { title: "AI 总结", requiresAuth: true },
+    },
+    {
       path: "/terms",
       name: "terms",
       component: () => import("@/views/TermsView.vue"),
