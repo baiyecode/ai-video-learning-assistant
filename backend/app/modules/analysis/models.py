@@ -71,7 +71,8 @@ class Analysis(Base):
     # Snapshot of the Subtitle version used, so the UI can show 人工/自动 even if
     # the Video's Subtitle is re-selected later.
     subtitle_source: Mapped[str] = mapped_column(String(16), default="manual")
-    # True once the generation input was shortened (ticket #9 fills this in).
+    # True when the Subtitle exceeded the configured input budget and only chunks
+    # spread across the timeline (first/middle/last) were summarised (ticket #9).
     truncated: Mapped[bool] = mapped_column(default=False)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
