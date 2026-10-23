@@ -6,6 +6,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.modules.catalog.schemas import RETENTION_NOTICE
+
 
 class CreateDownloadRequest(BaseModel):
     video_id: str = Field(min_length=1, max_length=64)
@@ -36,3 +38,4 @@ class DownloadOut(BaseModel):
     url_expires_at: datetime | None = None
     file_expires_at: datetime | None = None
     can_retry: bool = False
+    retention_notice: str = RETENTION_NOTICE

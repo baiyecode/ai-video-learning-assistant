@@ -39,8 +39,8 @@ FORMATS_TTL = timedelta(minutes=10)
 SUPPORTED_PLATFORMS = frozenset({"youtube", "bilibili"})
 
 _MESSAGE_VIDEO_UNAVAILABLE = "视频不可用，可能已被删除、设为私密或受地区限制"
-_MESSAGE_DRM = "该视频受 DRM 保护，无法解析"
-_MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，暂不支持解析"
+_MESSAGE_DRM = "该视频受 DRM 保护，本产品不提供绕过 DRM 的解析或下载"
+_MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，本产品不提供绕过会员权限的解析或下载"
 _MESSAGE_RESOLVE_FAILED = "视频解析失败，请稍后重试"
 _MESSAGE_PLATFORM_UNSUPPORTED = "暂不支持该平台，请提供 B 站或 YouTube 的单个视频链接"
 _MESSAGE_VIDEO_NOT_FOUND = "视频不存在，请重新解析"
