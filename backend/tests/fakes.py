@@ -24,6 +24,8 @@ def sample_video(
     platform_video_id: str = "dQw4w9WgXcQ",
     title: str = "示例视频",
     duration_seconds: int = 300,
+    is_drm: bool = False,
+    is_members_only: bool = False,
 ) -> ResolvedVideo:
     return ResolvedVideo(
         platform=platform,
@@ -38,6 +40,8 @@ def sample_video(
             VideoFormat(format_id="bestaudio", label="仅音频", ext="m4a", has_video=False),
         ),
         subtitles=(sample_subtitle_track(),),
+        is_drm=is_drm,
+        is_members_only=is_members_only,
     )
 
 
