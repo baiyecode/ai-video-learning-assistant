@@ -131,6 +131,8 @@ class FakeSummarizer:
     - ``error_after``: emit this many chunks, then raise ``error``.
     - ``delay_seconds``: sleep between chunks (keeps an Analysis in progress).
     - ``hang_seconds``: sleep before yielding anything (exercises the timeout).
+    - ``responder``: derive the response from the prompt (map-reduce echo tests);
+      when set it replaces ``chunks``.
     """
 
     chunks: list[str] = field(default_factory=lambda: ["这是", "一段", "摘要"])
@@ -138,6 +140,7 @@ class FakeSummarizer:
     error_after: int | None = None
     delay_seconds: float = 0.0
     hang_seconds: float | None = None
+    responder: Callable[[str], str] | None = None
     prompts: list[str] = field(default_factory=list)
 
     def stream(self, *, prompt: str) -> AsyncIterator[str]:
@@ -148,6 +151,11 @@ class FakeSummarizer:
                 await asyncio.sleep(self.hang_seconds)
             if self.error is not None and self.error_after is None:
                 raise self.error
+            if self.responder is not None:
+                text = self.responder(prompt)
+                if text:
+                    yield text
+                return
             for index, chunk in enumerate(self.chunks):
                 if self.error_after is not None and index >= self.error_after:
                     raise self.error or RuntimeError("synthetic summarizer failure")
