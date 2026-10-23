@@ -239,6 +239,9 @@ async def test_fourth_analysis_is_rejected_with_reset_time_then_resets_next_day(
     headers = await _register(client)
     for index in range(3):
         video_id = await _resolve(client, adapters, f"quotavid00{index + 1}")
+        if index:
+            # #12: one new Analysis per Account per 10 seconds.
+            adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
         created = await _create(client, headers, video_id)
         assert created.status_code == 201, created.text
         await _wait_terminal(client, headers, created.json()["id"])
@@ -247,6 +250,7 @@ async def test_fourth_analysis_is_rejected_with_reset_time_then_resets_next_day(
     assert (quota["used"], quota["remaining"]) == (3, 0)
 
     fourth_video = await _resolve(client, adapters, "quotavid004")
+    adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
     rejected = await _create(client, headers, fourth_video)
     assert rejected.status_code == 429
     error = rejected.json()["error"]
@@ -289,6 +293,7 @@ async def test_failure_releases_quota_and_allows_retry(
 
     adapters.summarizer.error = None  # type: ignore[attr-defined]
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
+    adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]  # creation throttle
     retried = await _create(client, headers, video_id)
     assert retried.status_code == 201
     assert retried.json()["id"] != analysis_id
@@ -444,6 +449,7 @@ async def test_force_creates_a_new_analysis_and_consumes_quota(
     first_id = (await _create(client, headers, video_id)).json()["id"]
     await _wait_terminal(client, headers, first_id)
 
+    adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]  # creation throttle
     forced = await _create(client, headers, video_id, force=True)
     assert forced.status_code == 201
     assert forced.json()["id"] != first_id

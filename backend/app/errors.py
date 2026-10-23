@@ -72,12 +72,15 @@ class AppError(Exception):
         code: str | ErrorCode,
         message: str,
         details: dict[str, Any] | None = None,
+        headers: dict[str, str] | None = None,
     ) -> None:
         super().__init__(message)
         self.status = status
         self.code = code.value if isinstance(code, ErrorCode) else str(code)
         self.message = message
         self.details = details or {}
+        # Extra response headers (e.g. ``Retry-After`` for 429 rate limits).
+        self.headers = headers or {}
 
 
 def request_id_of(request: Request | None = None) -> str:
@@ -111,11 +114,15 @@ def _json_error(
     message: str,
     details: dict[str, Any] | None,
     request_id: str,
+    headers: dict[str, str] | None = None,
 ) -> JSONResponse:
+    response_headers = dict(headers or {})
+    if request_id:
+        response_headers.setdefault("X-Request-ID", request_id)
     return JSONResponse(
         status_code=status,
         content=error_body(code=code, message=message, details=details, request_id=request_id),
-        headers={"X-Request-ID": request_id} if request_id else None,
+        headers=response_headers or None,
     )
 
 
@@ -128,7 +135,9 @@ async def _handle_app_error(request: Request, exc: Exception) -> JSONResponse:
         extra={"event": "app_error", "code": exc.code, "status_code": exc.status},
         exc_info=exc if exc.status >= 500 else None,
     )
-    return _json_error(exc.status, exc.code, exc.message, exc.details, request_id)
+    return _json_error(
+        exc.status, exc.code, exc.message, exc.details, request_id, headers=exc.headers
+    )
 
 
 async def _handle_validation_error(request: Request, exc: Exception) -> JSONResponse:

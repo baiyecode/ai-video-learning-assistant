@@ -18,7 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.deps import get_clock, get_current_account, get_session, get_settings
+from app.deps import get_clock, get_current_account, get_rate_limiter, get_session, get_settings
 from app.errors import AppError, ErrorCode
 from app.modules.analysis import quota as analysis_quota
 from app.modules.analysis.schemas import QuotaOut
@@ -35,6 +35,7 @@ from app.modules.identity.security import (
     verify_password,
 )
 from app.ports import Clock
+from app.ratelimit import RateLimiter, client_ip
 
 router = APIRouter(tags=["identity"])
 
@@ -148,8 +149,9 @@ async def register(
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
     clock: Clock = Depends(get_clock),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> dict:
-    # Hook for ticket #12: per-IP registration rate limit (5/hour) goes here.
+    rate_limiter.hit("auth.register", client_ip(request))
     if len(payload.password) < PASSWORD_MIN_LENGTH:
         raise AppError(400, ErrorCode.WEAK_PASSWORD, f"密码至少需要 {PASSWORD_MIN_LENGTH} 位")
 
@@ -184,8 +186,9 @@ async def login(
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
     clock: Clock = Depends(get_clock),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> dict:
-    # Hook for ticket #12: per-IP login rate limit (10/15 minutes) goes here.
+    rate_limiter.hit("auth.login", client_ip(request))
     account = await db.scalar(select(Account).where(Account.email == payload.email.strip().lower()))
 
     if account is None:

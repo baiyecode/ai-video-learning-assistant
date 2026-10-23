@@ -20,6 +20,21 @@ def _never_talk_to_sentry(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SENTRY_DSN", raising=False)
 
 
+@pytest.fixture(autouse=True)
+def _no_real_dns(monkeypatch: pytest.MonkeyPatch) -> None:
+    """SSRF checks resolve allowed hosts; tests must never hit real DNS.
+
+    A test may override this with its own ``monkeypatch`` (on the resolver function
+    or on ``socket.getaddrinfo``) to exercise private-address rejection.
+    """
+    monkeypatch.setattr(
+        "app.modules.catalog.urls.socket.getaddrinfo",
+        lambda *args, **kwargs: [
+            (2, 1, 6, "", ("93.184.216.34", 0)),
+        ],
+    )
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """Test settings: isolated SQLite file, no env file, no external services."""

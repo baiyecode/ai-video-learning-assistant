@@ -14,6 +14,9 @@ import { Transformer, type ITransformResult } from "markmap-lib";
 const SCRIPT_BLOCK = /<(script|style)\b[^>]*>[\s\S]*?<\/\1\s*>/gi;
 const HTML_COMMENT = /<!--[\s\S]*?-->/g;
 const HTML_TAG = /<\/?[a-z][a-z0-9-]*(?:\s[^>]*)?\/?>/gi;
+/** Markdown links to executable schemes keep their label but lose the link. */
+const UNSAFE_MARKDOWN_LINK =
+  /\[([^\]]*)\]\(\s*(?:javascript|vbscript|data)\s*:(?:[^()\n]|\([^()\n]*\))*\)/gi;
 
 /** Inline markup markmap needs for labels; images, scripts and frames are never useful. */
 const LABEL_TAGS = [
@@ -47,6 +50,7 @@ export function sanitizeMindmapMarkdown(source: string): string {
     .replace(/\r\n?/g, "\n")
     .replace(HTML_COMMENT, "")
     .replace(SCRIPT_BLOCK, "")
+    .replace(UNSAFE_MARKDOWN_LINK, "$1")
     .replace(HTML_TAG, "")
     .split("\n")
     .map((line) => line.trimEnd())

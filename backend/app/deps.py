@@ -13,6 +13,7 @@ from .errors import AppError, ErrorCode
 from .modules.identity.models import Account
 from .modules.identity.security import AccessTokenError, decode_access_token
 from .ports import Clock
+from .ratelimit import RateLimiter, build_rules
 
 
 def get_settings(request: Request) -> Settings:
@@ -25,6 +26,16 @@ def get_adapters(request: Request) -> Adapters:
 
 def get_clock(adapters: Adapters = Depends(get_adapters)) -> Clock:
     return adapters.clock
+
+
+def get_rate_limiter(request: Request, settings: Settings = Depends(get_settings)) -> RateLimiter:
+    """One in-memory limiter per application instance (created lazily on first use)."""
+    limiter: RateLimiter | None = getattr(request.app.state, "rate_limiter", None)
+    if limiter is None:
+        adapters = request.app.state.adapters
+        limiter = RateLimiter(clock=adapters.clock, rules=build_rules(settings))
+        request.app.state.rate_limiter = limiter
+    return limiter
 
 
 async def get_session(request: Request) -> AsyncIterator[AsyncSession]:

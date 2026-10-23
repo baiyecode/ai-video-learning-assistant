@@ -18,9 +18,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.modules.catalog.models import Subtitle, Video
-from app.ports import Clock
+from app.ports import BudgetLedger, Clock
+from app.ratelimit import RateLimiter
 
-from . import quota
+from . import generation, quota
 from .generation import MESSAGE_ANALYSIS_FAILED
 from .models import ACTIVE_STATUSES, Analysis, AnalysisStatus
 from .schemas import AnalysisErrorOut, AnalysisOut, AnalysisVideoOut
@@ -98,6 +99,8 @@ async def _create_once(
     account_id: str,
     video_id: str,
     force: bool,
+    rate_limiter: RateLimiter | None = None,
+    budget_ledger: BudgetLedger | None = None,
 ) -> CreateResult:
     video = await session.get(Video, video_id)
     if video is None:
@@ -133,6 +136,23 @@ async def _create_once(
         if completed is not None:
             return CreateResult(completed, video, False)
 
+    # Gates for a genuinely new Analysis only: reusing an in-progress or completed
+    # result above costs neither rate-limit budget nor Quota. Both run before the
+    # Quota reservation, so a rejection never consumes Quota.
+    if rate_limiter is not None and (
+        force or rate_limiter.last_tag("analyses.create", account_id) != video_id
+    ):
+        # A repeated *non-force* request for the Video that just started is an
+        # idempotent retry (double click / two tabs), not a new-analysis attempt.
+        rate_limiter.ensure("analyses.create", account_id)
+    if budget_ledger is not None:
+        await generation.ensure_budget(
+            budget_ledger,
+            estimated_usd=settings.analysis_cost_per_call_usd,
+            clock=clock,
+            daily_budget_usd=settings.daily_budget_usd,
+        )
+
     if not await quota.reserve(session, account_id, clock.today(), settings.analysis_daily_quota):
         raise _quota_exhausted(clock, settings)
 
@@ -162,6 +182,10 @@ async def _create_once(
         video = await session.get(Video, video_id)
         return CreateResult(active, video, False)
 
+    # Only a committed new row consumes the per-Account creation slot; the winner of
+    # a concurrent race records here and the loser above never does.
+    if rate_limiter is not None:
+        rate_limiter.record("analyses.create", account_id, tag=video_id)
     return CreateResult(analysis, video, True)
 
 
@@ -173,6 +197,8 @@ async def create_analysis(
     account_id: str,
     video_id: str,
     force: bool = False,
+    rate_limiter: RateLimiter | None = None,
+    budget_ledger: BudgetLedger | None = None,
 ) -> CreateResult:
     """Create or reuse an Analysis. Only a genuinely new row starts generation."""
     for attempt in range(_MAX_WRITE_ATTEMPTS):
@@ -184,6 +210,8 @@ async def create_analysis(
                 account_id=account_id,
                 video_id=video_id,
                 force=force,
+                rate_limiter=rate_limiter,
+                budget_ledger=budget_ledger,
             )
         except OperationalError as exc:
             await session.rollback()

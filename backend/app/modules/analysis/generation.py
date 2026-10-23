@@ -15,12 +15,17 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo
 
-from app.ports import BudgetLedger
+from app.errors import AppError, ErrorCode
+from app.ports import BudgetLedger, Clock
 
+SHANGHAI = ZoneInfo("Asia/Shanghai")
 MINDMAP_MARKER = "## 思维导图"
 MESSAGE_ANALYSIS_FAILED = "AI 生成失败，请稍后重试"
+MESSAGE_BUDGET_EXHAUSTED = "今日 AI 预算已用完，请于 {reset}（北京时间）后再试"
 
 _SOURCE_LABELS = {"manual": "人工字幕", "auto": "自动字幕"}
 
@@ -305,13 +310,39 @@ def build_merge_prompt(plan: GenerationPlan, *, partial_summaries: Sequence[str]
     )
 
 
-async def ensure_budget(ledger: BudgetLedger) -> None:
-    """Hook for ticket #12: refuse generation when the global AI budget is exhausted.
+def budget_reset_at(clock: Clock) -> datetime:
+    """Next Asia/Shanghai midnight as a timezone-aware instant."""
+    local = clock.now().astimezone(SHANGHAI)
+    next_day = local.date() + timedelta(days=1)
+    return datetime(next_day.year, next_day.month, next_day.day, tzinfo=SHANGHAI)
 
-    #12 replaces the body with ``can_spend``/``record`` calls raising
-    ``budget_exhausted``; #8 deliberately has no budget policy.
+
+async def ensure_budget(
+    ledger: BudgetLedger,
+    *,
+    estimated_usd: float,
+    clock: Clock,
+    daily_budget_usd: float,
+) -> None:
+    """Raise ``budget_exhausted`` when one more call would cross the daily budget.
+
+    Called when a genuinely new Analysis is created (before Quota is reserved) and
+    again right before generation. Viewing completed Analyses never calls this.
     """
-    del ledger
+    if await ledger.can_spend(estimated_usd):
+        return
+
+    reset_at = budget_reset_at(clock)
+    raise AppError(
+        429,
+        ErrorCode.BUDGET_EXHAUSTED,
+        MESSAGE_BUDGET_EXHAUSTED.format(reset=reset_at.strftime("%Y-%m-%d %H:%M")),
+        {
+            "daily_budget_usd": daily_budget_usd,
+            "estimated_usd": estimated_usd,
+            "resets_at": reset_at.isoformat(),
+        },
+    )
 
 
 class OutputSplitter:
