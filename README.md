@@ -19,6 +19,8 @@ backend/                 FastAPI 模块化单体（Python 3.12+，uv 管理）
     deps.py              get_settings / get_adapters / get_session / get_clock
     adapters/            生产适配器（未实现的在调用时抛 NotImplementedError）
     modules/             catalog / identity / media / analysis / ops 的空路由器
+    modules/ops/         /health 检查、Sentry 初始化
+  scripts/backup.py      SQLite 在线备份 + 保留策略
   tests/                 HTTP 接缝测试、fakes.py 测试替身
 frontend/                Vue 3 + Vite + TypeScript + Tailwind + Pinia + vue-router
   src/lib/api.ts         统一 fetch 封装（错误解析、401 刷新一次）
@@ -80,7 +82,50 @@ docker compose config     # 校验配置
 docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 ```
 
-`web` 由 nginx 提供 SPA 静态文件，并把 `/api/` 与 `/health` 反向代理到 `api:8000`（SSE 已关闭缓冲）。SQLite 与媒体文件放在 `app-data` 卷的 `/data`。
+`web` 由 nginx 提供 SPA 静态文件，并把 `/api/` 与 `/health` 反向代理到 `api:8000`（SSE 已关闭缓冲）。SQLite 在 `app-data` 卷的 `/data`，下载的媒体文件在 `media` 卷的 `/media`，备份在 `backups` 卷的 `/backups`。`api`、`backup`、`web` 均为 `restart: unless-stopped`，时区 `Asia/Shanghai`。
+
+## 运维
+
+### 日志与 request_id
+
+- 日志以单行 JSON 输出到 stdout：`timestamp`、`level`、`logger`、`message`、`request_id`，请求期间还包括 `method`、`path`、`status`、`duration_ms`，错误日志带 `error_code`。
+- 每个请求都会获得 `X-Request-ID`（合法的入站值会被沿用），响应头与错误响应体 `error.request_id` 都返回该值。
+- 定位一次失败请求：`docker compose logs api | grep <request_id>`，可看到 `request_completed` 与对应的 `app_error` / `unhandled_exception`。
+- Sentry 可选：设置 `SENTRY_DSN` 后自动初始化（事件带 `request_id` tag）；为空则完全禁用，不发送任何数据。`SENTRY_TRACES_SAMPLE_RATE` 控制性能采样率。
+
+### 健康检查
+
+`GET /health` 返回 200（`status: "ok"`）或 503（`status: "degraded"`），`checks` 包含：
+
+- `database`：`PRAGMA quick_check` 可读、临时写入成功、`journal_mode`（应为 `wal`）。
+- `disk`：媒体目录（`APP_MEDIA_ROOT`，默认 `<APP_DATA_DIR>/media`）可创建并写入探针文件。
+- `process`：进程存活与 PID。
+
+`version` 为后端版本。Docker healthcheck 复用该接口，失败时容器会被标记 unhealthy 并按重启策略自动重启。
+
+### 备份与恢复
+
+`backup` 服务启动后立即执行一次，之后每 24 小时执行 `python -m scripts.backup`；使用 SQLite 在线备份 API，写入 `backups` 卷的 `app-YYYYmmdd-HHMMSS.db`，每个备份做 `PRAGMA integrity_check`，默认保留最近 7 份（`BACKUP_RETENTION`）。
+
+```bash
+# 手动触发一次
+docker compose exec backup python -m scripts.backup
+# 查看
+docker compose exec backup ls -lh /backups
+# 拷出宿主机
+docker compose cp backup:/backups/app-20261023-020000.db ./app-backup.db
+```
+
+恢复（会丢失备份时间点之后的数据）：
+
+```bash
+docker compose stop api backup
+docker compose cp ./app-backup.db api:/data/app.db
+docker compose run --rm --entrypoint sh api -c 'rm -f /data/app.db-wal /data/app.db-shm'
+docker compose start api backup
+```
+
+本地没有 Docker 时可直接运行：`cd backend && APP_DATABASE_URL=... BACKUP_DIR=... uv run python -m scripts.backup`。
 
 ## 约定（后续 ticket 必须遵守）
 

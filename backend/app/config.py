@@ -26,6 +26,8 @@ class Settings(BaseSettings):
 
     database_url: str = "sqlite+aiosqlite:///./data/app.db"
     data_dir: Path = Path("./data")
+    # Optional separate mount for downloaded media; defaults to ``<data_dir>/media``.
+    media_root: Path | None = None
     log_level: str = "INFO"
     cors_origins: list[str] = Field(default_factory=list)
 
@@ -37,7 +39,7 @@ class Settings(BaseSettings):
 
     @property
     def media_dir(self) -> Path:
-        return self.data_dir / "media"
+        return self.media_root if self.media_root is not None else self.data_dir / "media"
 
     @property
     def is_production(self) -> bool:

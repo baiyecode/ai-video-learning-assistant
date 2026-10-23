@@ -14,6 +14,12 @@ from fastapi import FastAPI
 from tests.fakes import make_fake_adapters
 
 
+@pytest.fixture(autouse=True)
+def _never_talk_to_sentry(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Tests must never initialise a real Sentry client, even on a developer machine."""
+    monkeypatch.delenv("SENTRY_DSN", raising=False)
+
+
 @pytest.fixture
 def settings(tmp_path: Path) -> Settings:
     """Test settings: isolated SQLite file, no env file, no external services."""

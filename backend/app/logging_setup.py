@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import sys
 import time
 from contextvars import ContextVar
 from datetime import UTC, datetime
@@ -22,7 +23,7 @@ _SAFE_REQUEST_ID = re.compile(r"^[A-Za-z0-9._:-]{1,64}$")
 _EXTRA_FIELDS = (
     "event",
     "code",
-    "status_code",
+    "error_code",
     "method",
     "path",
     "duration_ms",
@@ -41,10 +42,18 @@ class JsonFormatter(logging.Formatter):
             "message": record.getMessage(),
             "request_id": request_id_var.get() or None,
         }
+        status = getattr(record, "status", None)
+        if status is None:
+            status = getattr(record, "status_code", None)
+        if status is not None:
+            payload["status"] = status
         for key in _EXTRA_FIELDS:
             value = getattr(record, key, None)
             if value is not None:
                 payload[key] = value
+        # Error handlers pass ``code``; the log contract calls the stable code ``error_code``.
+        if "error_code" not in payload and payload.get("code") is not None:
+            payload["error_code"] = payload.pop("code")
         if record.exc_info:
             payload["exception"] = self.formatException(record.exc_info)
         return json.dumps(payload, ensure_ascii=False, default=str)
@@ -64,7 +73,7 @@ def configure_logging(level: str = "INFO") -> None:
 
     json_handlers = [h for h in root.handlers if getattr(h, _JSON_HANDLER_MARKER, False)]
     if not json_handlers:
-        handler = logging.StreamHandler()
+        handler = logging.StreamHandler(sys.stdout)
         handler.setFormatter(JsonFormatter())
         setattr(handler, _JSON_HANDLER_MARKER, True)
         root.addHandler(handler)
@@ -91,6 +100,7 @@ class RequestContextMiddleware:
         token = request_id_var.set(request_id)
         status_code = 500
         started = time.perf_counter()
+        failed = False
 
         async def send_with_request_id(message: Message) -> None:
             nonlocal status_code
@@ -101,6 +111,11 @@ class RequestContextMiddleware:
 
         try:
             await self.app(scope, receive, send_with_request_id)
+        except Exception:
+            # Keep the contextvar set: Starlette's outer ServerErrorMiddleware logs and
+            # hands off to Sentry after this middleware returns, and both need the id.
+            failed = True
+            raise
         finally:
             duration_ms = round((time.perf_counter() - started) * 1000, 2)
             level = logging.DEBUG if scope.get("path") == "/health" else logging.INFO
@@ -109,13 +124,14 @@ class RequestContextMiddleware:
                 "request_completed",
                 extra={
                     "event": "request_completed",
-                    "status_code": status_code,
+                    "status": status_code,
                     "method": scope.get("method"),
                     "path": scope.get("path"),
                     "duration_ms": duration_ms,
                 },
             )
-            request_id_var.reset(token)
+            if not failed:
+                request_id_var.reset(token)
 
 
 def _incoming_request_id(scope: Scope) -> str | None:
