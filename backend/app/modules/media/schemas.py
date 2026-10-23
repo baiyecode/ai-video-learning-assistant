@@ -38,4 +38,6 @@ class DownloadOut(BaseModel):
     url_expires_at: datetime | None = None
     file_expires_at: datetime | None = None
     can_retry: bool = False
+    # 1-based FIFO position while ``queued``; ``None`` once running or terminal.
+    queue_position: int | None = None
     retention_notice: str = RETENTION_NOTICE
