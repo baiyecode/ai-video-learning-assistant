@@ -116,6 +116,9 @@ async def _spend_all_quota(
         assert created.status_code == 201, created.text
         ids.append(created.json()["id"])
         await _wait_terminal(client, headers, created.json()["id"])
+        # #12 throttles new Analyses to one per 10s per Account; this test is about
+        # Quota, so step past the window before the next creation.
+        adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
     return ids
 
 
