@@ -1,0 +1,45 @@
+name: ai-video-learning-assistant
+
+services:
+  api:
+    build:
+      context: ./backend
+    environment:
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_LOG_LEVEL: INFO
+      # Set APP_SECRET_KEY in a root .env file before deploying.
+      APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-only-change-me}
+      APP_DATABASE_URL: sqlite+aiosqlite:////data/app.db
+      APP_DATA_DIR: /data
+      APP_CORS_ORIGINS: "[]"
+      APP_DEEPSEEK_API_KEY: ${APP_DEEPSEEK_API_KEY:-}
+      APP_DEEPSEEK_BASE_URL: ${APP_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
+      APP_DEEPSEEK_MODEL: ${APP_DEEPSEEK_MODEL:-deepseek-chat}
+      APP_DAILY_BUDGET_USD: ${APP_DAILY_BUDGET_USD:-10}
+    volumes:
+      - app-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3)"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  web:
+    build:
+      context: ./frontend
+    ports:
+      - "${WEB_PORT:-8080}:80"
+    depends_on:
+      api:
+        condition: service_healthy
+    restart: unless-stopped
+
+volumes:
+  app-data:

@@ -1,0 +1,32 @@
+# Environment files (never commit real secrets)
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+data/
+
+# Node / frontend
+node_modules/
+frontend/dist/
+.vite/
+*.tsbuildinfo
+
+# Playwright
+frontend/playwright-report/
+frontend/test-results/
+frontend/blob-report/
+frontend/.playwright/
+
+# Logs / editors / OS
+*.log
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
