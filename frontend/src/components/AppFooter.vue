@@ -7,7 +7,7 @@
       <nav class="flex items-center gap-4">
         <RouterLink to="/terms" class="transition-colors hover:text-slate-900">使用条款</RouterLink>
         <RouterLink to="/terms#report" class="transition-colors hover:text-slate-900">
-          滥用举报
+          举报/投诉
         </RouterLink>
       </nav>
     </div>

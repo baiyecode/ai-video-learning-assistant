@@ -24,6 +24,8 @@ export interface DownloadDto {
   url_expires_at: string | null;
   file_expires_at: string | null;
   can_retry: boolean;
+  /** 1-based FIFO position while queued; null once running or terminal. */
+  queue_position?: number | null;
 }
 
 const STATUS_LABELS: Record<string, string> = {
@@ -49,6 +51,12 @@ export function isTerminalStatus(status: string): boolean {
 export function formatProgress(progress: number): string {
   const value = Number.isFinite(progress) ? Math.min(1, Math.max(0, progress)) : 0;
   return `${Math.round(value * 100)}%`;
+}
+
+/** `2` → `（第 2 位）`; unknown or invalid positions render as an empty string. */
+export function formatQueuePosition(position: number | null | undefined): string {
+  if (typeof position !== "number" || !Number.isFinite(position) || position < 1) return "";
+  return `（第 ${Math.floor(position)} 位）`;
 }
 
 /** Whole seconds left until `expiresAt`; expired or unparsable input is `0`. */

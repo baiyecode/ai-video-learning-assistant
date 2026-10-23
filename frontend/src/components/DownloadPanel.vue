@@ -5,14 +5,22 @@ import {
   downloadStatusLabel,
   formatCountdown,
   formatProgress,
+  formatQueuePosition,
   isTerminalStatus,
   remainingSeconds,
 } from "@/lib/download";
+import { isComplianceAcknowledged } from "@/lib/compliance";
 import { formatFileSize } from "@/lib/video";
 import type { VideoDto, VideoFormatDto } from "@/lib/video";
 import { useDownloadStore } from "@/stores/download";
 
-const props = defineProps<{ video: VideoDto; formats: VideoFormatDto[] }>();
+const props = withDefaults(
+  defineProps<{ video: VideoDto; formats: VideoFormatDto[]; complianceRequired?: boolean }>(),
+  { complianceRequired: false },
+);
+// The compliance gate is owned by HomeView: it shows the notice and calls ``retry``
+// once the acknowledgement is persisted. Ticket #14 keeps this hook tiny on purpose.
+const emit = defineEmits<{ "compliance-required": [retry: () => void] }>();
 
 const store = useDownloadStore();
 const selectedFormatId = ref(props.formats[0]?.format_id ?? "");
@@ -41,7 +49,9 @@ const failureMessage = computed(
   () => store.error?.message ?? download.value?.error?.message ?? "下载失败，请稍后重试",
 );
 const hint = computed(() => {
-  if (status.value === "queued") return "正在排队，请保持页面打开。";
+  if (status.value === "queued") {
+    return `正在排队${formatQueuePosition(download.value?.queue_position)}，请保持页面打开。`;
+  }
   if (status.value === "downloading") return "正在从平台下载文件…";
   if (status.value === "merging") return "正在合并音视频…";
   return "";
@@ -54,6 +64,10 @@ function formatOptionLabel(format: VideoFormatDto): string {
 
 function startDownload(): void {
   if (!canStart.value) return;
+  if (props.complianceRequired && !isComplianceAcknowledged()) {
+    emit("compliance-required", startDownload);
+    return;
+  }
   void store.start(props.video.id, selectedFormatId.value);
 }
 
@@ -167,15 +181,16 @@ onBeforeUnmount(() => {
         <p class="text-red-700">{{ failureMessage }}</p>
         <div class="flex flex-wrap items-center gap-3">
           <button
-            v-if="download.can_retry"
             type="button"
             class="rounded-md border border-slate-300 px-3 py-1 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:text-slate-400"
-            :disabled="store.starting"
+            :disabled="!download.can_retry || store.starting"
             @click="retryDownload"
           >
             {{ store.starting ? "正在重试…" : "重试" }}
           </button>
-          <span v-else class="text-xs text-slate-500">重试次数已达上限，请重新发起下载。</span>
+          <span v-if="!download.can_retry" class="text-xs text-slate-500">
+            重试次数已达上限，请重新发起下载。
+          </span>
           <span v-if="download.error" class="text-xs text-slate-400">
             错误代码：{{ download.error.code }}
           </span>

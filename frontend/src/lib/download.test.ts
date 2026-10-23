@@ -4,6 +4,7 @@ import {
   downloadStatusLabel,
   formatCountdown,
   formatProgress,
+  formatQueuePosition,
   isTerminalStatus,
   remainingSeconds,
 } from "@/lib/download";
@@ -48,6 +49,20 @@ describe("formatProgress", () => {
     expect(formatProgress(-0.2)).toBe("0%");
     expect(formatProgress(1.7)).toBe("100%");
     expect(formatProgress(Number.NaN)).toBe("0%");
+  });
+});
+
+describe("formatQueuePosition", () => {
+  it("renders the 1-based FIFO position", () => {
+    expect(formatQueuePosition(1)).toBe("（第 1 位）");
+    expect(formatQueuePosition(4)).toBe("（第 4 位）");
+  });
+
+  it("renders nothing when the task is not waiting", () => {
+    expect(formatQueuePosition(null)).toBe("");
+    expect(formatQueuePosition(undefined)).toBe("");
+    expect(formatQueuePosition(0)).toBe("");
+    expect(formatQueuePosition(Number.NaN)).toBe("");
   });
 });
 

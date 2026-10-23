@@ -10,6 +10,8 @@ from pydantic import BaseModel, Field
 from app.ports import SubtitleTrack, VideoFormat
 
 LEGAL_NOTICE = "仅限个人备份或已获授权内容"
+# Surfaced wherever a Download's lifecycle is described so the copy stays identical.
+RETENTION_NOTICE = "临时文件将在 1 小时后自动删除"
 
 
 class ResolveVideoRequest(BaseModel):
@@ -96,6 +98,7 @@ class ResolveResponse(BaseModel):
     subtitles: list[SubtitleOut]
     can_analyze: bool
     resolve_notice: str
+    retention_notice: str = RETENTION_NOTICE
 
 
 class VideoDetailResponse(ResolveResponse):

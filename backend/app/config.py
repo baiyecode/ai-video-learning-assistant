@@ -39,6 +39,16 @@ class Settings(BaseSettings):
     # ``None`` means: Secure in production, relaxed for local development/tests.
     auth_cookie_secure: bool | None = None
 
+    # Download resource boundaries (see docs/adr/0001-single-vps-sqlite.md).
+    download_global_concurrency: int = 5
+    download_account_concurrency: int = 2
+    download_visitor_concurrency: int = 1
+    download_visitor_hourly_limit: int = 5
+    download_max_duration_seconds: int = 2 * 60 * 60
+    download_max_file_size_bytes: int = 2 * 1024**3
+    # How often the in-process cleanup task looks for expired files. Zero disables it.
+    download_cleanup_interval_seconds: float = 60.0
+
     # Adapter configuration (consumed by the production adapters in later tickets).
     deepseek_api_key: str = ""
     deepseek_base_url: str = "https://api.deepseek.com"

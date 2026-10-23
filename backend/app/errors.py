@@ -40,6 +40,8 @@ class ErrorCode(StrEnum):
     DOWNLOAD_NOT_READY = "download_not_ready"
     DOWNLOAD_FAILED = "download_failed"
     DOWNLOAD_LIMIT_REACHED = "download_limit_reached"
+    DOWNLOAD_TOO_LONG = "download_too_long"
+    DOWNLOAD_TOO_LARGE = "download_too_large"
     FILE_EXPIRED = "file_expired"
     INVALID_SIGNATURE = "invalid_signature"
     TOO_MANY_REQUESTS = "too_many_requests"

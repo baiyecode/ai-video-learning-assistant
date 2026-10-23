@@ -1,13 +1,19 @@
-"""In-process Download queue and worker.
+"""In-process Download dispatcher and worker pool.
 
 The manager lives on ``app.state.download_manager`` (created lazily by the router, so
-``main.py`` stays untouched). One FIFO worker executes jobs sequentially; ticket #6
-adds the global/visitor/account concurrency limits on top of this seam.
+``main.py`` stays untouched). A single dispatcher drains a FIFO waiting list and
+launches one worker per job while the global, per-Account and per-visitor-IP caps
+allow. Work over a cap *waits*; it never fails. The hourly visitor creation cap is
+the only rejecting limit and lives in the service layer.
 
 Progress callbacks are synchronous by port contract, so they push onto an asyncio
 queue drained by a small "pump" coroutine that persists status/progress. The worker
 drains the pump before writing the terminal row, which keeps ``ready``/``failed``
 from being overwritten by a late ``merging`` update.
+
+``wait_idle()`` resolves when the waiting list and all workers are empty, which makes
+tests deterministic without sleeping. ``cleanup_expired()`` is public so tests can
+advance the ``Clock`` instead of waiting for the periodic task.
 """
 
 from __future__ import annotations
@@ -15,8 +21,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+from collections import deque
+from collections.abc import Collection
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.config import Settings
@@ -31,10 +42,20 @@ from .signing import FILE_TTL, SIGNED_URL_TTL
 logger = logging.getLogger("app.modules.media")
 
 MESSAGE_DOWNLOAD_FAILED = "下载失败，请稍后重试"
+MESSAGE_RESTART_INTERRUPTED = "服务重启导致任务中断，请重试"
 _MESSAGE_TIMEOUT = "下载超时，请稍后重试"
 _MESSAGE_VIDEO_GONE = "视频信息不存在，请重新解析后再试"
 _UNSAFE_FILENAME_CHARS = re.compile(r'[\\/:*?"<>|\x00-\x1f]')
 _MAX_STEM_LENGTH = 80
+
+
+@dataclass(frozen=True, slots=True)
+class _Job:
+    """Queue entry. Ownership is captured at submit time so caps need no DB reads."""
+
+    download_id: str
+    account_id: str | None
+    visitor_ip: str | None
 
 
 class DownloadManager:
@@ -49,35 +70,153 @@ class DownloadManager:
         self._adapters = adapters
         self._settings = settings
         self._clock = adapters.clock
-        self._queue: asyncio.Queue[str] = asyncio.Queue()
-        self._worker: asyncio.Task[None] | None = None
 
-    def submit(self, download_id: str) -> None:
-        """Queue a ``queued`` Download and make sure the worker is running."""
-        self._queue.put_nowait(download_id)
-        if self._worker is None or self._worker.done():
-            self._worker = asyncio.create_task(self._run(), name="download-worker")
+        self._max_global = settings.download_global_concurrency
+        self._max_account = settings.download_account_concurrency
+        self._max_visitor = settings.download_visitor_concurrency
+
+        self._pending: deque[_Job] = deque()
+        self._active: dict[str, _Job] = {}
+        self._dispatcher: asyncio.Task[None] | None = None
+        self._wake = asyncio.Event()
+        self._idle = asyncio.Event()
+        self._idle.set()
+
+        self._started = False
+        self._start_lock = asyncio.Lock()
+        self._cleanup_task: asyncio.Task[None] | None = None
+
+    # ------------------------------------------------------------------ lifecycle
+
+    async def start(self, *, exclude_ids: Collection[str] = ()) -> None:
+        """Idempotent lazy startup.
+
+        ``exclude_ids`` are rows the caller has *just* created or re-queued; they must
+        not be mistaken for work interrupted by a previous process.
+        """
+        if self._started:
+            return
+        async with self._start_lock:
+            if self._started:
+                return
+            await self._recover_interrupted(exclude_ids)
+            self._started = True
+            interval = self._settings.download_cleanup_interval_seconds
+            if interval > 0:
+                self._cleanup_task = asyncio.create_task(
+                    self._cleanup_loop(interval), name="download-cleanup"
+                )
+
+    async def _recover_interrupted(self, exclude_ids: Collection[str]) -> None:
+        """Rows still active at startup belong to a previous process; fail them."""
+        now = self._clock.now()
+        stmt = (
+            update(Download)
+            .where(Download.status.in_(_ACTIVE_STATUS_VALUES))
+            .values(
+                status=DownloadStatus.FAILED.value,
+                error_code=ErrorCode.DOWNLOAD_FAILED.value,
+                error_message=MESSAGE_RESTART_INTERRUPTED,
+                updated_at=now,
+            )
+        )
+        if exclude_ids:
+            stmt = stmt.where(Download.id.not_in(exclude_ids))
+        async with self._sessionmaker() as session:
+            result = await session.execute(stmt)
+            await session.commit()
+        count = result.rowcount or 0
+        if count:
+            logger.warning(
+                "downloads_recovered_after_restart",
+                extra={"event": "downloads_recovered_after_restart", "count": count},
+            )
+
+    def submit(
+        self,
+        download_id: str,
+        *,
+        account_id: str | None = None,
+        visitor_ip: str | None = None,
+    ) -> None:
+        """Queue a ``queued`` Download; the dispatcher starts automatically."""
+        self._pending.append(
+            _Job(download_id=download_id, account_id=account_id, visitor_ip=visitor_ip)
+        )
+        self._idle.clear()
+        self._wake.set()
+        if self._dispatcher is None or self._dispatcher.done():
+            self._dispatcher = asyncio.create_task(self._dispatch(), name="download-dispatcher")
 
     async def wait_idle(self) -> None:
         """Resolve once every submitted Download has reached a terminal state."""
-        await self._queue.join()
+        await self.start()
+        await self._idle.wait()
 
-    async def _run(self) -> None:
-        while True:
-            try:
-                download_id = self._queue.get_nowait()
-            except asyncio.QueueEmpty:
-                self._worker = None
-                return
-            try:
-                await self._execute(download_id)
-            except Exception:  # noqa: BLE001 - one bad job must not kill the queue
-                logger.exception(
-                    "download_job_crashed",
-                    extra={"event": "download_job_crashed", "download_id": download_id},
-                )
-            finally:
-                self._queue.task_done()
+    def queue_position(self, download_id: str) -> int | None:
+        """1-based FIFO position for a waiting job; ``None`` while running or unknown."""
+        for position, job in enumerate(self._pending, start=1):
+            if job.download_id == download_id:
+                return position
+        return None
+
+    # ------------------------------------------------------------------ dispatcher
+
+    async def _dispatch(self) -> None:
+        try:
+            while True:
+                job = self._next_runnable()
+                while job is not None:
+                    self._pending.remove(job)
+                    self._active[job.download_id] = job
+                    asyncio.create_task(
+                        self._run_job(job), name=f"download-{job.download_id}"
+                    )
+                    job = self._next_runnable()
+                self._wake.clear()
+                if not self._pending and not self._active:
+                    self._idle.set()
+                    return
+                await self._wake.wait()
+        finally:
+            self._dispatcher = None
+
+    def _next_runnable(self) -> _Job | None:
+        """First waiting job whose owner still has a slot; keeps creation order."""
+        if len(self._active) >= self._max_global:
+            return None
+        for job in self._pending:
+            if job.account_id is not None:
+                if self._count_owner(account_id=job.account_id) >= self._max_account:
+                    continue
+            elif job.visitor_ip is not None:
+                if self._count_owner(visitor_ip=job.visitor_ip) >= self._max_visitor:
+                    continue
+            return job
+        return None
+
+    def _count_owner(self, *, account_id: str | None = None, visitor_ip: str | None = None) -> int:
+        if account_id is not None:
+            return sum(1 for job in self._active.values() if job.account_id == account_id)
+        return sum(
+            1
+            for job in self._active.values()
+            if job.account_id is None and job.visitor_ip == visitor_ip
+        )
+
+    async def _run_job(self, job: _Job) -> None:
+        try:
+            await self._execute(job.download_id)
+        except Exception:  # noqa: BLE001 - one bad job must not kill the pool
+            logger.exception(
+                "download_job_crashed",
+                extra={"event": "download_job_crashed", "download_id": job.download_id},
+            )
+        finally:
+            self._active.pop(job.download_id, None)
+            self._wake.set()
+
+    # ------------------------------------------------------------------ execution
 
     async def _execute(self, download_id: str) -> None:
         async with self._sessionmaker() as session:
@@ -162,6 +301,17 @@ class DownloadManager:
         path: Path,
     ) -> None:
         size = (await asyncio.to_thread(path.stat)).st_size
+        max_size = self._settings.download_max_file_size_bytes
+        if size > max_size:
+            await asyncio.to_thread(_remove_file, path, self._settings.media_dir)
+            await self._mark_failed(
+                session,
+                download,
+                f"文件大小超过 {_size_label(max_size)} 上限，无法下载",
+                code=ErrorCode.DOWNLOAD_TOO_LARGE,
+            )
+            return
+
         ready_at = self._clock.now()
         download.status = DownloadStatus.READY
         download.progress = 1.0
@@ -178,10 +328,17 @@ class DownloadManager:
             extra={"event": "download_ready", "download_id": download.id, "size": size},
         )
 
-    async def _mark_failed(self, session: AsyncSession, download: Download, message: str) -> None:
+    async def _mark_failed(
+        self,
+        session: AsyncSession,
+        download: Download,
+        message: str,
+        *,
+        code: ErrorCode = ErrorCode.DOWNLOAD_FAILED,
+    ) -> None:
         now = self._clock.now()
         download.status = DownloadStatus.FAILED
-        download.error_code = ErrorCode.DOWNLOAD_FAILED.value
+        download.error_code = code.value
         download.error_message = message
         download.updated_at = now
         await session.commit()
@@ -189,6 +346,55 @@ class DownloadManager:
             "download_failed",
             extra={"event": "download_failed", "download_id": download.id, "code": download.error_code},
         )
+
+    # -------------------------------------------------------------------- retention
+
+    async def cleanup_expired(self) -> int:
+        """Delete files past their retention window and mark their tasks ``expired``."""
+        now = self._clock.now()
+        async with self._sessionmaker() as session:
+            rows = (
+                await session.scalars(
+                    select(Download).where(Download.status == DownloadStatus.READY)
+                )
+            ).all()
+            expired = [
+                row
+                for row in rows
+                if (expires := _as_aware(row.file_expires_at)) is not None and expires <= now
+            ]
+            for download in expired:
+                if download.file_path:
+                    await asyncio.to_thread(
+                        _remove_file, Path(download.file_path), self._settings.media_dir
+                    )
+                download.status = DownloadStatus.EXPIRED
+                download.file_path = None
+                download.updated_at = now
+            if expired:
+                await session.commit()
+        if expired:
+            logger.info(
+                "downloads_expired",
+                extra={"event": "downloads_expired", "count": len(expired)},
+            )
+        return len(expired)
+
+    async def _cleanup_loop(self, interval: float) -> None:
+        try:
+            while True:
+                await asyncio.sleep(interval)
+                try:
+                    await self.cleanup_expired()
+                except Exception:  # noqa: BLE001 - cleanup must not die on one bad row
+                    logger.exception("download_cleanup_failed", extra={"event": "download_cleanup_failed"})
+        except asyncio.CancelledError:
+            raise
+
+
+_ACTIVE_STATUS_VALUES = tuple(
+    status.value for status in (DownloadStatus.QUEUED, DownloadStatus.DOWNLOADING, DownloadStatus.MERGING)
+)
 
 
 def _resolved_video(video: Video) -> ResolvedVideo:
@@ -232,3 +438,35 @@ def _failure_message(error: Exception | None) -> str:
     if isinstance(error, AppError):
         return error.message
     return MESSAGE_DOWNLOAD_FAILED
+
+
+def _remove_file(path: Path, root: Path) -> None:
+    """Delete a retained file and, when empty, its per-download directory under ``root``."""
+    try:
+        path.unlink(missing_ok=True)
+    except OSError:
+        logger.warning(
+            "download_file_delete_failed",
+            extra={"event": "download_file_delete_failed", "path": str(path)},
+        )
+        return
+    parent = path.parent
+    try:
+        if parent != root and root in parent.parents:
+            parent.rmdir()  # only succeeds when the directory is empty
+    except OSError:
+        pass
+
+
+def _size_label(size: int) -> str:
+    for unit, factor in (("GB", 1024**3), ("MB", 1024**2), ("KB", 1024)):
+        if size >= factor:
+            return f"{size / factor:g}{unit}"
+    return f"{size}B"
+
+
+def _as_aware(value: datetime | None) -> datetime | None:
+    """SQLite round-trips timezone-aware datetimes as naive UTC values."""
+    if value is None:
+        return None
+    return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
