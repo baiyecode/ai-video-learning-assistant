@@ -52,8 +52,9 @@ export const useAnalysisStore = defineStore("analysis", {
   },
   actions: {
     /** POST /api/analyses: reuse an in-progress/completed result or reserve one Quota. */
-    async create(videoId: string): Promise<AnalysisDto> {
-      return await api.post<AnalysisDto>("/analyses", { video_id: videoId });
+    async create(videoId: string, options: { force?: boolean } = {}): Promise<AnalysisDto> {
+      const body = options.force ? { video_id: videoId, force: true } : { video_id: videoId };
+      return await api.post<AnalysisDto>("/analyses", body);
     },
 
     /** Load the persisted result, then stream it (replays everything when finished). */
@@ -120,6 +121,13 @@ export const useAnalysisStore = defineStore("analysis", {
     async retry(): Promise<string | null> {
       if (!this.videoId) return null;
       const analysis = await this.create(this.videoId);
+      return analysis.id;
+    },
+
+    /** Explicit re-analysis: always a new Analysis row and one Quota unit. */
+    async reanalyze(): Promise<string | null> {
+      if (!this.videoId) return null;
+      const analysis = await this.create(this.videoId, { force: true });
       return analysis.id;
     },
 

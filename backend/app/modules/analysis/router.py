@@ -38,10 +38,10 @@ from app.errors import ErrorCode
 from app.modules.identity.models import Account
 from app.ratelimit import RateLimiter
 
-from . import service
+from . import history, service
 from .manager import AnalysisManager
 from .models import Analysis, AnalysisStatus
-from .schemas import AnalysisOut, CreateAnalysisRequest
+from .schemas import AnalysisHistoryItemOut, AnalysisOut, CreateAnalysisRequest
 
 router = APIRouter(prefix="/analyses", tags=["analysis"])
 
@@ -90,6 +90,15 @@ async def create_analysis(
         # Reused in-progress or already completed Analysis: nothing new was reserved.
         response.status_code = 200
     return service.to_out(result.analysis, result.video)
+
+
+@router.get("", response_model=list[AnalysisHistoryItemOut])
+async def list_analysis_history(
+    session: AsyncSession = Depends(get_session),
+    account: Account = Depends(get_current_account),
+) -> list[AnalysisHistoryItemOut]:
+    """The current Account's Analyses, newest first. Other Accounts never appear."""
+    return await history.list_analyses(session, account.id)
 
 
 @router.get("/{analysis_id}", response_model=AnalysisOut)

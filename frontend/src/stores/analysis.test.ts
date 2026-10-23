@@ -128,4 +128,18 @@ describe("analysis store", () => {
     expect(store.error?.code).toBe("network_error");
     expect(store.streaming).toBe(false);
   });
+
+  it("re-analyses the current video with force and returns the new id", async () => {
+    mocks.get.mockResolvedValue(dto({ status: "completed" }));
+    mocks.connectSse.mockReturnValue(
+      scripted([event("done", { status: "completed" })]),
+    );
+    mocks.post.mockResolvedValue(dto({ id: "a2", status: "pending" }));
+
+    const store = useAnalysisStore();
+    await store.open("a1");
+    await expect(store.reanalyze()).resolves.toBe("a2");
+
+    expect(mocks.post).toHaveBeenCalledWith("/analyses", { video_id: "v1", force: true });
+  });
 });
