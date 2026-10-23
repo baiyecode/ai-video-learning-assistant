@@ -31,12 +31,12 @@ logger = logging.getLogger("app.main")
 
 def create_app(settings: Settings | None = None, adapters: Adapters | None = None) -> FastAPI:
     settings = settings or load_settings()
-    adapters = adapters or build_production_adapters(settings)
+    # The engine exists before the adapters so the SQLite budget ledger can share it.
+    engine, sessionmaker = create_engine_and_sessionmaker(settings)
+    adapters = adapters or build_production_adapters(settings, sessionmaker)
     configure_logging(settings.log_level)
     # No-op unless SENTRY_DSN is set; failures to import/init never block startup.
     init_sentry(environment=settings.env)
-
-    engine, sessionmaker = create_engine_and_sessionmaker(settings)
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:

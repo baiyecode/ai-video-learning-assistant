@@ -43,6 +43,9 @@ uv run uvicorn app.main:app --reload --port 8000
 - 健康检查：`curl http://127.0.0.1:8000/health`（200 正常，503 降级）
 - API 文档：`http://127.0.0.1:8000/api/docs`
 - 配置来自 `APP_*` 环境变量或 `backend/.env`（参考根目录 `.env.example`）。
+- 关键默认值：每日 AI 预算 `APP_DAILY_BUDGET_USD=10`（按北京时间自然日，超预算后新的分析返回 429 `budget_exhausted`，已有结果仍可查看），每次摘要调用估算 `APP_ANALYSIS_COST_PER_CALL_USD=0.01`，每个账号每日免费分析 `APP_ANALYSIS_DAILY_QUOTA=3`。
+- 限流（内存滑窗，超限返回 429 `too_many_requests` 并带 `Retry-After`）：解析 10 次/分/IP、创建下载 3 次/分/IP（叠加 #6 的每小时与并发上限）、登录 10 次/15 分/IP、注册 5 次/小时/IP、创建分析 1 次/10 秒/账号；对应 `APP_RATE_LIMIT_*` 可调。
+- 安全边界：仅接受 Bilibili/YouTube 的 http(s) 链接，拒绝凭据、非标准端口、localhost、内网/回环/链路本地/云元数据地址及解析到私有地址的主机；Markdown 与思维导图渲染前会清理脚本、事件处理器和 `javascript:` 链接。
 
 ### 前端
 

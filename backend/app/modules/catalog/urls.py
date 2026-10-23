@@ -12,10 +12,15 @@ comes from the adapter's ``ResolvedVideo``, so two wrappers of one Video dedupli
 
 from __future__ import annotations
 
+import ipaddress
 import re
+import socket
+from collections.abc import Callable
 from urllib.parse import parse_qs, urlsplit
 
 from app.errors import AppError, ErrorCode
+
+HostResolver = Callable[[str], set[str]]
 
 _YOUTUBE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _BILIBILI_BVID = re.compile(r"BV[0-9A-Za-z]{10}")
@@ -37,7 +42,7 @@ _MESSAGE_PLAYLIST = "暂不支持播放列表、合集或收藏夹，请提供�
 _MESSAGE_LIVE = "暂不支持直播链接，请提供已发布的单个视频"
 
 
-def normalize_video_url(raw: str) -> str:
+def normalize_video_url(raw: str, *, resolver: HostResolver | None = None) -> str:
     """Return the canonical single-video URL or raise :class:`AppError`.
 
     Canonical forms:
@@ -47,6 +52,11 @@ def normalize_video_url(raw: str) -> str:
 
     Bilibili multi-part parameters (``p=``) are part of the same Platform video and are
     dropped: P1 treats one BV/av id as one Video.
+
+    SSRF hardening: only http(s) URLs on the Bilibili/YouTube hosts are accepted, with
+    no credentials and a standard port. IP literals and private name suffixes are
+    rejected outright; the allowed host is also resolved (best-effort, injectable via
+    ``resolver``) and any private/loopback/link-local answer is refused.
     """
     text = (raw or "").strip()
     if not text:
@@ -71,14 +81,71 @@ def normalize_video_url(raw: str) -> str:
     host = (parsed.hostname or "").lower()
     if not host:
         raise _unsupported()
+    _reject_private_host(host)
 
+    resolve = resolver or _hostname_addresses
     if host in _YOUTUBE_HOSTS or host == "youtu.be":
+        _ensure_public_host(host, resolve)
         return _normalise_youtube(host, parsed.path, parsed.query)
     if host in _BILIBILI_SHORT_HOSTS:
+        _ensure_public_host(host, resolve)
         return _normalise_bilibili_short(parsed.path)
     if host in _BILIBILI_VIDEO_HOSTS or host.endswith(".bilibili.com"):
+        _ensure_public_host(host, resolve)
         return _normalise_bilibili(host, parsed.path, parsed.query)
     raise _unsupported()
+
+
+def _hostname_addresses(host: str) -> set[str]:
+    """Resolve ``host`` to IP address strings.
+
+    Best-effort: callers treat resolution failures as "no evidence of SSRF". Tests
+    monkeypatch this function (or pass ``resolver=``) so they never touch DNS.
+    """
+    infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    return {str(info[4][0]) for info in infos}
+
+
+def _reject_private_host(host: str) -> None:
+    """Reject localhost-style names and IP literals before any resolution."""
+    if (
+        host == "localhost"
+        or host.endswith(".localhost")
+        or host.endswith(".local")
+        or host.endswith(".internal")
+        or host.endswith(".home.arpa")
+    ):
+        raise _unsupported()
+    try:
+        ipaddress.ip_address(host)
+    except ValueError:
+        return
+    raise _unsupported()
+
+
+def _ensure_public_host(host: str, resolve: HostResolver) -> None:
+    try:
+        addresses = resolve(host)
+    except (OSError, UnicodeError):
+        # DNS is best-effort; the adapter will fail later if the host is unusable.
+        return
+    if any(_is_blocked_address(address) for address in addresses):
+        raise _unsupported()
+
+
+def _is_blocked_address(address: str) -> bool:
+    try:
+        parsed = ipaddress.ip_address(str(address).strip("[]").split("%")[0])
+    except ValueError:
+        return True
+    return (
+        parsed.is_private
+        or parsed.is_loopback
+        or parsed.is_link_local
+        or parsed.is_reserved
+        or parsed.is_multicast
+        or parsed.is_unspecified
+    )
 
 
 def _normalise_youtube(host: str, path: str, query: str) -> str:

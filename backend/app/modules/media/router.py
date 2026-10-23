@@ -14,8 +14,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.container import Adapters
-from app.deps import get_adapters, get_optional_account, get_session, get_settings
+from app.deps import get_adapters, get_optional_account, get_rate_limiter, get_session, get_settings
 from app.modules.identity.models import Account
+from app.ratelimit import RateLimiter
 
 from . import service
 from .manager import DownloadManager
@@ -57,7 +58,10 @@ async def create_download(
     adapters: Adapters = Depends(get_adapters),
     settings: Settings = Depends(get_settings),
     account: Account | None = Depends(get_optional_account),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> DownloadOut:
+    # Per-IP minute limit (#12) runs before #6's hourly/queue caps.
+    rate_limiter.hit("downloads.create", _client_ip(request))
     download = await service.create_download(
         session,
         settings,

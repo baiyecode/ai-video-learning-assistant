@@ -54,7 +54,12 @@ class AnalysisManager:
             plan = await self._prepare(analysis_id)
             if plan is None:
                 return
-            await generation.ensure_budget(self._adapters.budget_ledger)
+            await generation.ensure_budget(
+                self._adapters.budget_ledger,
+                estimated_usd=self._settings.analysis_cost_per_call_usd,
+                clock=self._clock,
+                daily_budget_usd=self._settings.daily_budget_usd,
+            )
             await self._generate(analysis_id, plan)
         except asyncio.CancelledError:
             raise
@@ -131,9 +136,14 @@ class AnalysisManager:
                     raise RuntimeError("generation plan has no prompt")
                 # Only the final (or single) call is streamed and persisted; the map
                 # calls produce intermediate summaries that are never shown.
-                async for chunk in self._adapters.summarizer.stream(prompt=prompt):
-                    if splitter.feed(chunk):
-                        await self._persist_summary(analysis_id, splitter.summary)
+                try:
+                    async for chunk in self._adapters.summarizer.stream(prompt=prompt):
+                        if splitter.feed(chunk):
+                            await self._persist_summary(analysis_id, splitter.summary)
+                finally:
+                    # Every Summarizer call is billed, including a call that failed
+                    # halfway: upstream tokens were already consumed.
+                    await self._record_call_cost()
         except TimeoutError as exc:
             failure = exc
         except Exception as exc:  # noqa: BLE001 - any adapter failure becomes analysis_failed
@@ -157,11 +167,26 @@ class AnalysisManager:
 
     async def _partial_summary(self, prompt: str) -> str:
         """Consume one map call whole; an empty result means the model failed."""
-        parts = [chunk async for chunk in self._adapters.summarizer.stream(prompt=prompt)]
-        text = "".join(parts).strip()
+        try:
+            parts = [chunk async for chunk in self._adapters.summarizer.stream(prompt=prompt)]
+            text = "".join(parts).strip()
+        finally:
+            await self._record_call_cost()
         if not text:
             raise RuntimeError("empty partial summary")
         return text
+
+    async def _record_call_cost(self) -> None:
+        """Bill one Summarizer call. A ledger outage must not fail the generation."""
+        try:
+            await self._adapters.budget_ledger.record(
+                self._settings.analysis_cost_per_call_usd
+            )
+        except Exception:  # noqa: BLE001 - recording is best-effort after the spend
+            logger.warning(
+                "budget_record_failed",
+                extra={"event": "budget_record_failed", "error_type": "budget"},
+            )
 
     async def _persist_summary(self, analysis_id: str, summary: str) -> None:
         async with self._sessionmaker() as session:

@@ -54,6 +54,8 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-chat"
     daily_budget_usd: float = 10.0
+    # Conservative per-call estimate used to gate and record each Summarizer call.
+    analysis_cost_per_call_usd: float = 0.01
 
     # Analysis (ticket #8): free Quota per Account per Asia/Shanghai day and the
     # end-to-end generation timeout. #12 adds rate limits and budget policy.
@@ -64,6 +66,14 @@ class Settings(BaseSettings):
     # the timeline are kept and the Analysis is flagged ``truncated``.
     analysis_chunk_chars: int = 6000
     analysis_max_input_chars: int = 120_000
+
+    # Rate limits (ticket #12). Sliding windows, in-memory per process; a value of 0
+    # disables that scope. Scopes key on the client IP except Analysis (per Account).
+    rate_limit_resolve_per_minute: int = 10
+    rate_limit_download_per_minute: int = 3
+    rate_limit_login_per_15_minutes: int = 10
+    rate_limit_register_per_hour: int = 5
+    rate_limit_analysis_seconds: float = 10.0
 
     @property
     def media_dir(self) -> Path:

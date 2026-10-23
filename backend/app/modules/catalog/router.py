@@ -7,11 +7,12 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.container import Adapters
-from app.deps import get_adapters, get_session
+from app.deps import get_adapters, get_rate_limiter, get_session
+from app.ratelimit import RateLimiter, client_ip
 
 from . import service, subtitles
 from .schemas import ResolveResponse, ResolveVideoRequest, VideoDetailResponse
@@ -22,9 +23,12 @@ router = APIRouter(prefix="/videos", tags=["catalog"])
 @router.post("/resolve", response_model=ResolveResponse)
 async def resolve_video(
     payload: ResolveVideoRequest,
+    request: Request,
     session: AsyncSession = Depends(get_session),
     adapters: Adapters = Depends(get_adapters),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> ResolveResponse:
+    rate_limiter.hit("videos.resolve", client_ip(request))
     return await service.resolve_video(session, adapters.video_source, adapters.clock, payload.url)
 
 

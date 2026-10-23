@@ -7,10 +7,10 @@ optional contact and free-form details are enough for a human to follow up.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String, Text
+from sqlalchemy import Date, DateTime, Float, ForeignKey, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -44,3 +44,19 @@ class Report(Base):
     )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class BudgetSpend(Base):
+    """Global AI spend per Asia/Shanghai calendar day.
+
+    One row per day; ``spent_usd`` is incremented atomically after each Summarizer
+    call. The day key comes from the injected Clock, so tests can cross midnight.
+    """
+
+    __tablename__ = "budget_spend"
+
+    day: Mapped[date] = mapped_column(Date, primary_key=True)
+    spent_usd: Mapped[float] = mapped_column(Float, default=0.0)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=_utcnow, onupdate=_utcnow
+    )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
 from .config import Settings
 from .ports import BudgetLedger, Clock, MediaStore, Summarizer, VideoSource
 
@@ -17,11 +19,14 @@ class Adapters:
     budget_ledger: BudgetLedger
 
 
-def build_production_adapters(settings: Settings) -> Adapters:
+def build_production_adapters(
+    settings: Settings,
+    sessionmaker: async_sessionmaker[AsyncSession] | None = None,
+) -> Adapters:
     """Wire real adapters. Import-safe: concrete SDKs are imported lazily by the adapters.
 
-    The concrete implementations are filled in by their owning tickets; until then they
-    raise ``NotImplementedError`` when used, never on import or construction.
+    ``sessionmaker`` binds the SQLite budget ledger to the application database; it is
+    optional only so type-checking tests can build the container without an engine.
     """
     from .adapters.db_budget import DbBudgetLedger
     from .adapters.deepseek_summarizer import DeepSeekSummarizer
@@ -29,10 +34,11 @@ def build_production_adapters(settings: Settings) -> Adapters:
     from .adapters.system_clock import SystemClock
     from .adapters.ytdlp_source import YtDlpVideoSource
 
+    clock = SystemClock()
     return Adapters(
         video_source=YtDlpVideoSource(settings),
         media_store=FsMediaStore(settings),
         summarizer=DeepSeekSummarizer(settings),
-        clock=SystemClock(),
-        budget_ledger=DbBudgetLedger(),
+        clock=clock,
+        budget_ledger=DbBudgetLedger(sessionmaker, clock, settings),
     )

@@ -256,6 +256,8 @@ async def test_visitor_hourly_creation_cap_rejects_with_retry_after(settings: Se
             assert created.status_code == 202, created.text
             await _wait_idle(app)
             await _await_terminal(client, created.json()["id"])
+            # #12: 3 creations per IP per minute; stay below it to reach the hourly cap.
+            clock.advance(seconds=61)  # type: ignore[attr-defined]
 
         rejected = await _create(client, video_id)
         assert rejected.status_code == 429, rejected.text
@@ -291,6 +293,8 @@ async def test_account_downloads_are_not_counted_against_the_visitor_cap(setting
             assert created.status_code == 202, created.text
             await _wait_idle(app)
             await _await_terminal(client, created.json()["id"])
+            # #12: 3 creations per IP per minute, independent of the visitor cap.
+            adapters.clock.advance(seconds=61)  # type: ignore[attr-defined]
 
 
 # ------------------------------------------------------------ queue and limits

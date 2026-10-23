@@ -168,13 +168,15 @@ class FakeSummarizer:
 
 @dataclass
 class FakeBudgetLedger:
-    """In-memory daily USD ledger."""
+    """In-memory daily USD ledger; ``recorded`` shows every billed Summarizer call."""
 
     budget_usd: float = 10.0
     spent_usd: float = 0.0
     recorded: list[float] = field(default_factory=list)
+    can_spend_calls: list[float] = field(default_factory=list)
 
     async def can_spend(self, estimated_usd: float) -> bool:
+        self.can_spend_calls.append(estimated_usd)
         return self.spent_usd + estimated_usd <= self.budget_usd
 
     async def record(self, usd: float) -> None:

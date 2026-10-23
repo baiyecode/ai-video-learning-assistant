@@ -27,9 +27,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.container import Adapters
-from app.deps import get_adapters, get_current_account, get_session, get_settings
+from app.deps import (
+    get_adapters,
+    get_current_account,
+    get_rate_limiter,
+    get_session,
+    get_settings,
+)
 from app.errors import ErrorCode
 from app.modules.identity.models import Account
+from app.ratelimit import RateLimiter
 
 from . import history, service
 from .manager import AnalysisManager
@@ -65,6 +72,7 @@ async def create_analysis(
     settings: Settings = Depends(get_settings),
     adapters: Adapters = Depends(get_adapters),
     account: Account = Depends(get_current_account),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> AnalysisOut:
     result = await service.create_analysis(
         session,
@@ -73,6 +81,8 @@ async def create_analysis(
         account_id=account.id,
         video_id=payload.video_id,
         force=payload.force,
+        rate_limiter=rate_limiter,
+        budget_ledger=adapters.budget_ledger,
     )
     if result.created:
         get_analysis_manager(request).submit(result.analysis.id)

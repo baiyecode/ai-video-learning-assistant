@@ -89,6 +89,14 @@ describe("buildMindmap", () => {
     expect(shape(root).children.map((child) => child.label)).toEqual(["章节", "图片"]);
   });
 
+  it("drops javascript: links while keeping the label text", () => {
+    const { root } = buildMindmap("- 主题\n  - [点我](javascript:alert(1))");
+    const serialized = JSON.stringify(root);
+
+    expect(serialized).not.toMatch(/javascript:/i);
+    expect(shape(root).children.map((child) => child.label)).toEqual(["点我"]);
+  });
+
   it("sanitizes node HTML even when it does not come from Markdown", () => {
     expect(sanitizeNodeContent('<img src=x onerror="alert(1)">安全')).toBe("安全");
     expect(sanitizeNodeContent("<script>alert(1)</script>安全")).toBe("安全");
