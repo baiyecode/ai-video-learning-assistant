@@ -6,7 +6,6 @@ import { EMAIL_NOT_VERIFIED_MESSAGE, uiErrorMessage } from "@/lib/uiError";
 describe("authErrorMessage", () => {
   it("maps stable backend codes to Chinese user-facing messages", () => {
     expect(authErrorMessage("invalid_credentials")).toBe("邮箱或密码不正确");
-    expect(authErrorMessage("email_taken")).toBe("该邮箱已注册，请直接登录");
     expect(authErrorMessage("weak_password")).toBe("密码至少需要 8 位");
     expect(authErrorMessage("invalid_request")).toBe("请检查邮箱格式与密码");
     expect(authErrorMessage("session_invalid")).toBe("登录状态已失效，请重新登录");

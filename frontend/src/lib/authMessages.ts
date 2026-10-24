@@ -3,7 +3,6 @@ import { EMAIL_NOT_VERIFIED_MESSAGE } from "@/lib/uiError";
 
 const AUTH_MESSAGES: Record<string, string> = {
   invalid_credentials: "邮箱或密码不正确",
-  email_taken: "该邮箱已注册，请直接登录",
   weak_password: "密码至少需要 8 位",
   invalid_request: "请检查邮箱格式与密码",
   auth_required: "登录状态已失效，请重新登录",
