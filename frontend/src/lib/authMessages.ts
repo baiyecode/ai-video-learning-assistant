@@ -1,4 +1,6 @@
 /** Chinese user-facing messages for stable auth error codes. */
+import { EMAIL_NOT_VERIFIED_MESSAGE } from "@/lib/uiError";
+
 const AUTH_MESSAGES: Record<string, string> = {
   invalid_credentials: "邮箱或密码不正确",
   email_taken: "该邮箱已注册，请直接登录",
@@ -6,7 +8,8 @@ const AUTH_MESSAGES: Record<string, string> = {
   invalid_request: "请检查邮箱格式与密码",
   auth_required: "登录状态已失效，请重新登录",
   session_invalid: "登录状态已失效，请重新登录",
-  email_not_verified: "请先验证邮箱后再发起 Analysis",
+  // One gate, one sentence: the email-gate copy lives in uiError (spec ticket #22).
+  email_not_verified: EMAIL_NOT_VERIFIED_MESSAGE,
   subscription_not_found: "还没有可管理的订阅，请先完成升级支付",
   too_many_requests: "尝试过于频繁，请稍后再试",
   service_unavailable: "服务暂时不可用，请稍后再试",

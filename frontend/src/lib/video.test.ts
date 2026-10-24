@@ -1,22 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  formatDuration,
-  formatFileSize,
-  platformLabel,
-  subtitleSourceLabel,
-  videoFlowMessageForCode,
-} from "@/lib/video";
-
-describe("videoFlowMessageForCode", () => {
-  it("owns the not-opened copy for the Douyin switch", () => {
-    expect(videoFlowMessageForCode("platform_not_enabled")).toBe("抖音暂未开放");
-  });
-
-  it("leaves other codes to the server message", () => {
-    expect(videoFlowMessageForCode("unsupported_url")).toBeNull();
-  });
-});
+import { formatDuration, formatFileSize, platformLabel, subtitleSourceLabel } from "@/lib/video";
 
 describe("formatDuration", () => {
   it("renders minutes and seconds under an hour", () => {

@@ -11,8 +11,8 @@ describe("uiErrorMessage", () => {
   });
 
   it("keeps the 403 email gate distinct as a verification moment", () => {
-    const error = asUiError(new ApiError("email_not_verified", "请先验证邮箱后再发起 Analysis", 403));
-    expect(uiErrorMessage(error)).toContain("邮箱尚未验证");
+    const error = asUiError(new ApiError("email_not_verified", "forbidden", 403));
+    expect(uiErrorMessage(error)).toBe("请先验证邮箱后再发起 Analysis");
     expect(uiErrorMessage(error)).not.toContain("Quota");
   });
 
