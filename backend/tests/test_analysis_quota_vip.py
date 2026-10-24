@@ -233,3 +233,39 @@ async def test_free_account_quota_snapshot_keeps_numeric_limit_and_free_membersh
     assert quota["daily_limit"] == 3
     assert quota["remaining"] == 3
     assert quota["membership"] == "free"
+
+
+async def test_failed_vip_analysis_releases_the_reservation(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """AC4: VIP status never bypasses the rollback: a failure leaves no count behind."""
+    adapters.summarizer.error = RuntimeError("upstream exploded")  # type: ignore[attr-defined]
+    headers, account_id = await _register(client, "crash@example.com")
+    await _activate_membership(client, account_id)
+    video_id = await _resolve(client, adapters, "crashvid001")
+
+    analysis_id = await _create_completed(client, adapters, headers, video_id)
+
+    assert (await _get(client, headers, analysis_id))["status"] == "failed"
+    quota = await _me(client, headers)
+    assert quota["used"] == 0
+    assert quota["daily_limit"] == -1
+
+
+async def test_vip_double_click_reuses_the_active_analysis_without_reserving_twice(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """AC6: two tabs of the same VIP create still reserve exactly one unit."""
+    adapters.summarizer.delay_seconds = 0.05  # type: ignore[attr-defined]
+    headers, account_id = await _register(client, "tabs@example.com")
+    await _activate_membership(client, account_id)
+    video_id = await _resolve(client, adapters, "tabvid00001")
+
+    responses = await asyncio.gather(_create(client, headers, video_id), _create(client, headers, video_id))
+
+    statuses = sorted(response.status_code for response in responses)
+    assert statuses == [200, 201], [response.text for response in responses]
+    assert responses[0].json()["id"] == responses[1].json()["id"]
+    assert responses[0].json()["quota"]["daily_limit"] == -1
+    assert (await _me(client, headers))["used"] == 1
+    await _wait_terminal(client, headers, responses[0].json()["id"])
