@@ -291,6 +291,68 @@ async def test_gateway_failure_answers_retryable_5xx_and_leaves_no_trace(
     assert membership.json()["status"] == "active"
 
 
+async def test_checkout_event_for_an_unknown_account_is_audited_but_not_applied(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """A paid event naming a deleted/unknown Account leaves no orphan subscription.
+
+    The audit row still records the provider event (disputes must stay traceable), and
+    the route answers 2xx so Stripe stops retrying an event that will never resolve.
+    """
+    body = checkout_completed_body(
+        "evt_ghost_1", "acct-does-not-exist", created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+
+    webhook = await _post_event(client, body)
+
+    assert webhook.status_code == 200, webhook.text
+    rows = await _audit_rows(app, "evt_ghost_1")
+    assert [(row.account_id, row.applied) for row in rows] == [("acct-does-not-exist", False)]
+
+
+async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscription(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """One Account, one subscription row: a fresh payment lifts it back to Active."""
+    from app.modules.billing.models import Subscription
+
+    response = await register(client, email="renew@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    async with app.state.sessionmaker() as session:
+        session.add(
+            Subscription(
+                account_id=account_id,
+                stripe_customer_id="cus_old",
+                stripe_subscription_id="sub_old",
+                status="canceled",
+                current_period_end=_dt("2026-01-20T09:00:00+00:00"),
+                price_id="price_fake_monthly",
+            )
+        )
+        await session.commit()
+
+    body = checkout_completed_body(
+        "evt_renew_1",
+        account_id,
+        created=_dt("2026-01-15T11:00:00+00:00"),
+        period_end=_dt(PERIOD_END),
+        subscription_id="sub_renewed",
+    )
+    webhook = await _post_event(client, body)
+
+    assert webhook.status_code == 200, webhook.text
+    membership = await client.get("/api/me/membership", headers=auth)
+    assert membership.json() == {"status": "active", "period_end": PERIOD_END, "portal_url": None}
+
+    async with app.state.sessionmaker() as session:
+        rows = (
+            await session.scalars(select(Subscription).where(Subscription.account_id == account_id))
+        ).all()
+    assert len(rows) == 1
+    assert rows[0].stripe_subscription_id == "sub_renewed"
+
+
 async def test_bad_signature_is_rejected_and_changes_nothing(
     client: AsyncClient, app: FastAPI
 ) -> None:
