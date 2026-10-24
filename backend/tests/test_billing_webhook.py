@@ -12,6 +12,8 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from app.container import Adapters
+from app.errors import AppError, ErrorCode
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -173,6 +175,36 @@ async def test_unknown_event_type_is_recorded_but_never_moves_state(
 
     rows = await _audit_rows(app, "evt_future_1")
     assert [(row.type, row.applied) for row in rows] == [("customer.subscription.deleted", False)]
+
+
+async def test_gateway_failure_answers_retryable_5xx_and_leaves_no_trace(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """AC6: the webhook neither blocks nor half-applies; the provider retries the event.
+
+    A gateway that fails before decoding must surface a 5xx (Stripe retries) and write
+    nothing at all - so the retry of the SAME event still lands cleanly.
+    """
+    response = await register(client, email="retry@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    body = checkout_completed_body(
+        "evt_flaky", account_id, created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+    gateway = adapters.billing_gateway
+    outage = AppError(503, ErrorCode.SERVICE_UNAVAILABLE, "订阅支付服务暂时不可用")
+    gateway.webhook_fail_with = outage  # type: ignore[attr-defined]
+
+    failed = await _post_event(client, body)
+    assert failed.status_code == 503, failed.text
+    assert failed.json()["error"]["code"] == "service_unavailable"
+    assert await _audit_rows(app, "evt_flaky") == []
+
+    gateway.webhook_fail_with = None  # type: ignore[attr-defined]
+    retried = await _post_event(client, body)
+    assert retried.status_code == 200, retried.text
+    membership = await client.get("/api/me/membership", headers=auth)
+    assert membership.json()["status"] == "active"
 
 
 async def test_bad_signature_is_rejected_and_changes_nothing(
