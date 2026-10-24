@@ -39,9 +39,12 @@ class StripeBillingGateway:
         cancel_url: str,
     ) -> CheckoutSession:
         self._require_config()
-        import stripe  # deferred: keeps ``import app`` safe without the SDK
 
         def _create() -> dict:
+            # Deferred inside the worker: the SDK import itself must not crash or leak
+            # as a 500 when the package is missing (deployment forgot ``uv add stripe``).
+            import stripe
+
             stripe.api_key = self._settings.stripe_api_key
             params: dict = {
                 "mode": "subscription",

@@ -8,10 +8,13 @@ the DB-derived read model returned by ``GET /api/me/membership``.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
+import httpx
 import pytest
 from app.modules.billing.models import Subscription
+from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy.exc import IntegrityError
@@ -130,3 +133,90 @@ async def test_one_subscription_per_account(client: AsyncClient, app: FastAPI) -
 
     with pytest.raises(IntegrityError):
         await seed_subscription(app, account_id, stripe_subscription_id="sub_second")
+
+
+def _bare_settings(**overrides: object):
+    from app.config import Settings
+
+    values: dict[str, object] = {
+        "_env_file": None,
+        "env": "test",
+        "secret_key": "test-only-secret",
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
+
+
+async def test_unconfigured_stripe_gateway_constructs_but_answers_503() -> None:
+    """Development without Stripe keys: no crash at wiring, an understood 503 per request."""
+    from app.adapters.stripe_billing import StripeBillingGateway
+    from app.errors import AppError
+
+    gateway = StripeBillingGateway(_bare_settings())
+
+    with pytest.raises(AppError) as raised:
+        await gateway.create_checkout(
+            account_id="acct_1",
+            email="learner@example.com",
+            price_id="",
+            success_url="http://testserver/?checkout=success",
+            cancel_url="http://testserver/?checkout=cancelled",
+        )
+
+    assert raised.value.status == 503
+    assert raised.value.code == "service_unavailable"
+    assert "订阅" in raised.value.message
+
+
+async def test_configured_stripe_gateway_reaches_the_sdk_layer(monkeypatch) -> None:
+    """With keys present the guard passes and the (uninstalled or unreachable) SDK fails as 503."""
+    import sys
+
+    from app.adapters import stripe_billing
+    from app.errors import AppError
+
+    monkeypatch.setitem(sys.modules, "stripe", None)  # force the import path to blow up
+    gateway = stripe_billing.StripeBillingGateway(
+        _bare_settings(stripe_api_key="sk_test_real", stripe_price_id="price_real")
+    )
+
+    with pytest.raises(AppError) as raised:
+        await gateway.create_checkout(
+            account_id="acct_1",
+            email=None,
+            price_id="price_real",
+            success_url="http://testserver/?checkout=success",
+            cancel_url="http://testserver/?checkout=cancelled",
+        )
+
+    assert raised.value.status == 503
+    assert raised.value.code == "service_unavailable"
+
+
+async def test_checkout_endpoint_answers_503_on_production_wiring_without_keys(
+    tmp_path: Path,
+) -> None:
+    """The whole production adapter path: the app boots and the endpoint explains itself."""
+    from app.config import Settings
+    from app.main import create_app
+
+    settings = Settings(
+        _env_file=None,
+        env="test",
+        secret_key="test-only-secret",
+        database_url=f"sqlite+aiosqlite:///{(tmp_path / 'app.db').as_posix()}",
+        data_dir=tmp_path / "data",
+        log_level="WARNING",
+    )
+    production_app = create_app(settings=settings)
+    transport = httpx.ASGITransport(app=production_app, raise_app_exceptions=False)
+
+    async with LifespanManager(production_app):
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+            authed = await register(http_client, email="upgrade@example.com")
+            response = await http_client.post("/api/billing/checkout", headers=bearer(authed))
+
+    assert response.status_code == 503, response.text
+    error = response.json()["error"]
+    assert error["code"] == "service_unavailable"
+    assert "订阅" in error["message"]
