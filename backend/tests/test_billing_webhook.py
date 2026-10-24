@@ -16,6 +16,7 @@ from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
+import pytest
 from app.container import Adapters
 from app.errors import AppError, ErrorCode
 from app.logging_setup import JsonFormatter
@@ -377,3 +378,99 @@ async def test_bad_signature_is_rejected_and_changes_nothing(
     membership = await client.get("/api/me/membership", headers=auth)
     assert membership.json()["status"] == "free"
     assert await _audit_rows(app, "evt_evil") == []
+
+
+def _bare_settings(**overrides: object):
+    from app.config import Settings
+
+    values: dict[str, object] = {
+        "_env_file": None,
+        "env": "test",
+        "secret_key": "test-only-secret",
+    }
+    values.update(overrides)
+    return Settings(**values)  # type: ignore[arg-type]
+
+
+def test_stripe_gateway_verifies_and_decodes_without_touching_the_sdk() -> None:
+    """The production adapter's webhook gate is pure stdlib HMAC - no SDK, no network."""
+    from app.adapters.stripe_billing import StripeBillingGateway
+
+    gateway = StripeBillingGateway(_bare_settings(stripe_webhook_secret="whsec_live"))
+    body = checkout_completed_body(
+        "evt_live_1",
+        "acct-7",
+        created=_dt(EVENT_CREATED),
+        period_end=_dt(PERIOD_END),
+        subscription_id="sub_live",
+        customer_id="cus_live",
+    )
+
+    event = gateway.verify_webhook(payload=body, signature=sign_webhook(body, secret="whsec_live"))
+
+    assert event.event_id == "evt_live_1"
+    assert event.type == "checkout.session.completed"
+    assert event.created == _dt(EVENT_CREATED)
+    assert event.account_id == "acct-7"
+    assert event.stripe_subscription_id == "sub_live"
+    assert event.stripe_customer_id == "cus_live"
+    assert event.current_period_end == _dt(PERIOD_END)
+    assert event.price_id == "price_fake_monthly"
+
+
+def test_stripe_gateway_rejects_events_signed_with_the_wrong_secret() -> None:
+    from app.adapters.stripe_billing import StripeBillingGateway
+
+    gateway = StripeBillingGateway(_bare_settings(stripe_webhook_secret="whsec_live"))
+    body = checkout_completed_body(
+        "evt_evil_2", "acct-7", created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+
+    with pytest.raises(AppError) as raised:
+        gateway.verify_webhook(payload=body, signature=sign_webhook(body, secret="whsec_wrong"))
+
+    assert raised.value.status == 400
+    assert raised.value.code == "invalid_signature"
+
+
+def test_stripe_gateway_rejects_a_tampered_body_under_a_valid_signature() -> None:
+    from app.adapters.stripe_billing import StripeBillingGateway
+
+    gateway = StripeBillingGateway(_bare_settings(stripe_webhook_secret="whsec_live"))
+    body = checkout_completed_body(
+        "evt_tamper_1", "acct-7", created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+    signature = sign_webhook(body, secret="whsec_live")
+    tampered = body.replace(b"acct-7", b"acct-2")
+
+    with pytest.raises(AppError) as raised:
+        gateway.verify_webhook(payload=tampered, signature=signature)
+
+    assert raised.value.status == 400
+    assert raised.value.code == "invalid_signature"
+
+
+def test_stripe_gateway_rejects_an_unreadable_body_under_a_valid_signature() -> None:
+    from app.adapters.stripe_billing import StripeBillingGateway
+
+    gateway = StripeBillingGateway(_bare_settings(stripe_webhook_secret="whsec_live"))
+    body = b"this is not a Stripe event"
+
+    with pytest.raises(AppError) as raised:
+        gateway.verify_webhook(payload=body, signature=sign_webhook(body, secret="whsec_live"))
+
+    assert raised.value.status == 400
+    assert raised.value.code == "invalid_request"
+
+
+def test_stripe_gateway_without_webhook_secret_reports_unavailable() -> None:
+    """No secret configured = no key to check against: 503 (retryable), never a blind accept."""
+    from app.adapters.stripe_billing import StripeBillingGateway
+
+    gateway = StripeBillingGateway(_bare_settings())
+
+    with pytest.raises(AppError) as raised:
+        gateway.verify_webhook(payload=b"{}", signature="t=1,v1=x")
+
+    assert raised.value.status == 503
+    assert raised.value.code == "service_unavailable"
