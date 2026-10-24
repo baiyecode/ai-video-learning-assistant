@@ -1,8 +1,10 @@
 """Thin SMTP adapter for the EmailSender port (ticket #21).
 
-Keypair/credential enforcement for production deployments is the production-hardening
-ticket's job; until then a deployment without ``APP_SMTP_HOST``/``APP_SMTP_FROM`` fails
-closed with an understandable 503 instead of crashing at import or startup.
+Production deployments are guaranteed ``APP_SMTP_HOST``/``APP_SMTP_FROM`` by
+``Settings.validate_production_secrets`` (ticket P2-10), so this adapter should never
+see the unconfigured state there. Development and tests may still leave them empty:
+the sender then fails closed with an understandable 503 instead of crashing at import
+or startup.
 """
 
 from __future__ import annotations

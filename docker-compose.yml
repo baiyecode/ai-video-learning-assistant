@@ -9,11 +9,15 @@ services:
       APP_ENV: production
       APP_DEBUG: "false"
       APP_LOG_LEVEL: INFO
-      # Set APP_SECRET_KEY in a root .env file before deploying.
+      # Set APP_SECRET_KEY (plus the APP_STRIPE_* trio and APP_SMTP_HOST/APP_SMTP_FROM
+      # below) in a root .env file before deploying; the api refuses to start without them.
       APP_SECRET_KEY: ${APP_SECRET_KEY:-dev-only-change-me}
       APP_DATABASE_URL: sqlite+aiosqlite:////data/app.db
       APP_DATA_DIR: /data
       APP_MEDIA_ROOT: /media
+      # Same-origin deployment: nginx (web) reverse-proxies /api, so the browser never
+      # crosses an origin and this stays empty. Local Vite development (no compose)
+      # allows http://localhost:5173 through the environment instead.
       APP_CORS_ORIGINS: "[]"
       # The compose stack is served over plain HTTP locally; set true behind HTTPS.
       APP_AUTH_COOKIE_SECURE: ${APP_AUTH_COOKIE_SECURE:-false}
@@ -21,8 +25,30 @@ services:
       APP_DEEPSEEK_BASE_URL: ${APP_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       APP_DEEPSEEK_MODEL: ${APP_DEEPSEEK_MODEL:-deepseek-chat}
       APP_DAILY_BUDGET_USD: ${APP_DAILY_BUDGET_USD:-10}
-      # Feature switch (ticket #23): Douyin parsing, off by default.
+      # Feature switch (ticket #23): Douyin parsing, off by default (P2-10 rollout doc
+      # in docs/ops/douyin-gray-release.md explains how to open and roll back).
       APP_DOUYIN_ENABLED: ${APP_DOUYIN_ENABLED:-false}
+      # Subscription billing (P2-01 / P2-10): production refuses to start while any of
+      # these three is empty; the RuntimeError names the missing APP_STRIPE_* variable.
+      APP_STRIPE_API_KEY: ${APP_STRIPE_API_KEY:-}
+      APP_STRIPE_WEBHOOK_SECRET: ${APP_STRIPE_WEBHOOK_SECRET:-}
+      APP_STRIPE_PRICE_ID: ${APP_STRIPE_PRICE_ID:-}
+      # Display-only price for the pricing UI; the payment provider's checkout wins.
+      APP_SUBSCRIPTION_MONTHLY_USD: ${APP_SUBSCRIPTION_MONTHLY_USD:-4.99}
+      # Email verification (P2-05 / P2-10): APP_SMTP_HOST and APP_SMTP_FROM are
+      # required in production; username/password stay optional for unauthenticated relays.
+      APP_SMTP_HOST: ${APP_SMTP_HOST:-}
+      APP_SMTP_PORT: ${APP_SMTP_PORT:-587}
+      APP_SMTP_USERNAME: ${APP_SMTP_USERNAME:-}
+      APP_SMTP_PASSWORD: ${APP_SMTP_PASSWORD:-}
+      APP_SMTP_USE_TLS: ${APP_SMTP_USE_TLS:-true}
+      APP_SMTP_FROM: ${APP_SMTP_FROM:-}
+      APP_EMAIL_VERIFICATION_TOKEN_TTL_HOURS: ${APP_EMAIL_VERIFICATION_TOKEN_TTL_HOURS:-24}
+      # Base of the verification-email links; must match the public web origin
+      # (WEB_PORT above defaults to 8080; set a real domain behind HTTPS in production).
+      APP_FRONTEND_BASE_URL: ${APP_FRONTEND_BASE_URL:-http://localhost:8080}
+      # Per-Account hourly cap for verification resends (0 disables).
+      APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR: ${APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR:-3}
       # Optional error reporting: leave SENTRY_DSN empty to disable it.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}
