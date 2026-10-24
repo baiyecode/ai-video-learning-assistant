@@ -16,9 +16,9 @@ import re
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
+from app.adapters.demo import DemoEmailSender
 from app.config import Settings
 from app.container import Adapters
-from app.adapters.demo import DemoEmailSender
 from app.deps import get_adapters, get_settings
 from app.errors import AppError, ErrorCode
 
