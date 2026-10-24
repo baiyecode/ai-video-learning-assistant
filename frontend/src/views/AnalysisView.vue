@@ -46,7 +46,7 @@ const membershipBadge = computed(() => {
   return membershipStatusLabel({
     status: quota.membership,
     period_end: null,
-    portal_url: null,
+    cancel_at_period_end: false,
     is_vip: quota.daily_limit < 0,
   });
 });
