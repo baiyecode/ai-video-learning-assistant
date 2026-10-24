@@ -8,15 +8,17 @@ port for a hosted payment page - and membership is a pure read of the record.
 from __future__ import annotations
 
 import logging
+from uuid import uuid4
 
-from sqlalchemy import select
+from sqlalchemy import select, update
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.modules.billing.models import Subscription, SubscriptionStatus
+from app.modules.billing.models import BillingEvent, Subscription, SubscriptionStatus
 from app.modules.billing.schemas import CheckoutOut, MembershipOut
 from app.modules.identity.models import Account
-from app.ports import BillingGateway, WebhookEvent
+from app.ports import BillingGateway, Clock, WebhookEvent
 from app.timeutil import required_utc
 
 logger = logging.getLogger("app.modules.billing")
@@ -26,6 +28,10 @@ STATUS_FREE = "free"
 
 CHECKOUT_COMPLETED = "checkout.session.completed"
 """The one event this ticket's state machine acts on (spec: payment success takes effect)."""
+
+
+def _new_id() -> str:
+    return str(uuid4())
 
 
 async def open_checkout(
@@ -64,16 +70,54 @@ async def membership(session: AsyncSession, account_id: str) -> MembershipOut:
     )
 
 
-async def apply_webhook(session: AsyncSession, event: WebhookEvent) -> None:
+async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent) -> None:
     """Advance the subscription state machine with one verified domain event.
 
-    Slice scope (P2-02): ``checkout.session.completed`` makes the Account Active with
-    the recorded period end; every other event type is a no-op here (audited upstream).
+    The ``BillingEvent`` unique ``event_id`` is claimed first: losing the conflict means
+    Stripe is redelivering an already-processed event, so nothing changes and the caller
+    still answers 2xx. Slice scope (P2-02): ``checkout.session.completed`` makes the
+    Account Active with the recorded period end; every other event type is recorded
+    only (the rest of the state machine ships with P2-04).
     """
+    claim = await session.execute(
+        sqlite_insert(BillingEvent)
+        .values(
+            id=_new_id(),
+            event_id=event.event_id,
+            type=event.type,
+            created=event.created,
+            processed_at=clock.now(),
+            account_id=event.account_id,
+            stripe_subscription_id=event.stripe_subscription_id,
+            applied=False,
+        )
+        .on_conflict_do_nothing(index_elements=["event_id"])
+    )
+    if claim.rowcount == 0:
+        logger.info(
+            "billing_event_duplicate_ignored",
+            extra={
+                "event": "billing_event_duplicate_ignored",
+                "event_id": event.event_id,
+                "event_type": event.type,
+                "outcome": "duplicate",
+            },
+        )
+        return
+    applied = await _transition(session, event)
+    if applied:
+        await session.execute(
+            update(BillingEvent).where(BillingEvent.event_id == event.event_id).values(applied=True)
+        )
+    await session.commit()
+
+
+async def _transition(session: AsyncSession, event: WebhookEvent) -> bool:
+    """Apply the state change this event type owns; True when state moved."""
     if event.type != CHECKOUT_COMPLETED or not event.account_id:
-        return
+        return False
     if await session.get(Account, event.account_id) is None:
-        return
+        return False
     subscription = await session.scalar(
         select(Subscription).where(Subscription.account_id == event.account_id)
     )
@@ -96,7 +140,6 @@ async def apply_webhook(session: AsyncSession, event: WebhookEvent) -> None:
             subscription.stripe_customer_id = event.stripe_customer_id
         if event.price_id:
             subscription.price_id = event.price_id
-    await session.commit()
     logger.info(
         "billing_membership_changed",
         extra={
@@ -105,5 +148,7 @@ async def apply_webhook(session: AsyncSession, event: WebhookEvent) -> None:
             "event_type": event.type,
             "account_id": event.account_id,
             "subscription_status": SubscriptionStatus.ACTIVE.value,
+            "outcome": "applied",
         },
     )
+    return True

@@ -12,7 +12,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Any
 
+from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from tests.fakes import checkout_completed_body, sign_webhook
 
@@ -65,3 +67,49 @@ async def test_checkout_completed_event_activates_membership(client: AsyncClient
         "period_end": PERIOD_END,
         "portal_url": None,
     }
+
+
+async def _audit_rows(app: FastAPI, event_id: str) -> list:
+    from app.modules.billing.models import BillingEvent
+
+    async with app.state.sessionmaker() as session:
+        return list(
+            (
+                await session.scalars(select(BillingEvent).where(BillingEvent.event_id == event_id))
+            ).all()
+        )
+
+
+async def test_replayed_event_id_applies_once_and_still_answers_2xx(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """AC2: Stripe redelivery of one event_id is idempotent yet keeps answering 2xx.
+
+    The second delivery carries the SAME event id but a tampered period end: if the
+    replay ever touched state the membership would visibly shift.
+    """
+    response = await register(client, email="replay@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+
+    first = checkout_completed_body(
+        "evt_replay_1", account_id, created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+    assert (await _post_event(client, first)).status_code == 200
+
+    second = checkout_completed_body(
+        "evt_replay_1",
+        account_id,
+        created=_dt(EVENT_CREATED),
+        period_end=_dt("2026-03-14T09:00:00+00:00"),
+        subscription_id="sub_tampered",
+    )
+    again = await _post_event(client, second)
+
+    assert again.status_code == 200, again.text
+    membership = await client.get("/api/me/membership", headers=auth)
+    assert membership.json()["period_end"] == PERIOD_END
+    assert membership.json()["status"] == "active"
+
+    rows = await _audit_rows(app, "evt_replay_1")
+    assert len(rows) == 1, "one event_id must leave exactly one audit row"

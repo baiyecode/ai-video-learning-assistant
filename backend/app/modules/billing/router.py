@@ -68,5 +68,5 @@ async def billing_webhook(
     event = adapters.billing_gateway.verify_webhook(
         payload=body, signature=request.headers.get("stripe-signature", "")
     )
-    await service.apply_webhook(session, event)
+    await service.apply_webhook(session, adapters.clock, event)
     return WebhookOut(received=True)
