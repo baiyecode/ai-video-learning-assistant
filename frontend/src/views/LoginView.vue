@@ -19,6 +19,7 @@ const password = ref("");
 const touched = ref(false);
 const submitting = ref(false);
 const errorMessage = ref<string | null>(null);
+const noticeMessage = ref<string | null>(null);
 
 const isRegister = computed(() => mode.value === "register");
 const passwordError = computed(() => (touched.value ? validatePassword(password.value) : null));
@@ -34,20 +35,25 @@ function switchMode(next: Mode): void {
   mode.value = next;
   touched.value = false;
   errorMessage.value = null;
+  noticeMessage.value = null;
 }
 
 async function submit(): Promise<void> {
   touched.value = true;
   errorMessage.value = null;
+  noticeMessage.value = null;
   if (validatePassword(password.value) !== null) return;
 
   submitting.value = true;
   try {
     if (isRegister.value) {
-      await auth.register(email.value, password.value);
-    } else {
-      await auth.login(email.value, password.value);
+      // Registration only acknowledges; it never signs us in (P2-06, ticket #22).
+      // Switch to the login tab so the Account can verify the emailed link and sign in.
+      noticeMessage.value = await auth.register(email.value, password.value);
+      mode.value = "login";
+      return;
     }
+    await auth.login(email.value, password.value);
     await router.replace(nextPath.value);
   } catch (error) {
     if (error instanceof ApiError) {
@@ -133,12 +139,16 @@ async function submit(): Promise<void> {
           {{ errorMessage }}
         </p>
 
+        <p v-if="noticeMessage" class="rounded-lg bg-emerald-50 px-3 py-2 text-sm text-emerald-700" role="status">
+          {{ noticeMessage }}
+        </p>
+
         <button
           type="submit"
           class="w-full rounded-lg bg-slate-900 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700 disabled:cursor-not-allowed disabled:bg-slate-400"
           :disabled="submitting"
         >
-          {{ submitting ? "请稍候…" : isRegister ? "注册并登录" : "登录" }}
+          {{ submitting ? "请稍候…" : isRegister ? "注册" : "登录" }}
         </button>
       </form>
     </div>
