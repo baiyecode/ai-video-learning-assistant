@@ -41,6 +41,7 @@ from app.timeutil import required_utc
 router = APIRouter(tags=["identity"])
 
 PASSWORD_MIN_LENGTH = 8
+_MESSAGE_SESSION_INVALID = "登录状态已失效，请重新登录"
 
 
 class Credentials(BaseModel):
@@ -101,11 +102,11 @@ def _require_origin(request: Request, settings: Settings) -> None:
     own_origin = f"{request.url.scheme}://{request.url.netloc}"
     if origin.rstrip("/") in {o.rstrip("/") for o in settings.cors_origins} | {own_origin}:
         return
-    raise AppError(403, ErrorCode.SESSION_INVALID, "登录状态已失效，请重新登录")
+    raise AppError(403, ErrorCode.SESSION_INVALID, _MESSAGE_SESSION_INVALID)
 
 
 def _session_invalid() -> AppError:
-    return AppError(401, ErrorCode.SESSION_INVALID, "登录状态已失效，请重新登录")
+    return AppError(401, ErrorCode.SESSION_INVALID, _MESSAGE_SESSION_INVALID)
 
 
 async def _issue_session(

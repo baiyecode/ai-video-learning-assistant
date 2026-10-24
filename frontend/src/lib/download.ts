@@ -1,5 +1,7 @@
 /** DTOs and pure presentation helpers for the Download flow. */
 
+import { formatDuration } from "@/lib/video";
+
 export type DownloadStatus = "queued" | "downloading" | "merging" | "ready" | "failed" | "expired";
 
 export interface DownloadErrorDto {
@@ -28,7 +30,7 @@ export interface DownloadDto {
   queue_position?: number | null;
 }
 
-const STATUS_LABELS: Record<string, string> = {
+const STATUS_LABELS: Record<DownloadStatus, string> = {
   queued: "排队中",
   downloading: "下载中",
   merging: "合并中",
@@ -37,13 +39,13 @@ const STATUS_LABELS: Record<string, string> = {
   expired: "已过期",
 };
 
-const TERMINAL_STATUSES: readonly string[] = ["ready", "failed", "expired"];
+const TERMINAL_STATUSES: readonly DownloadStatus[] = ["ready", "failed", "expired"];
 
 export function downloadStatusLabel(status: string): string {
-  return STATUS_LABELS[status] ?? status;
+  return STATUS_LABELS[status as DownloadStatus] ?? status;
 }
 
-export function isTerminalStatus(status: string): boolean {
+export function isTerminalStatus(status: DownloadStatus): boolean {
   return TERMINAL_STATUSES.includes(status);
 }
 
@@ -69,11 +71,5 @@ export function remainingSeconds(expiresAt: string | null | undefined, nowMs: nu
 
 /** `900` → `15:00`, `3725` → `1:02:05`. Invalid input clamps to `0:00`. */
 export function formatCountdown(seconds: number): string {
-  const finite = Number.isFinite(seconds) ? seconds : 0;
-  const total = Math.max(0, Math.floor(finite));
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const remainder = total % 60;
-  const pad = (value: number): string => String(value).padStart(2, "0");
-  return hours > 0 ? `${hours}:${pad(minutes)}:${pad(remainder)}` : `${minutes}:${pad(remainder)}`;
+  return formatDuration(seconds);
 }

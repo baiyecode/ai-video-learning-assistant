@@ -7,14 +7,12 @@
  */
 
 import type { SseMessage } from "@/lib/sse";
+import type { UiError } from "@/lib/uiError";
 
 export type AnalysisStatus = "pending" | "streaming" | "completed" | "failed";
 export type SubtitleSource = "manual" | "auto";
 
-export interface AnalysisError {
-  code: string;
-  message: string;
-}
+export type AnalysisError = UiError;
 
 export interface AnalysisVideoDto {
   id: string;
@@ -149,17 +147,15 @@ export function visibleSummary(markdown: string): string {
   return index === -1 ? markdown : markdown.slice(0, index).trimEnd();
 }
 
+const STATUS_LABELS: Record<AnalysisStatus, string> = {
+  pending: "排队中",
+  streaming: "生成中",
+  completed: "已完成",
+  failed: "生成失败",
+};
+
 export function analysisStatusLabel(status: AnalysisStatus): string {
-  switch (status) {
-    case "pending":
-      return "排队中";
-    case "streaming":
-      return "生成中";
-    case "completed":
-      return "已完成";
-    case "failed":
-      return "生成失败";
-  }
+  return STATUS_LABELS[status];
 }
 
 export function formatQuota(quota: QuotaDto | null | undefined): string {

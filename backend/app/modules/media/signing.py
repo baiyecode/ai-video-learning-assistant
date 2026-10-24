@@ -11,13 +11,13 @@ import hashlib
 import hmac
 from datetime import datetime, timedelta
 
+from app import messages
 from app.errors import AppError, ErrorCode
 
 SIGNED_URL_TTL = timedelta(minutes=15)
 FILE_TTL = timedelta(hours=1)
 
 _MESSAGE_INVALID_SIGNATURE = "下载链接无效，请刷新页面后重试"
-_MESSAGE_LINK_EXPIRED = "下载链接已过期，请刷新页面重新获取"
 
 
 def signature_for(download_id: str, expires_at: int, secret: str) -> str:
@@ -46,4 +46,4 @@ def verify_signature(
         raise AppError(403, ErrorCode.INVALID_SIGNATURE, _MESSAGE_INVALID_SIGNATURE)
     if expires_at <= int(now.timestamp()):
         # ``file_expired`` always means HTTP 410 Gone, never 403.
-        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_LINK_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, messages.FILE_EXPIRED)

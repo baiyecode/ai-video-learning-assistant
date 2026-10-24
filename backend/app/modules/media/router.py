@@ -31,7 +31,7 @@ def get_download_manager(request: Request) -> DownloadManager:
     return request.app.state.download_manager
 
 
-async def _start_manager(
+async def _ensure_manager_running(
     request: Request, *, exclude_ids: Collection[str] = ()
 ) -> DownloadManager:
     """Start the manager (recovery + cleanup) before it accepts the given rows."""
@@ -63,7 +63,7 @@ async def create_download(
         account_id=account.id if account is not None else None,
     )
     # The freshly created row is not "interrupted work" from a previous process.
-    manager = await _start_manager(request, exclude_ids=(download.id,))
+    manager = await _ensure_manager_running(request, exclude_ids=(download.id,))
     manager.submit(
         download.id,
         account_id=download.account_id,
@@ -110,7 +110,7 @@ async def retry_download(
         account_id=account.id if account is not None else None,
         visitor_ip=client_ip(request),
     )
-    manager = await _start_manager(request, exclude_ids=(download.id,))
+    manager = await _ensure_manager_running(request, exclude_ids=(download.id,))
     manager.submit(
         download.id,
         account_id=download.account_id,

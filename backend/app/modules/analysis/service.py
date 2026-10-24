@@ -31,8 +31,6 @@ from .schemas import AnalysisErrorOut, AnalysisOut, AnalysisVideoOut, QuotaOut
 logger = logging.getLogger("app.modules.analysis")
 
 MESSAGE_ANALYSIS_NOT_FOUND = "分析不存在或已失效"
-MESSAGE_DRM_PROTECTED = "该视频受 DRM 保护，暂不支持 AI 分析"
-MESSAGE_MEMBERS_ONLY = "该视频为会员专属内容，暂不支持 AI 分析"
 MESSAGE_QUOTA_EXHAUSTED = "今日 Analysis Quota 已用完，请于 {reset}（北京时间）后再试"
 MESSAGE_BUSY = "服务繁忙，请稍后重试"
 
@@ -101,9 +99,9 @@ async def _create_once(
     if video is None:
         raise AppError(404, ErrorCode.VIDEO_NOT_FOUND, messages.VIDEO_NOT_FOUND)
     if video.is_drm:
-        raise AppError(403, ErrorCode.DRM_PROTECTED, MESSAGE_DRM_PROTECTED)
+        raise AppError(403, ErrorCode.DRM_PROTECTED, messages.DRM_PROTECTED)
     if video.is_members_only:
-        raise AppError(403, ErrorCode.MEMBERS_ONLY, MESSAGE_MEMBERS_ONLY)
+        raise AppError(403, ErrorCode.MEMBERS_ONLY, messages.MEMBERS_ONLY)
 
     subtitle = await session.scalar(select(Subtitle).where(Subtitle.video_id == video_id))
     if subtitle is None:

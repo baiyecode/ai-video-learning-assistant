@@ -174,6 +174,15 @@ def _video_context(*, title: str, duration_seconds: int, subtitle_source: str) -
     return f"视频标题：{title}\n视频时长：约 {minutes} 分钟\n字幕来源：{source_label}"
 
 
+def _output_requirements(*, source_label: str) -> str:
+    return (
+        "输出要求：\n"
+        "1. 先用 Markdown 输出摘要，使用 ## 小标题分节，覆盖视频的主要结构与结论；\n"
+        f"2. 然后单独输出一行 `{MINDMAP_MARKER}`，其下用嵌套 Markdown 列表描述视频结构，最多三层；\n"
+        f"3. 全部使用简体中文，只使用{source_label}中的信息，不要编造。\n\n"
+    )
+
+
 def _direct_prompt(
     *,
     title: str,
@@ -190,11 +199,8 @@ def _direct_prompt(
         "你是一名中文视频学习助手。请基于下面的视频字幕，生成结构化的学习笔记。\n"
         f"{context}\n\n"
         f"{note}"
-        "输出要求：\n"
-        "1. 先用 Markdown 输出摘要，使用 ## 小标题分节，覆盖视频的主要结构与结论；\n"
-        f"2. 然后单独输出一行 `{MINDMAP_MARKER}`，其下用嵌套 Markdown 列表描述视频结构，最多三层；\n"
-        "3. 全部使用简体中文，只使用字幕中的信息，不要编造。\n\n"
-        "字幕内容：\n"
+        + _output_requirements(source_label="字幕")
+        + "字幕内容：\n"
         f"{body}"
     )
 
@@ -305,11 +311,8 @@ def build_merge_prompt(plan: GenerationPlan, *, partial_summaries: Sequence[str]
         f"{coverage}"
         "请将这些分段摘要归并成一篇结构化的学习笔记，覆盖视频的开头、中段与结尾，"
         "不要遗漏任何分段的要点，也不要编造。\n\n"
-        "输出要求：\n"
-        "1. 先用 Markdown 输出摘要，使用 ## 小标题分节，覆盖视频的主要结构与结论；\n"
-        f"2. 然后单独输出一行 `{MINDMAP_MARKER}`，其下用嵌套 Markdown 列表描述视频结构，最多三层；\n"
-        "3. 全部使用简体中文，只使用分段摘要中的信息。\n\n"
-        "分段摘要：\n"
+        + _output_requirements(source_label="分段摘要")
+        + "分段摘要：\n"
         f"{blocks}"
     )
 

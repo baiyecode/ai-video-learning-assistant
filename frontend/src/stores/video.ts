@@ -1,18 +1,14 @@
 /** Resolved Video state for the Home resolve flow. */
 
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import type { ResolveResult } from "@/lib/video";
+import { asUiError, type UiError } from "@/lib/uiError";
 import { defineStore } from "pinia";
-
-export interface VideoError {
-  code: string;
-  message: string;
-}
 
 interface VideoState {
   result: ResolveResult | null;
   loading: boolean;
-  error: VideoError | null;
+  error: UiError | null;
   lastUrl: string;
 }
 
@@ -39,10 +35,7 @@ export const useVideoStore = defineStore("video", {
         this.result = await api.post<ResolveResult>("/videos/resolve", { url: trimmed });
       } catch (caught) {
         this.result = null;
-        this.error =
-          caught instanceof ApiError
-            ? { code: caught.code, message: caught.message }
-            : { code: "network_error", message: "网络异常，请检查连接后重试" };
+        this.error = asUiError(caught);
       } finally {
         this.loading = false;
       }

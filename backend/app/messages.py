@@ -27,3 +27,4 @@ LIVE_NOT_SUPPORTED = "暂不支持直播，请粘贴已发布视频的页面地�
 DOWNLOAD_FAILED = "下载失败，请稍后重试"
 DOWNLOAD_TIMEOUT = "下载超时，请稍后重试"
 DOWNLOAD_INTERRUPTED = "服务重启导致任务中断，请重试"
+FILE_EXPIRED = "文件已过期，请重新发起下载"

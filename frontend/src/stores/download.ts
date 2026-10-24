@@ -3,19 +3,15 @@
 import { ApiError, api } from "@/lib/api";
 import type { DownloadDto } from "@/lib/download";
 import { isTerminalStatus } from "@/lib/download";
+import { asUiError, type UiError } from "@/lib/uiError";
 import { defineStore } from "pinia";
 
 const POLL_INTERVAL_MS = 1000;
 
-export interface DownloadUiError {
-  code: string;
-  message: string;
-}
-
 interface DownloadState {
   download: DownloadDto | null;
   starting: boolean;
-  error: DownloadUiError | null;
+  error: UiError | null;
   lastVideoId: string | null;
   lastFormatId: string | null;
 }
@@ -27,12 +23,6 @@ function stopPolling(): void {
     clearTimeout(pollTimer);
     pollTimer = null;
   }
-}
-
-function toUiError(caught: unknown): DownloadUiError {
-  return caught instanceof ApiError
-    ? { code: caught.code, message: caught.message }
-    : { code: "network_error", message: "网络异常，请检查连接后重试" };
 }
 
 export const useDownloadStore = defineStore("download", {
@@ -63,7 +53,7 @@ export const useDownloadStore = defineStore("download", {
         });
         this.schedulePoll();
       } catch (caught) {
-        this.error = toUiError(caught);
+        this.error = asUiError(caught);
       } finally {
         this.starting = false;
       }
@@ -86,7 +76,7 @@ export const useDownloadStore = defineStore("download", {
         this.schedulePoll();
       } catch (caught) {
         if (this.download?.id !== id) return;
-        this.error = toUiError(caught);
+        this.error = asUiError(caught);
         // A 4xx (e.g. 404 not_found, 410 file_expired) will not heal by polling again;
         // 5xx and network failures are transient and keep the countdown alive.
         if (caught instanceof ApiError && caught.status >= 400 && caught.status < 500) return;
@@ -103,7 +93,7 @@ export const useDownloadStore = defineStore("download", {
         this.download = await api.post<DownloadDto>(`/downloads/${current.id}/retry`);
         this.schedulePoll();
       } catch (caught) {
-        this.error = toUiError(caught);
+        this.error = asUiError(caught);
       } finally {
         this.starting = false;
       }

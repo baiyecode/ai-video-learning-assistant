@@ -9,15 +9,15 @@ import { defineStore } from "pinia";
 
 import {
   type AnalysisDto,
-  type AnalysisError,
   type AnalysisStreamState,
   type AnalysisVideoDto,
   type QuotaDto,
   applyAnalysisEvent,
   initialStreamState,
 } from "@/lib/analysis";
-import { ApiError, api } from "@/lib/api";
+import { api } from "@/lib/api";
 import { connectSse } from "@/lib/sse";
+import { asUiError } from "@/lib/uiError";
 
 interface AnalysisState extends AnalysisStreamState {
   id: string | null;
@@ -29,11 +29,6 @@ interface AnalysisState extends AnalysisStreamState {
 }
 
 let activeStream: AbortController | null = null;
-
-function toError(caught: unknown): AnalysisError {
-  if (caught instanceof ApiError) return { code: caught.code, message: caught.message };
-  return { code: "network_error", message: "网络异常，请检查连接后重试" };
-}
 
 export const useAnalysisStore = defineStore("analysis", {
   state: (): AnalysisState => ({
@@ -74,7 +69,7 @@ export const useAnalysisStore = defineStore("analysis", {
       try {
         analysis = await api.get<AnalysisDto>(`/analyses/${id}`);
       } catch (caught) {
-        this.error = toError(caught);
+        this.error = asUiError(caught);
         this.loading = false;
         return;
       }
@@ -110,7 +105,7 @@ export const useAnalysisStore = defineStore("analysis", {
           if (this.done) break;
         }
       } catch (caught) {
-        if (!controller.signal.aborted) this.error = toError(caught);
+        if (!controller.signal.aborted) this.error = asUiError(caught);
       } finally {
         if (activeStream === controller) activeStream = null;
         this.streaming = false;

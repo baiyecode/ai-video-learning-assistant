@@ -5,8 +5,8 @@ import { useRouter } from "vue-router";
 import ComplianceNotice from "@/components/ComplianceNotice.vue";
 import DownloadPanel from "@/components/DownloadPanel.vue";
 import SubtitlePanel from "@/components/SubtitlePanel.vue";
-import { ApiError } from "@/lib/api";
 import { acknowledgeCompliance, complianceMessageForCode } from "@/lib/compliance";
+import { asUiError, type UiError } from "@/lib/uiError";
 import {
   formatDuration,
   formatFileSize,
@@ -23,7 +23,7 @@ const analysisStore = useAnalysisStore();
 const router = useRouter();
 const url = ref("");
 const creatingAnalysis = ref(false);
-const analysisError = ref<{ code: string; message: string } | null>(null);
+const analysisError = ref<UiError | null>(null);
 
 const result = computed(() => store.result);
 const error = computed(() => store.error);
@@ -59,10 +59,7 @@ async function startAnalysis(): Promise<void> {
     const analysis = await analysisStore.create(resolved.video.id);
     await router.push({ name: "analysis", params: { id: analysis.id } });
   } catch (caught) {
-    analysisError.value =
-      caught instanceof ApiError
-        ? { code: caught.code, message: caught.message }
-        : { code: "network_error", message: "网络异常，请检查连接后重试" };
+    analysisError.value = asUiError(caught);
   } finally {
     creatingAnalysis.value = false;
   }

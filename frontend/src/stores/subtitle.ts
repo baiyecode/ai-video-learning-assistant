@@ -7,7 +7,7 @@
 
 import { defineStore } from "pinia";
 
-import { ApiError, api, apiErrorFromResponse, apiUrl, getAccessToken } from "@/lib/api";
+import { api, apiErrorFromResponse, apiUrl, getAccessToken } from "@/lib/api";
 import {
   filenameFromContentDisposition,
   subtitleExportFilename,
@@ -15,28 +15,18 @@ import {
   type SubtitleDetailDto,
   type SubtitleExportFormat,
 } from "@/lib/subtitle";
-
-export interface SubtitleError {
-  code: string;
-  message: string;
-}
+import { asUiError, type UiError } from "@/lib/uiError";
 
 interface SubtitleState {
   videoId: string | null;
   subtitle: SubtitleDetailDto | null;
   loading: boolean;
-  error: SubtitleError | null;
+  error: UiError | null;
   exporting: SubtitleExportFormat | null;
-  exportError: SubtitleError | null;
+  exportError: UiError | null;
 }
 
 let loadSequence = 0;
-
-function toSubtitleError(caught: unknown): SubtitleError {
-  return caught instanceof ApiError
-    ? { code: caught.code, message: caught.message }
-    : { code: "network_error", message: "网络异常，请检查连接后重试" };
-}
 
 function saveBlob(blob: Blob, filename: string): void {
   if (typeof document === "undefined" || typeof URL.createObjectURL !== "function") return;
@@ -78,7 +68,7 @@ export const useSubtitleStore = defineStore("subtitle", {
       } catch (caught) {
         if (sequence !== loadSequence) return;
         this.subtitle = null;
-        this.error = toSubtitleError(caught);
+        this.error = asUiError(caught);
       } finally {
         if (sequence === loadSequence) this.loading = false;
       }
@@ -105,7 +95,7 @@ export const useSubtitleStore = defineStore("subtitle", {
         );
         saveBlob(await response.blob(), filename);
       } catch (caught) {
-        this.exportError = toSubtitleError(caught);
+        this.exportError = asUiError(caught);
       } finally {
         this.exporting = null;
       }

@@ -33,7 +33,6 @@ VISITOR_WINDOW = timedelta(hours=1)
 
 _MESSAGE_DOWNLOAD_NOT_FOUND = "下载任务不存在或已过期"
 _MESSAGE_NOT_READY = "文件尚未准备完成，请稍候"
-_MESSAGE_FILE_EXPIRED = "文件已过期，请重新发起下载"
 _MESSAGE_RETRY_IN_PROGRESS = "任务仍在进行中，请稍候再试"
 _MESSAGE_RETRY_EXHAUSTED = "重试已达上限，请重新发起下载"
 
@@ -178,13 +177,13 @@ async def get_download(
     now = clock.now()
 
     if download.status == DownloadStatus.EXPIRED:
-        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, messages.FILE_EXPIRED)
 
     if download.status == DownloadStatus.READY:
         file_expires = as_utc(download.file_expires_at)
         if download.file_path is None or file_expires is None or now >= file_expires:
             await _mark_expired(session, download, now)
-            raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+            raise AppError(410, ErrorCode.FILE_EXPIRED, messages.FILE_EXPIRED)
         # Keep the link valid while the file is retained, capped at 15 minutes.
         expires_at = min(now + SIGNED_URL_TTL, file_expires)
         download.url_expires_at = expires_at
@@ -249,19 +248,19 @@ async def resolve_file(
 
     download = await _load(session, download_id)
     if download.status == DownloadStatus.EXPIRED:
-        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, messages.FILE_EXPIRED)
     if download.status != DownloadStatus.READY:
         raise AppError(409, ErrorCode.DOWNLOAD_NOT_READY, _MESSAGE_NOT_READY)
 
     file_expires = as_utc(download.file_expires_at)
     if download.file_path is None or file_expires is None or now >= file_expires:
         await _mark_expired(session, download, now)
-        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, messages.FILE_EXPIRED)
 
     path = Path(download.file_path)
     if not await asyncio.to_thread(path.is_file):
         await _mark_expired(session, download, now)
-        raise AppError(410, ErrorCode.FILE_EXPIRED, _MESSAGE_FILE_EXPIRED)
+        raise AppError(410, ErrorCode.FILE_EXPIRED, messages.FILE_EXPIRED)
 
     return path, download.file_name or path.name
 
