@@ -21,6 +21,8 @@ SUBTITLES_UNAVAILABLE = "该视频没有可用字幕，暂不支持 AI 分析"
 
 UNSUPPORTED_URL = "暂不支持该地址，请粘贴 B 站或 YouTube 视频的页面地址"
 UNSUPPORTED_PLATFORM = "暂不支持该平台，请粘贴 B 站或 YouTube 视频的页面地址"
+# Feature-switch rejection: the platform is recognised but not opened yet (ticket #23).
+PLATFORM_NOT_ENABLED = "抖音暂未开放"
 PLAYLIST_NOT_SUPPORTED = "暂不支持播放列表、合集或收藏夹，请粘贴单个视频的页面地址"
 LIVE_NOT_SUPPORTED = "暂不支持直播，请粘贴已发布视频的页面地址"
 
