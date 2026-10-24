@@ -35,6 +35,10 @@ export interface AnalysisDto {
   updated_at: string;
   completed_at: string | null;
   video: AnalysisVideoDto | null;
+  /** Subscription status behind the quota gate: "free"/"active"/"trial_ending"/... */
+  membership?: string;
+  /** Post-creation quota snapshot; VIP carries the unlimited sentinel. */
+  quota?: QuotaDto | null;
 }
 
 /** `GET /api/me` quota block. `resets_at` is ISO8601 with a `+08:00` offset. */
@@ -43,6 +47,8 @@ export interface QuotaDto {
   used: number;
   remaining: number;
   resets_at: string;
+  /** Subscription status; a negative `daily_limit` is the VIP unlimited sentinel. */
+  membership?: string;
 }
 
 export const MINDMAP_MARKER = "## 思维导图";
@@ -160,6 +166,8 @@ export function analysisStatusLabel(status: AnalysisStatus): string {
 
 export function formatQuota(quota: QuotaDto | null | undefined): string {
   if (!quota) return "Quota 加载中";
+  // VIP Membership: the backend sends the -1 unlimited sentinel instead of a cap.
+  if (quota.daily_limit < 0) return "Analysis 不限次";
   const limit = Math.max(0, quota.daily_limit);
   const remaining = Math.max(0, Math.min(quota.remaining, limit));
   return `Quota 剩余 ${remaining} / ${limit}`;
