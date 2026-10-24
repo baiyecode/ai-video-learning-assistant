@@ -55,11 +55,18 @@ _BILIBILI_SHORT_HOSTS = {"b23.tv"}
 _DOUYIN_VIDEO_HOSTS = {"douyin.com", "www.douyin.com", "m.douyin.com"}
 _DOUYIN_SHORT_HOSTS = {"v.douyin.com"}
 
-#: Registry: Platform id -> hosts it owns (the only supported-list truth source).
+#: Registry: Platform id -> hosts it owns. The single source of truth for the
+#: supported list: :data:`_HOST_PLATFORM` is derived from it and the normalise
+#: dispatch below resolves every host through that map.
 PLATFORM_HOSTS: dict[str, frozenset[str]] = {
     YOUTUBE_PLATFORM: frozenset(_YOUTUBE_HOSTS),
     BILIBILI_PLATFORM: frozenset(_BILIBILI_VIDEO_HOSTS | _BILIBILI_SHORT_HOSTS),
     DOUYIN_PLATFORM: frozenset(_DOUYIN_VIDEO_HOSTS | _DOUYIN_SHORT_HOSTS),
+}
+
+#: Host -> Platform lookup consumed by the dispatch, generated from ``PLATFORM_HOSTS``.
+_HOST_PLATFORM: dict[str, str] = {
+    host: platform for platform, hosts in PLATFORM_HOSTS.items() for host in hosts
 }
 
 #: Platforms accepted without any feature switch.
@@ -109,16 +116,24 @@ def normalize_video_url(raw: str, *, enabled_platforms: frozenset[str] = DEFAULT
         raise _unsupported()
     _reject_private_host(host)
 
-    if host in _YOUTUBE_HOSTS or host == "youtu.be":
+    # Dispatch resolves the host through the registry-derived platform map: an
+    # unregistered host is unsupported, full stop.
+    platform = _HOST_PLATFORM.get(host)
+    if platform == YOUTUBE_PLATFORM:
         return _normalise_youtube(host, parsed.path, parsed.query)
-    if host in _BILIBILI_SHORT_HOSTS:
-        return _normalise_bilibili_short(parsed.path)
-    if host in _BILIBILI_VIDEO_HOSTS or host.endswith(".bilibili.com"):
+    if platform == BILIBILI_PLATFORM:
+        if host in _BILIBILI_SHORT_HOSTS:
+            return _normalise_bilibili_short(parsed.path)
         return _normalise_bilibili(host, parsed.path, parsed.query)
-    if host in _DOUYIN_VIDEO_HOSTS or host in _DOUYIN_SHORT_HOSTS:
+    if platform == DOUYIN_PLATFORM:
         if DOUYIN_PLATFORM not in enabled_platforms:
             raise _platform_not_enabled()
         return _normalise_douyin(host, parsed.path)
+    if host.endswith(".bilibili.com"):
+        # Registered family sub-domains the registry does not list as hosts
+        # (live., space., …) still belong to the Bilibili branch so their
+        # dedicated rejection copy beats the generic unsupported one.
+        return _normalise_bilibili(host, parsed.path, parsed.query)
     raise _unsupported()
 
 
