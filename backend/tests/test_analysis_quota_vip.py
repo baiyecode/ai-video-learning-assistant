@@ -120,6 +120,15 @@ async def _create_completed(
     return analysis_id
 
 
+async def _spend_free_quota(
+    client: AsyncClient, adapters: Adapters, headers: dict[str, str], prefix: str
+) -> None:
+    """Exhaust the free daily allowance of 3 so the fourth attempt shows the gate."""
+    for index in range(3):
+        video_id = await _resolve(client, adapters, f"{prefix}{index + 1:04}")
+        await _create_completed(client, adapters, headers, video_id)
+
+
 async def test_active_subscription_creates_analyses_beyond_the_daily_quota(
     client: AsyncClient, adapters: Adapters
 ) -> None:
@@ -128,8 +137,50 @@ async def test_active_subscription_creates_analyses_beyond_the_daily_quota(
     await _activate_membership(client, account_id)
 
     for index in range(4):
-        video_id = await _resolve(client, adapters, f"vipvid{index + 1:05}")
+        video_id = await _resolve(client, adapters, "vipvid" + f"{index + 1:05d}")
         await _create_completed(client, adapters, headers, video_id)
 
     quota = await _me(client, headers)
     assert quota["used"] == 4
+
+
+async def test_trial_ending_subscription_is_exempt_from_the_daily_quota(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """AC2: an unfinished trial (trial_ending) grants VIP Membership too."""
+    headers, account_id = await _register(client, "trial@example.com")
+    await _seed_subscription(app, account_id, "trial_ending")
+
+    for index in range(4):
+        video_id = await _resolve(client, adapters, f"trialid{index + 1:04}")
+        await _create_completed(client, adapters, headers, video_id)
+
+    assert (await _me(client, headers))["used"] == 4
+
+
+async def test_past_due_subscription_is_not_exempt_from_the_daily_quota(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """AC2: payment trouble (past_due) loses the exemption."""
+    headers, account_id = await _register(client, "dunning@example.com")
+    await _seed_subscription(app, account_id, "past_due")
+
+    await _spend_free_quota(client, adapters, headers, "pastdue")
+
+    fourth = await _create(client, headers, await _resolve(client, adapters, "pastdue0004"))
+    assert fourth.status_code == 429, fourth.text
+    assert fourth.json()["error"]["code"] == "quota_exhausted"
+
+
+async def test_canceled_subscription_kept_until_period_end_is_not_exempt(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """AC2: a canceled subscription is not VIP (P2-04 will flip it only pre-period-end)."""
+    headers, account_id = await _register(client, "quitter@example.com")
+    await _seed_subscription(app, account_id, "canceled")
+
+    await _spend_free_quota(client, adapters, headers, "cancel0")
+
+    fourth = await _create(client, headers, await _resolve(client, adapters, "cancel00004"))
+    assert fourth.status_code == 429, fourth.text
+    assert fourth.json()["error"]["code"] == "quota_exhausted"
