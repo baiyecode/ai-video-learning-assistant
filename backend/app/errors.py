@@ -52,6 +52,8 @@ class ErrorCode(StrEnum):
     EMAIL_TAKEN = "email_taken"
     WEAK_PASSWORD = "weak_password"
     SESSION_INVALID = "session_invalid"
+    VERIFICATION_TOKEN_INVALID = "verification_token_invalid"
+    VERIFICATION_TOKEN_EXPIRED = "verification_token_expired"
     ANALYSIS_NOT_FOUND = "analysis_not_found"
     ANALYSIS_FAILED = "analysis_failed"
     REPORT_INVALID = "report_invalid"

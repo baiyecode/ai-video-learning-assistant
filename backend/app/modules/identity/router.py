@@ -31,6 +31,7 @@ from app.modules.identity.security import (
     encode_access_token,
     hash_password,
     hash_refresh_token,
+    hash_verification_token,
     new_refresh_token,
     set_refresh_cookie,
     verify_dummy_password,
@@ -63,6 +64,8 @@ class AccountOut(BaseModel):
     id: str
     email: str
     created_at: str
+    # Email verification state (ticket #21). ``None`` until the one-time link is confirmed.
+    email_verified_at: str | None = None
 
 
 class AuthResponse(BaseModel):
@@ -77,11 +80,17 @@ class MeResponse(BaseModel):
     quota: QuotaOut
 
 
+class ConfirmVerificationRequest(BaseModel):
+    token: str
+
+
 def _account_out(account: Account) -> AccountOut:
+    verified_at = account.email_verified_at
     return AccountOut(
         id=account.id,
         email=account.email,
         created_at=required_utc(account.created_at).isoformat(),
+        email_verified_at=required_utc(verified_at).isoformat() if verified_at else None,
     )
 
 
@@ -296,6 +305,54 @@ async def logout(
         await db.commit()
 
     clear_refresh_cookie(response, settings)
+
+
+def _verification_token_invalid() -> AppError:
+    return AppError(400, ErrorCode.VERIFICATION_TOKEN_INVALID, "验证链接无效或已被使用")
+
+
+@router.post(
+    "/auth/verification/confirm",
+    response_model=AccountOut,
+    summary="Consume a one-time email verification token",
+)
+async def confirm_verification(
+    payload: ConfirmVerificationRequest,
+    db: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(get_clock),
+) -> AccountOut:
+    """Authenticate by the token itself; no session or cookie is required.
+
+    A successful confirmation persists ``email_verified_at`` and clears the stored
+    token hash, making the link single-use.
+    """
+    token_hash = hash_verification_token(payload.token.strip())
+    account = await db.scalar(
+        select(Account).where(Account.verification_token_hash == token_hash)
+    )
+    if account is None:
+        raise _verification_token_invalid()
+
+    now = clock.now()
+    # Atomic single-use consumption: a concurrent replay can only claim the token once.
+    consumed = await db.execute(
+        update(Account)
+        .where(Account.id == account.id, Account.verification_token_hash == token_hash)
+        .values(
+            email_verified_at=now,
+            verification_token_hash=None,
+            verification_expires_at=None,
+        )
+    )
+    if consumed.rowcount != 1:
+        await db.rollback()
+        raise _verification_token_invalid()
+    await db.commit()
+
+    account.email_verified_at = now
+    account.verification_token_hash = None
+    account.verification_expires_at = None
+    return _account_out(account)
 
 
 @router.get("/me", response_model=MeResponse, summary="Current Account and quota")
