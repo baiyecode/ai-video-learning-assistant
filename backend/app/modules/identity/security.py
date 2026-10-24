@@ -58,6 +58,15 @@ def hash_refresh_token(token: str) -> str:
     return hashlib.sha256(token.encode("utf-8")).hexdigest()
 
 
+def new_verification_token() -> str:
+    """Opaque one-time email-verification token (distinct from any Session token)."""
+    return secrets.token_urlsafe(48)
+
+
+def hash_verification_token(token: str) -> str:
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
 def _signing_key(settings: Settings) -> bytes:
     """Derive a full-length HMAC key so short configured secrets still meet HS256 guidance."""
     return hashlib.sha256(f"jwt:{settings.jwt_signing_key}".encode()).digest()
@@ -131,7 +140,9 @@ __all__ = [
     "encode_access_token",
     "hash_password",
     "hash_refresh_token",
+    "hash_verification_token",
     "new_refresh_token",
+    "new_verification_token",
     "set_refresh_cookie",
     "verify_dummy_password",
     "verify_password",

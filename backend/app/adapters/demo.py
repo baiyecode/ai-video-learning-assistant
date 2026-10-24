@@ -8,12 +8,15 @@ database and download paths with stable content.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from app.adapters.webhook_codec import verify_and_decode
 from app.ports import (
     CheckoutSession,
+    OutboundEmail,
     ResolvedVideo,
     SubtitlePayload,
     SubtitleTrack,
@@ -145,3 +148,20 @@ class DemoBillingGateway:
     def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
         """Offline replay of Stripe-style events; the golden path signs with the demo secret."""
         return verify_and_decode(payload=payload, signature_header=signature, secret=DEMO_WEBHOOK_SECRET)
+
+
+@dataclass
+class DemoEmailSender:
+    """In-memory inbox standing in for real email delivery in fake-adapter mode.
+
+    The Playwright golden path reads the verification link back out of ``inbox``;
+    nothing ever leaves the process (user story 27).
+    """
+
+    inbox: list[OutboundEmail] = field(default_factory=list)
+
+    async def send(self, message: OutboundEmail) -> None:
+        logging.getLogger("app.adapters.demo").info(
+            "demo_email_queued", extra={"event": "demo_email_queued", "to": message.to}
+        )
+        self.inbox.append(message)
