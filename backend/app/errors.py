@@ -29,6 +29,7 @@ class ErrorCode(StrEnum):
     INVALID_REQUEST = "invalid_request"
     UNSUPPORTED_URL = "unsupported_url"
     PLAYLIST_NOT_SUPPORTED = "playlist_not_supported"
+    PLATFORM_NOT_ENABLED = "platform_not_enabled"
     DRM_PROTECTED = "drm_protected"
     MEMBERS_ONLY = "members_only"
     VIDEO_UNAVAILABLE = "video_unavailable"

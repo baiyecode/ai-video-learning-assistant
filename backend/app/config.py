@@ -99,6 +99,10 @@ class Settings(BaseSettings):
     # Display-only monthly price shown by the pricing UI; billing maths lives in Stripe.
     subscription_monthly_usd: float = 4.99
 
+    # Feature switches (ticket #23). Douyin parsing ships behind this switch so it can
+    # be opened and rolled back per deployment without a code change.
+    douyin_enabled: bool = False
+
     @property
     def media_dir(self) -> Path:
         return self.media_root if self.media_root is not None else self.data_dir / "media"

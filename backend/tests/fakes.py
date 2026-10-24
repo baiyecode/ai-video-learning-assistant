@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -19,6 +20,11 @@ from app.ports import (
 from app.timeutil import shanghai_day
 
 FAKE_CHECKOUT_URL = "https://checkout.stripe.test/c/fake-checkout"
+
+#: The one Douyin Video the fake short-link wrapper unwraps to.
+DOUYIN_DEFAULT_VIDEO_ID = "7123456789012345678"
+_DOUYIN_SHARE_URL = re.compile(r"^https://www\.douyin\.com/video/(\d{5,23})$")
+_DOUYIN_SHORT_URL = re.compile(r"^https://v\.douyin\.com/[A-Za-z0-9_-]+$")
 
 
 def sample_subtitle_track(language: str = "zh-Hans", *, automatic: bool = False) -> SubtitleTrack:
@@ -52,6 +58,36 @@ def sample_video(
     )
 
 
+def sample_douyin_video(
+    *,
+    platform_video_id: str = DOUYIN_DEFAULT_VIDEO_ID,
+    title: str = "抖音示例视频",
+    duration_seconds: int = 15,
+    with_subtitle: bool = False,
+) -> ResolvedVideo:
+    """Douyin shape: cover + duration, one server-side watermarked format, no captions."""
+    return ResolvedVideo(
+        platform="douyin",
+        platform_video_id=platform_video_id,
+        title=title,
+        duration_seconds=duration_seconds,
+        webpage_url=f"https://www.douyin.com/video/{platform_video_id}",
+        uploader="抖音作者",
+        thumbnail_url="https://p3-douyin.example/cover.jpg",
+        formats=(
+            VideoFormat(
+                format_id="watermark_mp4",
+                label="带水印",
+                ext="mp4",
+                width=720,
+                height=1280,
+                filesize=8_000_000,
+            ),
+        ),
+        subtitles=(sample_subtitle_track(),) if with_subtitle else (),
+    )
+
+
 @dataclass
 class FrozenClock:
     """A Clock frozen at an instant; advance it explicitly in tests."""
@@ -71,7 +107,12 @@ class FrozenClock:
 
 @dataclass
 class FakeVideoSource:
-    """Resolves URLs from an in-memory catalogue and serves canned subtitles."""
+    """Resolves URLs from an in-memory catalogue and serves canned subtitles.
+
+    Unregistered Douyin URLs are recognised by shape: a ``www.douyin.com/video/<id>``
+    page resolves to that id, and a ``v.douyin.com/<code>`` short link unwraps to the
+    default Douyin Video — mirroring the production adapter following the redirect.
+    """
 
     videos: dict[str, ResolvedVideo] = field(default_factory=dict)
     subtitles: dict[tuple[str, str], SubtitlePayload] = field(default_factory=dict)
@@ -85,6 +126,11 @@ class FakeVideoSource:
             raise self.resolve_error
         if url in self.videos:
             return self.videos[url]
+        share = _DOUYIN_SHARE_URL.fullmatch(url)
+        if share is not None:
+            return sample_douyin_video(platform_video_id=share.group(1))
+        if _DOUYIN_SHORT_URL.fullmatch(url):
+            return sample_douyin_video()
         return sample_video()
 
     async def fetch_subtitle(self, video: ResolvedVideo, track: SubtitleTrack) -> SubtitlePayload:

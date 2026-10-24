@@ -34,6 +34,9 @@ _MESSAGE_SERVICE_UNAVAILABLE = "解析服务暂时不可用，请稍后再试"
 _MESSAGE_TIMEOUT = "解析超时，请稍后重试"
 _MESSAGE_SUBTITLE_FAILED = "字幕获取失败，请稍后重试"
 
+_DOUYIN_PLATFORM = "douyin"
+_DOUYIN_WATERMARK_LABEL = "带水印"
+
 _HTML_TAG = re.compile(r"<[^>]+>")
 _TIMESTAMP_LINE = re.compile(r"^\s*(\S+)\s*-->\s*(\S+)")
 
@@ -75,7 +78,9 @@ class YtDlpVideoSource:
             webpage_url=webpage_url,
             uploader=_first_str(info.get("uploader"), info.get("channel")),
             thumbnail_url=thumbnail if isinstance(thumbnail, str) else None,
-            formats=_formats_of(info),
+            formats=(
+                _douyin_formats_of(info) if platform == _DOUYIN_PLATFORM else _formats_of(info)
+            ),
             subtitles=_subtitle_tracks(info),
             is_drm=is_drm,
             is_members_only=members_only,
@@ -214,6 +219,11 @@ def _platform_of(info: dict[str, Any]) -> str:
         return "bilibili"
     if "youtube" in extractor:
         return "youtube"
+    if "douyin" in extractor:
+        # yt-dlp's Douyin extractor follows ``v.douyin.com`` short links to the video
+        # page, so ``id``/``webpage_url`` below already carry the canonical identity:
+        # share page and short link collapse into the same Video, never a duplicate.
+        return _DOUYIN_PLATFORM
     raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_PLATFORM)
 
 
@@ -253,6 +263,52 @@ def _formats_of(info: dict[str, Any]) -> tuple[VideoFormat, ...]:
             )
         )
     return tuple(formats)
+
+
+def _douyin_formats_of(info: dict[str, Any]) -> tuple[VideoFormat, ...]:
+    """Douyin exposes exactly one platform-provided rendition: the watermarked one.
+
+    The Platform dimension decides clarity (ticket #23): whatever raw qualities
+    yt-dlp reports, the product collapses them to the single best merged format and
+    labels it 带水印, so the Download UI never offers a multi-quality choice.
+    """
+    candidates: list[dict[str, Any]] = []
+    for raw in info.get("formats") or []:
+        if not isinstance(raw, dict) or raw.get("has_drm"):
+            continue
+        format_id = str(raw.get("format_id") or "").strip()
+        if not format_id:
+            continue
+        if raw.get("vcodec") in (None, "none") and raw.get("acodec") in (None, "none"):
+            continue
+        candidates.append(raw)
+    if not candidates:
+        return ()
+
+    merged = [
+        raw
+        for raw in candidates
+        if raw.get("vcodec") not in (None, "none") and raw.get("acodec") not in (None, "none")
+    ]
+    best = max(
+        merged or candidates,
+        key=lambda raw: (
+            _int_or_none(raw.get("height")) or 0,
+            _int_or_none(raw.get("filesize") or raw.get("filesize_approx")) or 0,
+        ),
+    )
+    return (
+        VideoFormat(
+            format_id=str(best.get("format_id") or "").strip(),
+            label=_DOUYIN_WATERMARK_LABEL,
+            ext=str(best.get("ext") or "mp4"),
+            width=_int_or_none(best.get("width")),
+            height=_int_or_none(best.get("height")),
+            filesize=_int_or_none(best.get("filesize") or best.get("filesize_approx")),
+            has_video=best.get("vcodec") not in (None, "none"),
+            has_audio=best.get("acodec") not in (None, "none"),
+        ),
+    )
 
 
 def _format_label(raw: dict[str, Any], *, has_video: bool, has_audio: bool) -> str:
