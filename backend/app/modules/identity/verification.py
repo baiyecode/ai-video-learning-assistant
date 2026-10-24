@@ -45,3 +45,23 @@ def verification_email(account: Account, settings: Settings, raw_token: str) -> 
         f"验证链接仅可使用一次。如果这不是你本人的操作，请忽略本邮件。"
     )
     return OutboundEmail(to=account.email, subject=SUBJECT, body=body)
+
+
+REMINDER_SUBJECT = "有人使用你的邮箱注册"
+
+
+def reminder_email(email: str, settings: Settings) -> OutboundEmail:
+    """Copy for an already-occupied email: never reveals the account state (story 22).
+
+    It goes to the address that was just offered at registration, telling the owner
+    someone tried to sign up with it and what to do if that was them, without exposing
+    whether an account exists or whether its email is already verified.
+    """
+    body = (
+        f"你好，\n\n"
+        f"有人刚刚使用这个邮箱在{settings.app_name}尝试注册。\n\n"
+        f"如果这是你本人的操作，说明你的账号尚未完成邮箱验证或你想重新发起：请前往登录页重新登录，"
+        f"并在验证邮件中完成验证。\n\n"
+        f"如果这不是你本人的操作，请忽略本邮件，你的账号不受影响。"
+    )
+    return OutboundEmail(to=email, subject=REMINDER_SUBJECT, body=body)

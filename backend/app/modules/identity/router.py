@@ -1,7 +1,9 @@
-"""Identity HTTP routes: register, login, refresh, logout and ``/api/me``.
+"""Identity HTTP routes: register, login, refresh, logout, email verification and ``/api/me``.
 
-Mounted under ``/api`` by ``main.py``. Refresh tokens travel only in an HttpOnly cookie and
-rotate on every refresh; the database stores just their SHA-256 hash. Access tokens are
+Mounted under ``/api`` by ``main.py``. Registration creates an unverified Account and sends a
+verification mail; it never starts a Session or reveals whether the email was already taken.
+``POST /auth/login`` then issues the Session. Refresh tokens travel only in an HttpOnly cookie
+and rotate on every refresh; the database stores just their SHA-256 hash. Access tokens are
 15-minute JWTs passed as ``Authorization: Bearer``.
 """
 
@@ -37,7 +39,11 @@ from app.modules.identity.security import (
     verify_dummy_password,
     verify_password,
 )
-from app.modules.identity.verification import issue_verification_token, verification_email
+from app.modules.identity.verification import (
+    issue_verification_token,
+    reminder_email,
+    verification_email,
+)
 from app.ports import Clock
 from app.ratelimit import RateLimiter
 from app.timeutil import required_utc
@@ -48,6 +54,11 @@ logger = logging.getLogger("app.identity")
 
 PASSWORD_MIN_LENGTH = 8
 _MESSAGE_SESSION_INVALID = "登录状态已失效，请重新登录"
+# Registration never reveals whether an email is already registered: both the new-Account
+# and the taken-email paths answer with this one sentence and deliver an email (story 22).
+_MESSAGE_REGISTER_ACK = "如果这是你本人的操作，请查收邮箱中的验证邮件"
+_MESSAGE_VERIFICATION_SENT = "验证邮件已发送，请查收邮箱"
+_MESSAGE_ALREADY_VERIFIED = "邮箱已验证，无需再次发送"
 
 
 class Credentials(BaseModel):
@@ -82,6 +93,17 @@ class MeResponse(BaseModel):
 
 class ConfirmVerificationRequest(BaseModel):
     token: str
+
+
+class RegisterResponse(BaseModel):
+    """Uniform registration acknowledgement. Identical whether the email is new or taken."""
+
+    message: str
+
+
+class VerificationRequestResponse(BaseModel):
+    message: str
+    email_verified: bool
 
 
 class ChangePasswordRequest(BaseModel):
@@ -157,29 +179,48 @@ async def _find_session(db: AsyncSession, raw_token: str) -> Session | None:
     )
 
 
+async def _deliver(adapters: Adapters, message) -> None:
+    """Send an email without ever letting a mail outage fail the request.
+
+    Verification and reminder mails are recoverable (the resend endpoint re-sends), so
+    a delivery error is logged and swallowed rather than surfacing to the client.
+    """
+    try:
+        await adapters.email_sender.send(message)
+    except Exception:
+        logger.warning("email_delivery_failed", exc_info=True)
+
+
 @router.post(
     "/auth/register",
-    response_model=AuthResponse,
+    response_model=RegisterResponse,
     status_code=201,
-    summary="Create an Account and start a Session",
+    summary="Create an Account and send its verification email",
 )
 async def register(
     payload: Credentials,
     request: Request,
-    response: Response,
     db: AsyncSession = Depends(get_session),
     settings: Settings = Depends(get_settings),
     clock: Clock = Depends(get_clock),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
     adapters: Adapters = Depends(get_adapters),
-) -> dict:
+) -> RegisterResponse:
+    """Non-revealing registration: the response is identical for a new and a taken email.
+
+    A new email creates an unverified Account and receives a verification mail. A taken
+    email creates nothing and receives an "if this was you" reminder, so the caller cannot
+    tell whether the address is registered. Registration no longer starts a Session; the
+    client authenticates through ``POST /auth/login`` afterwards (story 19).
+    """
     rate_limiter.hit("auth.register", client_ip(request))
     if len(payload.password) < PASSWORD_MIN_LENGTH:
         raise AppError(400, ErrorCode.WEAK_PASSWORD, f"密码至少需要 {PASSWORD_MIN_LENGTH} 位")
 
     email = payload.email.strip().lower()
     if await db.scalar(select(Account).where(Account.email == email)) is not None:
-        raise AppError(409, ErrorCode.EMAIL_TAKEN, "该邮箱已注册，请直接登录")
+        await _deliver(adapters, reminder_email(email, settings))
+        return RegisterResponse(message=_MESSAGE_REGISTER_ACK)
 
     password_hash = await asyncio.to_thread(hash_password, payload.password)
     account = Account(email=email, password_hash=password_hash, created_at=clock.now())
@@ -187,25 +228,15 @@ async def register(
     try:
         await db.flush()
     except IntegrityError:
+        # Lost a registration race for the same email: behave exactly like the taken path.
         await db.rollback()
-        raise AppError(409, ErrorCode.EMAIL_TAKEN, "该邮箱已注册，请直接登录") from None
+        await _deliver(adapters, reminder_email(email, settings))
+        return RegisterResponse(message=_MESSAGE_REGISTER_ACK)
 
-    refresh_token = await _issue_session(
-        db, account, settings, clock, user_agent=request.headers.get("user-agent")
-    )
     verification_token = issue_verification_token(account, settings, clock)
     await db.commit()
-
-    # A delivery failure must not undo a successful registration; the verification
-    # email can be re-sent (ticket #22).
-    try:
-        await adapters.email_sender.send(verification_email(account, settings, verification_token))
-    except Exception:
-        logger.warning("verification_email_delivery_failed", exc_info=True)
-
-    access_token, expires_at = encode_access_token(account.id, settings, now=clock.now())
-    set_refresh_cookie(response, refresh_token, settings)
-    return _auth_response(account, access_token, expires_at, settings)
+    await _deliver(adapters, verification_email(account, settings, verification_token))
+    return RegisterResponse(message=_MESSAGE_REGISTER_ACK)
 
 
 @router.post("/auth/login", response_model=AuthResponse, summary="Start a Session")
@@ -362,6 +393,39 @@ async def confirm_verification(
     account.verification_token_hash = None
     account.verification_expires_at = None
     return _account_out(account)
+
+
+@router.post(
+    "/auth/verification/request",
+    response_model=VerificationRequestResponse,
+    status_code=202,
+    summary="Re-send the verification email for the current Account",
+)
+async def request_verification(
+    db: AsyncSession = Depends(get_session),
+    settings: Settings = Depends(get_settings),
+    clock: Clock = Depends(get_clock),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    adapters: Adapters = Depends(get_adapters),
+    account: Account = Depends(get_current_account),
+) -> VerificationRequestResponse:
+    """Re-send a verification mail, rate-limited per Account.
+
+    Requires a login (a valid bearer token) but not a verified email. A rejected request
+    because of the frequency ceiling is ``429 too_many_requests`` with a ``Retry-After``
+    header, matching the other rate-limited endpoints. Re-sending to an already-verified
+    email sends nothing and keeps the verified state (no leak: the caller is the owner).
+    """
+    rate_limiter.hit("auth.verification.request", account.id)
+    if account.email_verified_at is not None:
+        return VerificationRequestResponse(
+            message=_MESSAGE_ALREADY_VERIFIED, email_verified=True
+        )
+
+    verification_token = issue_verification_token(account, settings, clock)
+    await db.commit()
+    await _deliver(adapters, verification_email(account, settings, verification_token))
+    return VerificationRequestResponse(message=_MESSAGE_VERIFICATION_SENT, email_verified=False)
 
 
 @router.post("/auth/password", status_code=204, summary="Change the Account password")

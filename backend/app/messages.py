@@ -30,3 +30,8 @@ DOWNLOAD_FAILED = "下载失败，请稍后重试"
 DOWNLOAD_TIMEOUT = "下载超时，请稍后重试"
 DOWNLOAD_INTERRUPTED = "服务重启导致任务中断，请重试"
 FILE_EXPIRED = "文件已过期，请重新发起下载"
+
+# Email verification (ticket #22): Analysis is gated on a verified email, but login,
+# resolve, Subtitle viewing and Download are not. The same sentence should read
+# identically wherever the gate fires, so it lives here.
+EMAIL_NOT_VERIFIED = "请先验证邮箱后再发起 Analysis"

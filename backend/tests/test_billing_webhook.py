@@ -24,6 +24,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from tests.auth_flows import login as auth_login
+from tests.auth_flows import register as auth_register
 from tests.fakes import checkout_completed_body, sign_webhook, webhook_event_body
 
 PASSWORD = "correct-horse"
@@ -36,9 +38,9 @@ def bearer(response: Any) -> dict[str, str]:
 
 
 async def register(client: AsyncClient, *, email: str) -> Any:
-    response = await client.post("/api/auth/register", json={"email": email, "password": PASSWORD})
-    assert response.status_code == 201, response.text
-    return response
+    """Register then log in: webhook reads need the Account id and a Session, not verification."""
+    await auth_register(client, email=email, password=PASSWORD)
+    return await auth_login(client, email=email, password=PASSWORD)
 
 
 def _dt(value: str) -> datetime:

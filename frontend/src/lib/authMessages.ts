@@ -6,6 +6,7 @@ const AUTH_MESSAGES: Record<string, string> = {
   invalid_request: "请检查邮箱格式与密码",
   auth_required: "登录状态已失效，请重新登录",
   session_invalid: "登录状态已失效，请重新登录",
+  email_not_verified: "请先验证邮箱后再发起 Analysis",
   too_many_requests: "尝试过于频繁，请稍后再试",
   service_unavailable: "服务暂时不可用，请稍后再试",
   internal_error: "服务器内部错误，请稍后重试",

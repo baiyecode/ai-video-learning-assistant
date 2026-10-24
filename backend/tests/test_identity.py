@@ -2,6 +2,10 @@
 
 Everything is exercised through the in-process HTTP seam with fake adapters and a
 FrozenClock, so token/session expiry is deterministic.
+
+Registration no longer starts a Session and no longer reveals whether an email is taken
+(ticket #22): it always answers 201 with a uniform message and authenticates through
+``POST /auth/login`` afterwards.
 """
 
 from __future__ import annotations
@@ -22,7 +26,7 @@ def bearer(response: Any) -> dict[str, str]:
 async def register(
     client: AsyncClient,
     *,
-    email: str = "Learner@Example.com",
+    email: str = "learner@example.com",
     password: str = PASSWORD,
     expect: int = 201,
 ) -> Any:
@@ -31,13 +35,44 @@ async def register(
     return response
 
 
-async def test_register_login_and_me_round_trip(client: AsyncClient) -> None:
-    response = await register(client)
+async def login(
+    client: AsyncClient,
+    *,
+    email: str = "learner@example.com",
+    password: str = PASSWORD,
+    expect: int = 200,
+) -> Any:
+    response = await client.post("/api/auth/login", json={"email": email, "password": password})
+    assert response.status_code == expect, response.text
+    return response
 
+
+async def register_and_login(client: AsyncClient, *, email: str = "learner@example.com") -> Any:
+    """Create the Account (unverified) and open a Session; returns the login response."""
+    await register(client, email=email)
+    return await login(client, email=email)
+
+
+async def test_register_creates_account_without_authenticating(client: AsyncClient) -> None:
+    response = await register(client, email="Learner@Example.com")
+
+    body = response.json()
+    # A uniform acknowledgement: no Session material, and nothing that says "created".
+    assert body == {"message": "如果这是你本人的操作，请查收邮箱中的验证邮件"}
+    assert "access_token" not in body
+    assert "account" not in body
+    assert "set-cookie" not in {k.lower() for k in response.headers}
+
+
+async def test_login_returns_the_session_and_me_round_trip(client: AsyncClient) -> None:
+    await register(client)
+
+    response = await login(client, email="LEARNER@example.COM")
     body = response.json()
     assert body["account"]["email"] == "learner@example.com"
     assert body["account"]["id"]
     assert body["account"]["created_at"]
+    assert body["account"]["email_verified_at"] is None
     assert body["access_token"]
     assert body["token_type"] == "bearer"
     assert body["expires_in"] == 15 * 60
@@ -58,23 +93,17 @@ async def test_register_login_and_me_round_trip(client: AsyncClient) -> None:
         "membership": "free",
     }
 
-    # Email is normalised, so logging in with different casing works.
-    login = await client.post(
-        "/api/auth/login", json={"email": "LEARNER@example.COM", "password": PASSWORD}
-    )
-    assert login.status_code == 200
-    assert login.json()["account"]["id"] == body["account"]["id"]
 
-    me = await client.get("/api/me", headers=bearer(login))
-    assert me.status_code == 200
+async def test_registering_a_taken_email_does_not_reveal_it(client: AsyncClient) -> None:
+    """A second registration for the same email is indistinguishable from the first."""
+    first = await register(client, email="learner@example.com")
+    second = await register(client, email="Learner@Example.com")
 
-
-async def test_duplicate_email_is_rejected_case_insensitively(client: AsyncClient) -> None:
-    await register(client, email="learner@example.com")
-
-    response = await register(client, email="Learner@Example.com", expect=409)
-
-    assert response.json()["error"]["code"] == "email_taken"
+    assert second.status_code == first.status_code == 201
+    assert second.json() == first.json()
+    # Nothing in the acknowledgement signals that the email was already registered.
+    assert "account" not in second.json()
+    assert "access_token" not in second.json()
 
 
 async def test_weak_password_is_rejected(client: AsyncClient) -> None:
@@ -94,12 +123,8 @@ async def test_wrong_password_and_unknown_email_share_invalid_credentials(
 ) -> None:
     await register(client, email="learner@example.com")
 
-    wrong_password = await client.post(
-        "/api/auth/login", json={"email": "learner@example.com", "password": "wrong-password"}
-    )
-    unknown_email = await client.post(
-        "/api/auth/login", json={"email": "nobody@example.com", "password": PASSWORD}
-    )
+    wrong_password = await login(client, password="wrong-password", expect=401)
+    unknown_email = await login(client, email="nobody@example.com", expect=401)
 
     for response in (wrong_password, unknown_email):
         assert response.status_code == 401
@@ -108,7 +133,7 @@ async def test_wrong_password_and_unknown_email_share_invalid_credentials(
 
 
 async def test_refresh_rotates_the_token_and_rejects_the_old_one(client: AsyncClient) -> None:
-    registered = await register(client)
+    logged_in = await register_and_login(client)
     old_refresh = client.cookies.get("refresh_token")
     assert old_refresh
 
@@ -116,7 +141,7 @@ async def test_refresh_rotates_the_token_and_rejects_the_old_one(client: AsyncCl
     assert refreshed.status_code == 200
     new_refresh = client.cookies.get("refresh_token")
     assert new_refresh and new_refresh != old_refresh
-    assert refreshed.json()["access_token"] != registered.json()["access_token"]
+    assert refreshed.json()["access_token"] != logged_in.json()["access_token"]
     assert refreshed.json()["account"]["email"] == "learner@example.com"
 
     me = await client.get("/api/me", headers=bearer(refreshed))
@@ -130,13 +155,11 @@ async def test_refresh_rotates_the_token_and_rejects_the_old_one(client: AsyncCl
 
 
 async def test_logout_revokes_only_the_current_session(client: AsyncClient) -> None:
-    first = await register(client)
+    first = await register_and_login(client)
     first_refresh = client.cookies.get("refresh_token")
     assert first_refresh
 
-    second = await client.post(
-        "/api/auth/login", json={"email": "learner@example.com", "password": PASSWORD}
-    )
+    second = await login(client)
     assert second.status_code == 200
     second_refresh = client.cookies.get("refresh_token")
     assert second_refresh and second_refresh != first_refresh
@@ -162,7 +185,7 @@ async def test_logout_revokes_only_the_current_session(client: AsyncClient) -> N
 async def test_expired_access_token_is_rejected_but_refresh_still_works(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    response = await register(client)
+    response = await register_and_login(client)
     adapters.clock.advance(seconds=15 * 60 + 1)
 
     expired = await client.get("/api/me", headers=bearer(response))
@@ -175,7 +198,7 @@ async def test_expired_access_token_is_rejected_but_refresh_still_works(
 
 
 async def test_expired_refresh_session_is_rejected(client: AsyncClient, adapters: Adapters) -> None:
-    await register(client)
+    await register_and_login(client)
     adapters.clock.advance(days=7, seconds=1)
 
     response = await client.post("/api/auth/refresh", headers=ORIGIN)
@@ -201,7 +224,7 @@ async def test_refresh_requires_a_session_cookie(client: AsyncClient) -> None:
 
 
 async def test_refresh_and_logout_reject_a_foreign_origin(client: AsyncClient) -> None:
-    registered = await register(client)
+    logged_in = await register_and_login(client)
 
     bad_origin = {"Origin": "https://evil.example"}
     refresh = await client.post("/api/auth/refresh", headers=bad_origin)
@@ -215,4 +238,4 @@ async def test_refresh_and_logout_reject_a_foreign_origin(client: AsyncClient) -
     # The rejected logout did not revoke anything.
     good = await client.post("/api/auth/refresh", headers=ORIGIN)
     assert good.status_code == 200
-    assert (await client.get("/api/me", headers=bearer(registered))).status_code == 200
+    assert (await client.get("/api/me", headers=bearer(logged_in))).status_code == 200
