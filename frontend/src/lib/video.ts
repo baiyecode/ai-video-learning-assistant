@@ -42,12 +42,25 @@ export interface ResolveResult {
 const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube",
   bilibili: "B 站",
+  douyin: "抖音",
+};
+
+/**
+ * Resolve-flow codes the product owns its own copy for (ticket #23).
+ * Everything else keeps the server-issued message.
+ */
+const VIDEO_FLOW_MESSAGES: Record<string, string> = {
+  platform_not_enabled: "抖音暂未开放",
 };
 
 const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;
 
 export function platformLabel(platform: string): string {
   return PLATFORM_LABELS[platform] ?? platform;
+}
+
+export function videoFlowMessageForCode(code: string): string | null {
+  return VIDEO_FLOW_MESSAGES[code] ?? null;
 }
 
 export function subtitleSourceLabel(isAutomatic: boolean): string {

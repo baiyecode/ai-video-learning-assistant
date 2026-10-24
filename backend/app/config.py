@@ -90,6 +90,19 @@ class Settings(BaseSettings):
     # the Playwright golden path. Never enable this in production.
     fake_adapters: bool = False
 
+    # Subscription billing (ticket P2-01). Development may leave the Stripe
+    # credentials unset; billing requests then answer 503 instead of crashing.
+    # Production refuses to start without them (checked in a later ticket).
+    stripe_api_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id: str = ""
+    # Display-only monthly price shown by the pricing UI; billing maths lives in Stripe.
+    subscription_monthly_usd: float = 4.99
+
+    # Feature switches (ticket #23). Douyin parsing ships behind this switch so it can
+    # be opened and rolled back per deployment without a code change.
+    douyin_enabled: bool = False
+
     # Email verification (ticket #21): lifetime of the one-time verification token
     # (kept short on purpose; 24h is the cap) and the product page the email links back to.
     email_verification_token_ttl_hours: int = 24

@@ -129,3 +129,29 @@ class EmailSender(Protocol):
     """Deliver one email. Fake adapters keep an observable in-memory inbox."""
 
     async def send(self, message: OutboundEmail) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CheckoutSession:
+    """A hosted payment page created by the billing gateway; the user is sent to ``url``."""
+
+    id: str
+    url: str
+
+
+@runtime_checkable
+class BillingGateway(Protocol):
+    """Subscription billing provider (Stripe in production). Business modules never
+    import the SDK; adapters that raise ``AppError`` surface as the HTTP envelope."""
+
+    async def create_checkout(
+        self,
+        *,
+        account_id: str,
+        email: str | None,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        """Create a subscription Checkout Session for one monthly price."""
+        ...

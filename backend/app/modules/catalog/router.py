@@ -10,8 +10,9 @@ from typing import Literal
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import Settings
 from app.container import Adapters
-from app.deps import get_adapters, get_rate_limiter, get_session
+from app.deps import get_adapters, get_rate_limiter, get_session, get_settings
 from app.http import client_ip
 from app.ratelimit import RateLimiter
 
@@ -27,10 +28,13 @@ async def resolve_video(
     request: Request,
     session: AsyncSession = Depends(get_session),
     adapters: Adapters = Depends(get_adapters),
+    settings: Settings = Depends(get_settings),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> ResolveResponse:
     rate_limiter.hit("videos.resolve", client_ip(request))
-    return await service.resolve_video(session, adapters.video_source, adapters.clock, payload.url)
+    return await service.resolve_video(
+        session, adapters.video_source, adapters.clock, payload.url, settings
+    )
 
 
 @router.get("/{video_id}", response_model=VideoDetailResponse)
