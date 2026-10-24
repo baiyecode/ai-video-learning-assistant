@@ -1,9 +1,13 @@
-"""Stripe billing gateway adapter (ticket P2-01).
+"""Stripe billing gateway adapter (tickets P2-01 / P2-02).
 
 Wraps the Stripe SDK behind the ``BillingGateway`` port. Constructing this adapter
 always succeeds, even without credentials: the SDK import and every network call are
 deferred, and a request made while ``APP_STRIPE_API_KEY``/``APP_STRIPE_PRICE_ID`` are
 missing answers an understandable 503 instead of crashing at import or startup.
+
+Webhook verification needs no SDK: the ``Stripe-Signature`` HMAC scheme is implemented
+in stdlib by ``app.adapters.webhook_codec``, so the gateway can vet and decode events
+even while the account-level SDK calls are unavailable.
 """
 
 from __future__ import annotations
@@ -11,9 +15,10 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from app.adapters.webhook_codec import verify_and_decode
 from app.config import Settings
 from app.errors import AppError, ErrorCode
-from app.ports import CheckoutSession
+from app.ports import CheckoutSession, WebhookEvent
 
 logger = logging.getLogger("app.adapters.stripe_billing")
 
@@ -70,3 +75,11 @@ class StripeBillingGateway:
             )
             raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_UNAVAILABLE) from exc
         return CheckoutSession(id=str(session["id"]), url=str(session["url"]))
+
+    def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
+        """Verify and decode a Stripe webhook. Without ``APP_STRIPE_WEBHOOK_SECRET``
+        there is no key to check against, so the gateway reports itself unavailable."""
+        secret = self._settings.stripe_webhook_secret.strip()
+        if not secret:
+            raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_NOT_CONFIGURED)
+        return verify_and_decode(payload=payload, signature_header=signature, secret=secret)
