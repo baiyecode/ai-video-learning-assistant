@@ -173,3 +173,29 @@ async def test_unknown_event_type_is_recorded_but_never_moves_state(
 
     rows = await _audit_rows(app, "evt_future_1")
     assert [(row.type, row.applied) for row in rows] == [("customer.subscription.deleted", False)]
+
+
+async def test_bad_signature_is_rejected_and_changes_nothing(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """AC5: an event that fails the signature gate is a 400 and touches no data at all."""
+    response = await register(client, email="attacker@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    body = checkout_completed_body(
+        "evt_evil", account_id, created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+
+    forged = await client.post(
+        "/api/billing/webhook", content=body, headers={"stripe-signature": "t=1768471200,v1=deadbeef"}
+    )
+
+    assert forged.status_code == 400, forged.text
+    assert forged.json()["error"]["code"] == "invalid_signature"
+
+    unsigned = await client.post("/api/billing/webhook", content=body)
+    assert unsigned.status_code == 400, unsigned.text
+
+    membership = await client.get("/api/me/membership", headers=auth)
+    assert membership.json()["status"] == "free"
+    assert await _audit_rows(app, "evt_evil") == []
