@@ -50,12 +50,17 @@ def verify_dummy_password(password: str) -> None:
     verify_password(password, _DUMMY_PASSWORD_HASH)
 
 
+def _sha256_hex(value: str) -> str:
+    """The one SHA-256-to-hex primitive behind every persisted opaque token hash."""
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
 def new_refresh_token() -> str:
     return secrets.token_urlsafe(48)
 
 
 def hash_refresh_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return _sha256_hex(token)
 
 
 def new_verification_token() -> str:
@@ -64,7 +69,7 @@ def new_verification_token() -> str:
 
 
 def hash_verification_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+    return _sha256_hex(token)
 
 
 def _signing_key(settings: Settings) -> bytes:
