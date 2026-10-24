@@ -84,6 +84,11 @@ class ConfirmVerificationRequest(BaseModel):
     token: str
 
 
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def _account_out(account: Account) -> AccountOut:
     verified_at = account.email_verified_at
     return AccountOut(
@@ -357,6 +362,30 @@ async def confirm_verification(
     account.verification_token_hash = None
     account.verification_expires_at = None
     return _account_out(account)
+
+
+@router.post("/auth/password", status_code=204, summary="Change the Account password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_session),
+) -> None:
+    """Re-hash the password and invalidate any unused verification token (story 23).
+
+    An already-confirmed Account keeps ``email_verified_at``; only the outstanding
+    one-time link dies.
+    """
+    if len(payload.new_password) < PASSWORD_MIN_LENGTH:
+        raise AppError(400, ErrorCode.WEAK_PASSWORD, f"密码至少需要 {PASSWORD_MIN_LENGTH} 位")
+
+    valid = await asyncio.to_thread(verify_password, payload.current_password, account.password_hash)
+    if not valid:
+        raise AppError(403, ErrorCode.INVALID_CREDENTIALS, "当前密码不正确")
+
+    account.password_hash = await asyncio.to_thread(hash_password, payload.new_password)
+    account.verification_token_hash = None
+    account.verification_expires_at = None
+    await db.commit()
 
 
 @router.get("/me", response_model=MeResponse, summary="Current Account and quota")

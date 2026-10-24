@@ -160,3 +160,57 @@ async def test_token_lifetime_follows_the_configured_ttl(settings: Settings) -> 
 
     assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == "verification_token_expired"
+
+
+async def test_password_change_invalidates_an_unused_verification_token(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    registered = await register(client)
+    token = verification_token(adapters)
+
+    changed = await client.post(
+        "/api/auth/password",
+        json={"current_password": PASSWORD, "new_password": "new-correct-horse"},
+        headers=bearer(registered),
+    )
+    assert changed.status_code == 204, changed.text
+
+    confirm = await client.post("/api/auth/verification/confirm", json={"token": token})
+    assert confirm.status_code == 400, confirm.text
+    assert confirm.json()["error"]["code"] == "verification_token_invalid"
+
+    # The new password is the one that works now.
+    login = await client.post(
+        "/api/auth/login",
+        json={"email": "learner@example.com", "password": "new-correct-horse"},
+    )
+    assert login.status_code == 200, login.text
+
+
+async def test_password_change_rejects_wrong_current_and_weak_new_password(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    registered = await register(client)
+    headers = bearer(registered)
+
+    wrong_current = await client.post(
+        "/api/auth/password",
+        json={"current_password": "not-my-password", "new_password": "new-correct-horse"},
+        headers=headers,
+    )
+    assert wrong_current.status_code == 403, wrong_current.text
+    assert wrong_current.json()["error"]["code"] == "invalid_credentials"
+
+    weak_new = await client.post(
+        "/api/auth/password",
+        json={"current_password": PASSWORD, "new_password": "short"},
+        headers=headers,
+    )
+    assert weak_new.status_code == 400, weak_new.text
+    assert weak_new.json()["error"]["code"] == "weak_password"
+
+    # A rejected change keeps the verification token usable.
+    still_usable = await client.post(
+        "/api/auth/verification/confirm", json={"token": verification_token(adapters)}
+    )
+    assert still_usable.status_code == 200, still_usable.text
