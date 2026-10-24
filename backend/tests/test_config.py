@@ -46,3 +46,26 @@ def test_production_accepts_strong_secrets_and_empty_jwt_fallback(tmp_path: Path
 def test_development_keeps_its_convenience_defaults(tmp_path: Path) -> None:
     settings = _production(tmp_path, env="test", secret_key="dev-only-change-me")
     settings.validate_production_secrets()
+
+
+def test_subscription_defaults_follow_the_app_prefix_convention() -> None:
+    settings = Settings(_env_file=None, env="test", secret_key="test-only-secret")
+
+    assert settings.stripe_api_key == ""
+    assert settings.stripe_webhook_secret == ""
+    assert settings.stripe_price_id == ""
+    assert settings.subscription_monthly_usd == 4.99
+
+
+def test_stripe_settings_read_app_prefixed_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("APP_STRIPE_API_KEY", "sk_test_123")
+    monkeypatch.setenv("APP_STRIPE_WEBHOOK_SECRET", "whsec_123")
+    monkeypatch.setenv("APP_STRIPE_PRICE_ID", "price_monthly_1")
+    monkeypatch.setenv("APP_SUBSCRIPTION_MONTHLY_USD", "9.99")
+
+    settings = Settings(_env_file=None, env="test", secret_key="test-only-secret")
+
+    assert settings.stripe_api_key == "sk_test_123"
+    assert settings.stripe_webhook_secret == "whsec_123"
+    assert settings.stripe_price_id == "price_monthly_1"
+    assert settings.subscription_monthly_usd == 9.99

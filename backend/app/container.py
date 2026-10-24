@@ -7,7 +7,7 @@ from dataclasses import dataclass
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from .config import Settings
-from .ports import BudgetLedger, Clock, MediaStore, Summarizer, VideoSource
+from .ports import BillingGateway, BudgetLedger, Clock, MediaStore, Summarizer, VideoSource
 
 
 @dataclass(frozen=True, slots=True)
@@ -17,6 +17,7 @@ class Adapters:
     summarizer: Summarizer
     clock: Clock
     budget_ledger: BudgetLedger
+    billing_gateway: BillingGateway
 
 
 def build_production_adapters(
@@ -33,7 +34,7 @@ def build_production_adapters(
 
     clock = SystemClock()
     if settings.fake_adapters:
-        from .adapters.demo import DemoMediaStore, DemoSummarizer, DemoVideoSource
+        from .adapters.demo import DemoBillingGateway, DemoMediaStore, DemoSummarizer, DemoVideoSource
 
         return Adapters(
             video_source=DemoVideoSource(),
@@ -41,10 +42,12 @@ def build_production_adapters(
             summarizer=DemoSummarizer(),
             clock=clock,
             budget_ledger=DbBudgetLedger(sessionmaker, clock, settings),
+            billing_gateway=DemoBillingGateway(),
         )
 
     from .adapters.deepseek_summarizer import DeepSeekSummarizer
     from .adapters.fs_media_store import FsMediaStore
+    from .adapters.stripe_billing import StripeBillingGateway
     from .adapters.ytdlp_source import YtDlpVideoSource
 
     return Adapters(
@@ -53,4 +56,5 @@ def build_production_adapters(
         summarizer=DeepSeekSummarizer(settings),
         clock=clock,
         budget_ledger=DbBudgetLedger(sessionmaker, clock, settings),
+        billing_gateway=StripeBillingGateway(settings),
     )
