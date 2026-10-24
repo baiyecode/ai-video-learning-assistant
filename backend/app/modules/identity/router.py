@@ -50,7 +50,7 @@ from app.timeutil import required_utc
 
 router = APIRouter(tags=["identity"])
 
-logger = logging.getLogger("app.identity")
+logger = logging.getLogger("app.modules.identity")
 
 PASSWORD_MIN_LENGTH = 8
 _MESSAGE_SESSION_INVALID = "登录状态已失效，请重新登录"
@@ -188,7 +188,11 @@ async def _deliver(adapters: Adapters, message) -> None:
     try:
         await adapters.email_sender.send(message)
     except Exception:
-        logger.warning("email_delivery_failed", exc_info=True)
+        logger.warning(
+            "email_delivery_failed",
+            extra={"event": "email_delivery_failed", "recipient": message.to},
+            exc_info=True,
+        )
 
 
 async def _neutral_register_ack(

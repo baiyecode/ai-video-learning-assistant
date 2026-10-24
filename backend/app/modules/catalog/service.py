@@ -41,7 +41,7 @@ from .urls import (
     normalize_video_url,
 )
 
-logger = logging.getLogger("app.catalog")
+logger = logging.getLogger("app.modules.catalog")
 
 FORMATS_TTL = timedelta(minutes=10)
 
