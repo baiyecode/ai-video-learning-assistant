@@ -18,7 +18,7 @@ from sqlalchemy import select
 
 from tests.auth_flows import login as auth_login
 from tests.auth_flows import register as auth_register
-from tests.fakes import checkout_completed_body, lifecycle_event_body, sign_webhook
+from tests.fakes import FAKE_PORTAL_URL, checkout_completed_body, lifecycle_event_body, sign_webhook
 
 PASSWORD = "correct-horse"
 CHECKOUT_CREATED = "2026-01-15T09:00:00+00:00"
@@ -277,3 +277,80 @@ async def test_lifecycle_event_for_an_unknown_subscription_changes_nothing(
     assert (await _membership(client, auth))["status"] == "free"
     rows = await _audit_rows(app, "evt_orphan")
     assert [(row.account_id, row.applied) for row in rows] == [(None, False)]
+
+
+async def test_portal_endpoint_returns_the_gateway_portal_url(client: AsyncClient) -> None:
+    """AC4: an Account with a subscription gets the self-service portal link from the gateway."""
+    response = await register(client, email="portal@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    portal = await client.post("/api/billing/portal", headers=auth)
+
+    assert portal.status_code == 200, portal.text
+    assert portal.json() == {"url": FAKE_PORTAL_URL}
+
+
+async def test_portal_requires_logging_in(client: AsyncClient) -> None:
+    response = await client.post("/api/billing/portal")
+
+    assert response.status_code == 401, response.text
+    assert response.json()["error"]["code"] == "auth_required"
+
+
+async def test_portal_without_a_subscription_is_an_understood_404(client: AsyncClient) -> None:
+    """AC4: free Accounts get a stable code and a Chinese message, not a stack or a 500."""
+    response = await register(client, email="nopay@example.com")
+    auth = bearer(response)
+
+    portal = await client.post("/api/billing/portal", headers=auth)
+
+    assert portal.status_code == 404, portal.text
+    error = portal.json()["error"]
+    assert error["code"] == "subscription_not_found"
+    assert "订阅" in error["message"]
+
+
+@pytest.mark.parametrize("lifecycle_event", ["invoice.payment_failed", "customer.subscription.deleted"])
+async def test_portal_stays_open_for_past_due_and_canceled_subscriptions(
+    client: AsyncClient, lifecycle_event: str
+) -> None:
+    """Story 11/12: card updates and billing history live exactly when payments hurt."""
+    response = await register(client, email=f"portal-{lifecycle_event}@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+    later = lifecycle_event_body(
+        f"evt_{lifecycle_event}_portal", lifecycle_event, _dt("2026-01-15T10:00:00+00:00"),
+        account_id=account_id,
+    )
+    assert (await _post_event(client, later)).status_code == 200
+
+    portal = await client.post("/api/billing/portal", headers=auth)
+
+    assert portal.status_code == 200, portal.text
+    assert portal.json() == {"url": FAKE_PORTAL_URL}
+
+
+async def test_stripe_gateway_portal_reports_unavailable_without_configuration() -> None:
+    """Production adapter parity with checkout: no keys or no customer = clear 503, no crash."""
+    from app.adapters.stripe_billing import StripeBillingGateway
+    from app.config import Settings
+    from app.errors import AppError
+
+    unconfigured = StripeBillingGateway(
+        Settings(_env_file=None, env="test", secret_key="test-only-secret")
+    )
+    with pytest.raises(AppError) as raised:
+        await unconfigured.create_portal(stripe_customer_id="cus_1", return_url="http://testserver/")
+    assert raised.value.status == 503
+    assert raised.value.code == "service_unavailable"
+
+    keyed = StripeBillingGateway(
+        Settings(_env_file=None, env="test", secret_key="test-only-secret", stripe_api_key="sk_test_x")
+    )
+    with pytest.raises(AppError) as raised:
+        await keyed.create_portal(stripe_customer_id="", return_url="http://testserver/")
+    assert raised.value.status == 503
+    assert raised.value.code == "service_unavailable"

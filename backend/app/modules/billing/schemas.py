@@ -11,6 +11,12 @@ class CheckoutOut(BaseModel):
     url: str
 
 
+class PortalOut(BaseModel):
+    """The self-service customer portal page (card updates, invoices) for a subscriber."""
+
+    url: str
+
+
 class MembershipOut(BaseModel):
     """The one subscription truth for the frontend (spec API contract).
 

@@ -140,6 +140,13 @@ class CheckoutSession:
 
 
 @dataclass(frozen=True, slots=True)
+class CustomerPortal:
+    """The provider-hosted customer portal page (card updates, invoices) for one owner."""
+
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
 class WebhookEvent:
     """A signature-verified domain event decoded by a BillingGateway adapter.
 
@@ -182,4 +189,16 @@ class BillingGateway(Protocol):
         """Verify the raw webhook body against the provider signature header and
         decode it into one domain event. Raises ``AppError`` (400) when the signature
         is invalid or the body is unreadable; the payload is trusted only past this gate."""
+        ...
+
+    async def create_portal(
+        self,
+        *,
+        stripe_customer_id: str,
+        return_url: str,
+    ) -> CustomerPortal:
+        """Mint a customer portal session for the subscription owner (P2-04 self-service).
+
+        ``stripe_customer_id`` may be blank when the webhooks never carried one; adapters
+        answer an understandable ``AppError`` instead of an SDK-level failure."""
         ...

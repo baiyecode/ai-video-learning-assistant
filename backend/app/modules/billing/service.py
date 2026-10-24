@@ -15,13 +15,16 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
+from app.errors import AppError, ErrorCode
 from app.modules.billing.models import BillingEvent, Subscription, SubscriptionStatus, is_vip
-from app.modules.billing.schemas import CheckoutOut, MembershipOut
+from app.modules.billing.schemas import CheckoutOut, MembershipOut, PortalOut
 from app.modules.identity.models import Account
 from app.ports import BillingGateway, Clock, WebhookEvent
 from app.timeutil import required_utc
 
 logger = logging.getLogger("app.modules.billing")
+
+_MESSAGE_NO_SUBSCRIPTION = "还没有可管理的订阅，请先完成升级支付"
 
 STATUS_FREE = "free"
 """Membership status for an Account with no subscription record."""
@@ -73,6 +76,32 @@ async def open_checkout(
         cancel_url=f"{origin}/?checkout=cancelled",
     )
     return CheckoutOut(url=checkout.url)
+
+
+async def open_portal(
+    session: AsyncSession,
+    gateway: BillingGateway,
+    account: Account,
+    *,
+    origin: str,
+) -> PortalOut:
+    """Mint the provider-hosted self-service link (card updates, invoices) for a subscriber.
+
+    The subscription record is the gate: without one there is nothing to manage, and
+    the caller gets an understood 404 instead of a provider round trip. Past Due and
+    Canceled records keep the door open - those are exactly the states where users
+    must fix payment details or read billing history.
+    """
+    subscription = await session.scalar(
+        select(Subscription).where(Subscription.account_id == account.id)
+    )
+    if subscription is None:
+        raise AppError(404, ErrorCode.SUBSCRIPTION_NOT_FOUND, _MESSAGE_NO_SUBSCRIPTION)
+    portal = await gateway.create_portal(
+        stripe_customer_id=subscription.stripe_customer_id or "",
+        return_url=f"{origin}/?portal=finished",
+    )
+    return PortalOut(url=portal.url)
 
 
 async def membership(session: AsyncSession, account_id: str) -> MembershipOut:

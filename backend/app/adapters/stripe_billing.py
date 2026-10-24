@@ -18,7 +18,7 @@ import logging
 from app.adapters.webhook_codec import verify_and_decode
 from app.config import Settings
 from app.errors import AppError, ErrorCode
-from app.ports import CheckoutSession, WebhookEvent
+from app.ports import CheckoutSession, CustomerPortal, WebhookEvent
 
 logger = logging.getLogger("app.adapters.stripe_billing")
 
@@ -75,6 +75,35 @@ class StripeBillingGateway:
             )
             raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_UNAVAILABLE) from exc
         return CheckoutSession(id=str(session["id"]), url=str(session["url"]))
+
+    async def create_portal(self, *, stripe_customer_id: str, return_url: str) -> CustomerPortal:
+        """Mint a Stripe customer-portal session for the subscription owner.
+
+        Same deferred-SDK shape as checkout: no credentials means a clear 503, and an
+        empty customer id (webhooks never carried one) cannot open a portal either.
+        """
+        self._require_config()
+        if not stripe_customer_id.strip():
+            raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_UNAVAILABLE)
+
+        def _create() -> dict:
+            import stripe
+
+            stripe.api_key = self._settings.stripe_api_key
+            return stripe.billing_portal.Session.create(
+                customer=stripe_customer_id, return_url=return_url
+            )
+
+        try:
+            session = await asyncio.to_thread(_create)
+        except AppError:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "stripe_portal_failed", extra={"event": "stripe_portal_failed"}, exc_info=exc
+            )
+            raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_UNAVAILABLE) from exc
+        return CustomerPortal(url=str(session["url"]))
 
     def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
         """Verify and decode a Stripe webhook. Without ``APP_STRIPE_WEBHOOK_SECRET``
