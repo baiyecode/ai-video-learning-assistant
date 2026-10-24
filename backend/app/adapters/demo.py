@@ -12,6 +12,7 @@ import logging
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 from app.adapters.webhook_codec import verify_and_decode
 from app.ports import (
@@ -28,7 +29,9 @@ from app.ports import (
 DEMO_WEBHOOK_SECRET = "whsec_demo"
 
 _DEMO_ID = "demoP1Video"
+_DEMO_DOUYIN_ID = "demoDouyinVideo"
 _DEMO_TITLE = "演示视频：从零理解间隔重复"
+_DEMO_DOUYIN_TITLE = "演示短视频：三分钟搞懂主动回忆"
 _DEMO_SUBTITLE = (
     "间隔重复是一种利用遗忘曲线安排复习的学习方法。"
     "第一次复习安排在一天后，第二次三天后，随后逐渐拉长间隔。"
@@ -39,33 +42,27 @@ _DEMO_SUBTITLE = (
 
 
 class DemoVideoSource:
-    """Resolves any supported URL to one canned, deterministic Video."""
+    """Resolves any supported URL to canned, deterministic content.
+
+    Platform and Platform video id are read off the (already normalised) page address
+    rather than hard-coded, for two reasons the golden path depends on: one Account can
+    burn several Quota units on distinct Videos (ticket P2-09), and a 抖音 address gets
+    its own shape (ticket #23 leftover) so the user-visible platform label and the
+    export filename differ from YouTube's. All other content stays canned.
+    """
 
     async def resolve(self, url: str) -> ResolvedVideo:
+        platform, platform_video_id = _demo_identity(url)
+        is_douyin = platform == "douyin"
         return ResolvedVideo(
-            platform="youtube",
-            platform_video_id=_DEMO_ID,
-            title=_DEMO_TITLE,
-            duration_seconds=300,
-            webpage_url="https://www.youtube.com/watch?v=demoP1Video",
+            platform=platform,
+            platform_video_id=platform_video_id,
+            title=_DEMO_DOUYIN_TITLE if is_douyin else _DEMO_TITLE,
+            duration_seconds=180 if is_douyin else 300,
+            webpage_url=url,
             uploader="演示作者",
             thumbnail_url=None,
-            formats=(
-                VideoFormat(
-                    format_id="best",
-                    label="最佳画质",
-                    ext="mp4",
-                    height=720,
-                    filesize=1024,
-                ),
-                VideoFormat(
-                    format_id="bestaudio",
-                    label="仅音频",
-                    ext="m4a",
-                    filesize=512,
-                    has_video=False,
-                ),
-            ),
+            formats=_DEMO_DOUYIN_FORMATS if is_douyin else _DEMO_FORMATS,
             subtitles=(SubtitleTrack(language="zh-Hans", name="中文（简体）"),),
         )
 
@@ -81,6 +78,56 @@ class DemoVideoSource:
             ],
             text=_DEMO_SUBTITLE,
         )
+
+
+_DEMO_FORMATS = (
+    VideoFormat(
+        format_id="best",
+        label="最佳画质",
+        ext="mp4",
+        height=720,
+        filesize=1024,
+    ),
+    VideoFormat(
+        format_id="bestaudio",
+        label="仅音频",
+        ext="m4a",
+        filesize=512,
+        has_video=False,
+    ),
+)
+
+#: 抖音 ships one progressive mp4, exactly like the yt-dlp adapter's douyin branch.
+_DEMO_DOUYIN_FORMATS = (
+    VideoFormat(
+        format_id="douyin-mp4",
+        label="高清",
+        ext="mp4",
+        height=720,
+        filesize=2048,
+    ),
+)
+
+
+def _demo_identity(url: str) -> tuple[str, str]:
+    """The canned Video's ``(platform, platform_video_id)`` for a normalised page address.
+
+    Only the identity varies per address; every other field is the same deterministic
+    content, so assertions about the summary, subtitles and mindmap stay stable. An
+    address the normaliser accepted but whose shape is unknown falls back to the P1
+    demo Video, keeping the historical golden-path filename ``youtube-demoP1Video.txt``.
+    """
+    parsed = urlsplit(url or "")
+    host = (parsed.hostname or "").lower()
+    segments = [segment for segment in parsed.path.split("/") if segment]
+    if host.endswith("douyin.com"):
+        return "douyin", (segments[-1] if segments else _DEMO_DOUYIN_ID)
+    if host.endswith("bilibili.com") or host == "b23.tv":
+        return "bilibili", (segments[-1] if segments else "BV1demo00001")
+    video_id = parse_qs(parsed.query).get("v", [""])[0].strip()
+    if not video_id and host in {"youtu.be", "www.youtu.be"}:
+        video_id = segments[-1] if segments else ""
+    return "youtube", (video_id or _DEMO_ID)
 
 
 class DemoMediaStore:
@@ -160,8 +207,9 @@ class DemoBillingGateway:
 class DemoEmailSender:
     """In-memory inbox standing in for real email delivery in fake-adapter mode.
 
-    The Playwright golden path reads the verification link back out of ``inbox``;
-    nothing ever leaves the process (user story 27).
+    The Playwright golden path reads the verification link back out of ``inbox`` through
+    the demo-only ``GET /api/demo/inbox`` route; nothing ever leaves the process
+    (user story 27).
     """
 
     inbox: list[OutboundEmail] = field(default_factory=list)
@@ -171,3 +219,8 @@ class DemoEmailSender:
             "demo_email_queued", extra={"event": "demo_email_queued", "to": message.to}
         )
         self.inbox.append(message)
+
+    def messages_for(self, to: str | None = None) -> list[OutboundEmail]:
+        """Newest-first inbox view, optionally narrowed to one address."""
+        messages = [message for message in self.inbox if to is None or message.to == to]
+        return list(reversed(messages))

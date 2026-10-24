@@ -14,11 +14,13 @@ from app import __version__
 from app.config import Settings
 from app.deps import get_settings
 
-from . import reports
+from . import demo_inbox, reports
 from .health import check_database, check_disk, check_process
 
 router = APIRouter(tags=["ops"])
 router.include_router(reports.router)
+# Demo-mode only: every route self-guards on ``APP_FAKE_ADAPTERS`` (ticket P2-09).
+router.include_router(demo_inbox.router)
 
 
 @router.get("/health", summary="Service, database and disk health")
