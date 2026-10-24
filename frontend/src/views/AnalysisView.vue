@@ -11,7 +11,9 @@ import {
   visibleSummary,
 } from "@/lib/analysis";
 import { ApiError } from "@/lib/api";
+import { membershipStatusLabel } from "@/lib/billing";
 import { renderMarkdown } from "@/lib/markdown";
+import { uiErrorMessage } from "@/lib/uiError";
 import { platformLabel, subtitleSourceLabel } from "@/lib/video";
 import { useAnalysisStore } from "@/stores/analysis";
 
@@ -36,6 +38,21 @@ const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
 const canRetry = computed(() => store.status === "failed" && store.videoId !== null);
 const canReanalyze = computed(() => store.status === "completed" && store.videoId !== null);
 const reanalysis = computed(() => reanalysisAvailability(store.quota));
+// Subscription state rides along on the quota snapshot (``/me`` keeps ``{account, quota}``),
+// so the badge mirrors the membership truth source without a second request.
+const membershipBadge = computed(() => {
+  const quota = store.quota;
+  if (!quota?.membership) return "";
+  return membershipStatusLabel({
+    status: quota.membership,
+    period_end: null,
+    portal_url: null,
+    is_vip: quota.daily_limit < 0,
+  });
+});
+const quotaDepleted = computed(
+  () => !!store.quota && store.quota.daily_limit >= 0 && store.quota.remaining <= 0,
+);
 const reanalysisBlockedReason = computed(() => {
   if (reanalysis.value.allowed) return "";
   return quotaReset.value ? `${reanalysis.value.message}，${quotaReset.value}` : reanalysis.value.message;
@@ -111,6 +128,22 @@ async function confirmReanalyze(): Promise<void> {
       <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span v-if="quotaLabel">{{ quotaLabel }}</span>
         <span v-if="quotaReset">{{ quotaReset }}</span>
+        <span
+          v-if="membershipBadge"
+          class="rounded-full px-2 py-0.5 font-medium"
+          :class="store.quota && store.quota.daily_limit < 0
+            ? 'bg-emerald-50 text-emerald-700'
+            : 'bg-slate-100 text-slate-600'"
+        >
+          {{ membershipBadge }}
+        </span>
+        <RouterLink
+          v-if="quotaDepleted"
+          to="/pricing"
+          class="rounded-full bg-slate-900 px-2.5 py-0.5 font-medium text-white transition-colors hover:bg-slate-700"
+        >
+          升级不限次
+        </RouterLink>
       </div>
     </div>
 
@@ -165,6 +198,13 @@ async function confirmReanalyze(): Promise<void> {
       <span v-if="!reanalysis.allowed" class="text-xs text-slate-500">
         {{ reanalysisBlockedReason }}
       </span>
+      <RouterLink
+        v-if="!reanalysis.allowed"
+        to="/pricing"
+        class="text-xs font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+      >
+        升级 VIP，Analysis 不限次
+      </RouterLink>
     </div>
 
     <p
@@ -187,9 +227,23 @@ async function confirmReanalyze(): Promise<void> {
       role="alert"
       class="space-y-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
     >
-      <p class="font-medium">{{ store.error.message }}</p>
+      <p class="font-medium">{{ uiErrorMessage(store.error) }}</p>
       <div class="flex flex-wrap items-center gap-3 text-xs text-red-600">
         <span>错误代码：{{ store.error.code }}</span>
+        <RouterLink
+          v-if="store.error.code === 'quota_exhausted'"
+          to="/pricing"
+          class="font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+        >
+          升级 VIP，Analysis 不限次
+        </RouterLink>
+        <RouterLink
+          v-else-if="store.error.code === 'email_not_verified'"
+          to="/account"
+          class="font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+        >
+          查看验证指引
+        </RouterLink>
         <span v-if="quotaReset" class="text-red-500">{{ quotaReset }}，届时 Quota 恢复</span>
         <button
           v-if="canRetry"
@@ -265,7 +319,16 @@ async function confirmReanalyze(): Promise<void> {
           {{ reanalysis.message }}
           <span v-if="reanalysis.resetsAt && quotaReset">，{{ quotaReset }}</span>
         </p>
-        <p v-if="reanalyzeError" class="text-xs text-red-600">{{ reanalyzeError }}</p>
+        <p v-if="reanalyzeError" class="text-xs text-red-600">
+          {{ reanalyzeError }}
+          <RouterLink
+            v-if="!reanalysis.allowed"
+            to="/pricing"
+            class="ml-1 font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+          >
+            升级 VIP，Analysis 不限次
+          </RouterLink>
+        </p>
         <div class="flex justify-end gap-2">
           <button
             type="button"

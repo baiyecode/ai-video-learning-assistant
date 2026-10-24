@@ -2,17 +2,31 @@
 import { computed, onMounted } from "vue";
 
 import { formatQuota, formatQuotaReset } from "@/lib/analysis";
+import { membershipStatusLabel } from "@/lib/billing";
 import { historyRows } from "@/lib/history";
+import { useAuthStore } from "@/stores/auth";
+import { useBillingStore } from "@/stores/billing";
 import { useHistoryStore } from "@/stores/history";
 
 const store = useHistoryStore();
+const auth = useAuthStore();
+const billing = useBillingStore();
 
 const rows = computed(() => historyRows(store.items));
 const quotaLabel = computed(() => (store.quota ? formatQuota(store.quota) : ""));
 const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
+// The free-plan cap exhausted today is the strongest moment to offer the upgrade.
+const quotaDepleted = computed(
+  () =>
+    !!store.quota &&
+    store.quota.daily_limit >= 0 &&
+    store.quota.remaining <= 0 &&
+    !billing.isVip,
+);
 
 onMounted(() => {
   void store.load();
+  if (auth.isAuthenticated) void billing.loadMembership();
 });
 
 function statusClass(status: string): string {
@@ -32,6 +46,20 @@ function statusClass(status: string): string {
       <div class="flex flex-wrap items-center gap-2 text-xs text-slate-500">
         <span v-if="quotaLabel">{{ quotaLabel }}</span>
         <span v-if="quotaReset">{{ quotaReset }}</span>
+        <span
+          v-if="auth.isAuthenticated && billing.membership"
+          class="rounded-full px-2 py-0.5 font-medium"
+          :class="billing.isVip ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+        >
+          {{ membershipStatusLabel(billing.membership) }}
+        </span>
+        <RouterLink
+          v-if="quotaDepleted"
+          to="/pricing"
+          class="rounded-full bg-slate-900 px-2.5 py-0.5 font-medium text-white transition-colors hover:bg-slate-700"
+        >
+          升级不限次
+        </RouterLink>
       </div>
     </div>
 

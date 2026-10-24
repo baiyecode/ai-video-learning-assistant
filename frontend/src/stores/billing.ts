@@ -40,6 +40,22 @@ export const useBillingStore = defineStore("billing", {
         this.loading = false;
       }
     },
+    /**
+     * POST /billing/checkout: mint the hosted payment page and hand it to the browser.
+     *
+     * Returns the URL for the caller to navigate to (full-page jump: the card never
+     * lives in this app). The redirect back is never treated as proof of payment —
+     * only a fresh ``loadMembership()`` read of /me/membership decides the outcome.
+     */
+    async openCheckout(): Promise<string> {
+      const body = await api.post<{ url: string }>("/billing/checkout", {});
+      return body.url;
+    },
+    /** POST /billing/portal: the self-service management page (cards, invoices). */
+    async openPortal(): Promise<string> {
+      const body = await api.post<{ url: string }>("/billing/portal", {});
+      return body.url;
+    },
     reset(): void {
       this.membership = null;
       this.loading = false;

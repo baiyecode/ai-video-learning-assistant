@@ -19,3 +19,47 @@ export function authErrorMessage(code: string | null | undefined): string {
   if (code && AUTH_MESSAGES[code]) return AUTH_MESSAGES[code];
   return GENERIC_MESSAGE;
 }
+
+/** Rate-limit envelope fields carried by ``ApiError.details`` on 429. */
+interface RateLimitDetails {
+  retry_after?: unknown;
+  reset_at?: unknown;
+}
+
+/**
+ * Copy for a refused verification re-send: the backend rate-limits per Account and
+ * reports ``retry_after`` seconds plus the ``reset_at`` instant it lifts.
+ */
+export function verificationResendNotice(details: RateLimitDetails): string {
+  const retryAfter =
+    typeof details.retry_after === "number" && details.retry_after > 0
+      ? Math.ceil(details.retry_after / 60)
+      : null;
+  const resetAt = typeof details.reset_at === "string" ? details.reset_at : null;
+  const day = resetAt ? shanghaiMinute(resetAt) : null;
+  if (retryAfter !== null && day) {
+    return `发送验证邮件过于频繁，请约 ${retryAfter} 分钟后再试（${day} 后可重试）。`;
+  }
+  if (retryAfter !== null) {
+    return `发送验证邮件过于频繁，请约 ${retryAfter} 分钟后再试。`;
+  }
+  if (day) return `发送验证邮件过于频繁，${day} 后可重试。`;
+  return "发送验证邮件过于频繁，请稍后再试。";
+}
+
+/** `2026-01-16T02:15:00+00:00` → `01-16 10:15` in Asia/Shanghai. */
+function shanghaiMinute(iso: string): string | null {
+  const date = new Date(iso);
+  if (Number.isNaN(date.getTime())) return null;
+  const parts = new Intl.DateTimeFormat("zh-CN", {
+    timeZone: "Asia/Shanghai",
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes): string =>
+    parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+}
