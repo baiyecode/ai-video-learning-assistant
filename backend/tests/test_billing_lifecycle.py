@@ -12,7 +12,9 @@ from datetime import datetime
 from typing import Any
 
 import pytest
+from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import select
 
 from tests.auth_flows import login as auth_login
 from tests.auth_flows import register as auth_register
@@ -118,3 +120,89 @@ async def test_payment_succeeded_restores_an_active_membership(client: AsyncClie
         "portal_url": None,
         "is_vip": True,
     }
+
+
+async def test_subscription_updated_backfills_the_period_end_the_checkout_omitted(
+    client: AsyncClient
+) -> None:
+    """P2-02 leftover: a real checkout object may lack the period end; a later
+    ``customer.subscription.updated`` (status still active, i.e. cancelled-at-period-end
+    semantics) writes it in and VIP survives until then."""
+    response = await register(client, email="periodend@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    checkout = checkout_completed_body("evt_lc_no_period", account_id, created=_dt(CHECKOUT_CREATED))
+    assert (await _post_event(client, checkout)).status_code == 200
+    assert (await _membership(client, auth))["period_end"] is None
+
+    updated = lifecycle_event_body(
+        "evt_lc_update_1",
+        "customer.subscription.updated",
+        _dt("2026-01-15T09:30:00+00:00"),
+        account_id=account_id,
+        period_end=_dt(PERIOD_END),
+        subscription_status="active",
+    )
+    assert (await _post_event(client, updated)).status_code == 200
+
+    assert await _membership(client, auth) == {
+        "status": "active",
+        "period_end": PERIOD_END,
+        "portal_url": None,
+        "is_vip": True,
+    }
+
+
+async def test_subscription_updated_trialing_maps_to_trial_ending_and_keeps_vip(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """A subscription object in ``trialing`` lands on trial_ending: still VIP (AC3)."""
+    response = await register(client, email="trialing@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    updated = lifecycle_event_body(
+        "evt_lc_trial",
+        "customer.subscription.updated",
+        _dt("2026-01-15T10:00:00+00:00"),
+        account_id=account_id,
+        subscription_status="trialing",
+    )
+    assert (await _post_event(client, updated)).status_code == 200
+
+    membership = await _membership(client, auth)
+    assert membership["status"] == "trial_ending"
+    assert membership["is_vip"] is True
+
+
+async def test_subscription_updated_with_an_unrecognized_status_never_moves_state(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Unknown payload statuses are never guessed: audit row, no transition."""
+    response = await register(client, email="weird@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    updated = lifecycle_event_body(
+        "evt_lc_weird",
+        "customer.subscription.updated",
+        _dt("2026-01-15T10:00:00+00:00"),
+        account_id=account_id,
+        subscription_status="incomplete_expired",
+    )
+    assert (await _post_event(client, updated)).status_code == 200
+
+    assert (await _membership(client, auth))["status"] == "active"
+    rows = await _audit_rows(app, "evt_lc_weird")
+    assert [row.applied for row in rows] == [False]
+
+
+async def _audit_rows(app: FastAPI, event_id: str) -> list:
+    from app.modules.billing.models import BillingEvent
+
+    async with app.state.sessionmaker() as session:
+        return list(
+            (await session.scalars(select(BillingEvent).where(BillingEvent.event_id == event_id))).all()
+        )

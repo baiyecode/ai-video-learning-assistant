@@ -32,6 +32,8 @@ CHECKOUT_COMPLETED = "checkout.session.completed"
 INVOICE_PAYMENT_FAILED = "invoice.payment_failed"
 INVOICE_PAYMENT_SUCCEEDED = "invoice.payment_succeeded"
 CUSTOMER_SUBSCRIPTION_DELETED = "customer.subscription.deleted"
+SUBSCRIPTION_CREATED = "customer.subscription.created"
+SUBSCRIPTION_UPDATED = "customer.subscription.updated"
 
 _LIFECYCLE_STATUS: dict[str, SubscriptionStatus] = {
     INVOICE_PAYMENT_FAILED: SubscriptionStatus.PAST_DUE,
@@ -39,6 +41,16 @@ _LIFECYCLE_STATUS: dict[str, SubscriptionStatus] = {
     CUSTOMER_SUBSCRIPTION_DELETED: SubscriptionStatus.CANCELED,
 }
 """State-machine edges (spec): the recorded status only ever moves on these events."""
+
+_STRIPE_SUBSCRIPTION_STATUS: dict[str, SubscriptionStatus] = {
+    "active": SubscriptionStatus.ACTIVE,
+    "trialing": SubscriptionStatus.TRIAL_ENDING,
+    "past_due": SubscriptionStatus.PAST_DUE,
+    "canceled": SubscriptionStatus.CANCELED,
+}
+"""Translation of the provider's subscription-object status. Unlisted statuses (and
+``created``/``updated`` events without one) never move state - the local record keeps
+the last status an event of authority wrote."""
 
 
 def _new_id() -> str:
@@ -201,14 +213,17 @@ async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
 
 async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
     """Advance an existing record along a spec edge; never guess state, never mint one."""
-    target = _LIFECYCLE_STATUS.get(event.type)
-    if target is None:
+    object_event = event.type in (SUBSCRIPTION_CREATED, SUBSCRIPTION_UPDATED)
+    if event.type not in _LIFECYCLE_STATUS and not object_event:
         return False
+    target = _LIFECYCLE_STATUS.get(event.type)
+    if target is None and object_event:
+        target = _STRIPE_SUBSCRIPTION_STATUS.get(event.subscription_status or "")
     subscription = await _find_subscription(session, event)
     if subscription is None:
         return False
     changed = False
-    if subscription.status != target.value:
+    if target is not None and subscription.status != target.value:
         subscription.status = target.value
         changed = True
     if event.current_period_end is not None and (
@@ -217,14 +232,17 @@ async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
     ):
         subscription.current_period_end = event.current_period_end
         changed = True
-    if event.stripe_subscription_id and subscription.stripe_subscription_id != event.stripe_subscription_id:
+    if (
+        event.stripe_subscription_id
+        and subscription.stripe_subscription_id != event.stripe_subscription_id
+    ):
         subscription.stripe_subscription_id = event.stripe_subscription_id
         changed = True
     if event.stripe_customer_id and not subscription.stripe_customer_id:
         subscription.stripe_customer_id = event.stripe_customer_id
         changed = True
     if changed:
-        _log_membership(event, target.value)
+        _log_membership(event, subscription.status)
     return changed
 
 
