@@ -102,6 +102,7 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
     still answers 2xx. Events older than the newest recorded one (out-of-order delivery)
     are audit-only, and event types the state machine does not own never move state.
     """
+    account_id = await _effective_account_id(session, event)
     claim = await session.execute(
         sqlite_insert(BillingEvent)
         .values(
@@ -110,7 +111,7 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
             type=event.type,
             created=event.created,
             processed_at=clock.now(),
-            account_id=event.account_id,
+            account_id=account_id,
             stripe_subscription_id=event.stripe_subscription_id,
             applied=False,
         )
@@ -127,14 +128,14 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
             },
         )
         return
-    if await _is_stale(session, event):
+    if await _is_stale(session, event, account_id):
         logger.info(
             "billing_event_stale_ignored",
             extra={
                 "event": "billing_event_stale_ignored",
                 "event_id": event.event_id,
                 "event_type": event.type,
-                "account_id": event.account_id,
+                "account_id": account_id,
                 "outcome": "stale",
             },
         )
@@ -148,17 +149,37 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
     await session.commit()
 
 
-async def _is_stale(session: AsyncSession, event: WebhookEvent) -> bool:
+async def _effective_account_id(session: AsyncSession, event: WebhookEvent) -> str | None:
+    """The Account an event belongs to.
+
+    Real invoice/subscription events name only Stripe ids; the local owner is resolved
+    through the subscription record so the audit trail and the out-of-order guard stay
+    per Account. Unmatched events keep ``None`` - nothing is invented.
+    """
+    if event.account_id:
+        return event.account_id
+    if event.stripe_subscription_id:
+        return await session.scalar(
+            select(Subscription.account_id).where(
+                Subscription.stripe_subscription_id == event.stripe_subscription_id
+            )
+        )
+    return None
+
+
+async def _is_stale(
+    session: AsyncSession, event: WebhookEvent, account_id: str | None
+) -> bool:
     """Out-of-order guard: older-than-newest recorded events never move state (spec 状态机).
 
     The comparison is per Account over the audit trail, so a replayed historical event
     can only ever append an audit row, never roll the subscription back.
     """
-    if not event.account_id:
+    if not account_id:
         return False
     newest = await session.scalar(
         select(func.max(BillingEvent.created)).where(
-            BillingEvent.account_id == event.account_id,
+            BillingEvent.account_id == account_id,
             BillingEvent.event_id != event.event_id,
         )
     )

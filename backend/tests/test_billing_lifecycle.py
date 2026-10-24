@@ -206,3 +206,74 @@ async def _audit_rows(app: FastAPI, event_id: str) -> list:
         return list(
             (await session.scalars(select(BillingEvent).where(BillingEvent.event_id == event_id))).all()
         )
+
+
+async def test_event_naming_only_the_stripe_ids_moves_state_and_lands_on_the_right_audit_trail(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Real invoice events carry only Stripe ids: the subscription id resolves the owner."""
+    response = await register(client, email="stripeonly@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    failed = lifecycle_event_body(
+        "evt_no_account", "invoice.payment_failed", _dt("2026-01-15T10:00:00+00:00")
+    )
+    assert (await _post_event(client, failed)).status_code == 200
+
+    assert (await _membership(client, auth))["status"] == "past_due"
+    rows = await _audit_rows(app, "evt_no_account")
+    assert [(row.account_id, row.applied) for row in rows] == [(account_id, True)]
+
+
+async def test_late_lifecycle_event_older_than_the_newest_is_audit_only(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Out-of-order still wins nobody: the stale failure cannot undo the newer success."""
+    response = await register(client, email="latefail@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    succeeded = lifecycle_event_body(
+        "evt_new_success",
+        "invoice.payment_succeeded",
+        _dt("2026-01-16T10:00:00+00:00"),
+        account_id=account_id,
+    )
+    assert (await _post_event(client, succeeded)).status_code == 200
+
+    late_failure = lifecycle_event_body(
+        "evt_late_failure",
+        "invoice.payment_failed",
+        _dt("2026-01-15T12:00:00+00:00"),
+        account_id=account_id,
+    )
+    assert (await _post_event(client, late_failure)).status_code == 200
+
+    membership = await _membership(client, auth)
+    assert membership["status"] == "active"
+    assert membership["is_vip"] is True
+    rows = await _audit_rows(app, "evt_late_failure")
+    assert [row.applied for row in rows] == [False]
+
+
+async def test_lifecycle_event_for_an_unknown_subscription_changes_nothing(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """An event whose subscription id matches no record is acknowledged, audited, inert."""
+    response = await register(client, email="orphan@example.com")
+    auth = bearer(response)
+
+    orphan = lifecycle_event_body(
+        "evt_orphan",
+        "customer.subscription.deleted",
+        _dt("2026-01-15T10:00:00+00:00"),
+        subscription_id="sub_never_seen",
+    )
+    assert (await _post_event(client, orphan)).status_code == 200
+
+    assert (await _membership(client, auth))["status"] == "free"
+    rows = await _audit_rows(app, "evt_orphan")
+    assert [(row.account_id, row.applied) for row in rows] == [(None, False)]
