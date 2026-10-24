@@ -9,11 +9,16 @@ them (signature header + Stripe-style body), and the derived truth is read back 
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
+import logging
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
 import pytest
 from app.container import Adapters
+from app.logging_setup import JsonFormatter
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -379,6 +384,57 @@ async def _wait_completed(client: AsyncClient, headers: dict[str, str], analysis
             return
         await asyncio.sleep(0.01)
     raise AssertionError(f"analysis {analysis_id} did not complete")
+
+
+class _CaptureHandler(logging.Handler):
+    """Formats records exactly like production and keeps the parsed JSON lines."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.setFormatter(JsonFormatter())
+        self.entries: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.entries.append(json.loads(self.format(record)))
+
+
+@contextlib.contextmanager
+def _capture_json_logs() -> Iterator[list[dict]]:
+    handler = _CaptureHandler()
+    root = logging.getLogger()
+    previous_level = root.level
+    root.setLevel(logging.DEBUG)
+    root.addHandler(handler)
+    try:
+        yield handler.entries
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous_level)
+
+
+async def test_lifecycle_transition_is_logged_with_the_stripe_event_id(client: AsyncClient) -> None:
+    """Story 38: every lifecycle move is a structured line naming the provider event."""
+    response = await register(client, email="logged-fail@example.com")
+    account_id = response.json()["account"]["id"]
+    await _activate(client, account_id)
+
+    failed = lifecycle_event_body(
+        "evt_lc_logged",
+        "invoice.payment_failed",
+        _dt("2026-01-15T10:00:00+00:00"),
+        account_id=account_id,
+    )
+    with _capture_json_logs() as entries:
+        assert (await _post_event(client, failed)).status_code == 200
+
+    transition = next(
+        entry for entry in entries if entry["message"] == "billing_membership_changed"
+    )
+    assert transition["event_id"] == "evt_lc_logged"
+    assert transition["event_type"] == "invoice.payment_failed"
+    assert transition["account_id"] == account_id
+    assert transition["subscription_status"] == "past_due"
+    assert transition["outcome"] == "applied"
 
 
 async def _resolve_video(
