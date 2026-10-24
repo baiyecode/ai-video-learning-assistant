@@ -23,6 +23,7 @@ from .errors import register_exception_handlers
 from .logging_setup import RequestContextMiddleware, configure_logging
 from .modules.analysis.manager import AnalysisManager
 from .modules.analysis.router import router as analysis_router
+from .modules.billing.router import router as billing_router
 from .modules.catalog.router import router as catalog_router
 from .modules.identity.router import router as identity_router
 from .modules.media.manager import DownloadManager
@@ -102,6 +103,7 @@ def create_app(settings: Settings | None = None, adapters: Adapters | None = Non
     api_router.include_router(identity_router)
     api_router.include_router(media_router)
     api_router.include_router(analysis_router)
+    api_router.include_router(billing_router)
     app.include_router(api_router)
     app.include_router(ops_router)  # /health lives outside /api
 
