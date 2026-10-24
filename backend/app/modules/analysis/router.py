@@ -24,7 +24,6 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import messages
 from app.config import Settings
 from app.container import Adapters
 from app.deps import (
@@ -44,6 +43,11 @@ from .models import Analysis, AnalysisStatus
 from .schemas import AnalysisHistoryItemOut, AnalysisOut, CreateAnalysisRequest
 
 router = APIRouter(prefix="/analyses", tags=["analysis"])
+
+# Email verification gate (ticket #22): Analysis is gated on a verified email; login,
+# resolve, Subtitle viewing and Download are not. The gate only ever fires from this
+# route, so the copy lives here (README: 模块独有文案留模块内; the code stays in errors.py).
+MESSAGE_EMAIL_NOT_VERIFIED = "请先验证邮箱后再发起 Analysis"
 
 
 def get_analysis_manager(request: Request) -> AnalysisManager:
@@ -69,7 +73,7 @@ async def create_analysis(
         raise AppError(
             403,
             ErrorCode.EMAIL_NOT_VERIFIED,
-            messages.EMAIL_NOT_VERIFIED,
+            MESSAGE_EMAIL_NOT_VERIFIED,
             {"video_id": payload.video_id},
         )
     # Read the id before any service-side commit/rollback: a rollback expires the

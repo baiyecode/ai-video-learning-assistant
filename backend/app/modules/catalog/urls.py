@@ -34,6 +34,10 @@ _BILIBILI_AVID = re.compile(r"av\d+", re.IGNORECASE)
 _SHORT_LINK_CODE = re.compile(r"[A-Za-z0-9_-]+")
 _DOUYIN_VIDEO_ID = re.compile(r"\d{5,23}")
 
+# Feature-switch rejection (ticket #23): the platform is recognised but not opened
+# yet. Single-module copy per the README convention: it only ever surfaces here.
+_MESSAGE_PLATFORM_NOT_ENABLED = "抖音暂未开放"
+
 YOUTUBE_PLATFORM = "youtube"
 BILIBILI_PLATFORM = "bilibili"
 DOUYIN_PLATFORM = "douyin"
@@ -278,7 +282,7 @@ def _platform_not_enabled(platform: str = DOUYIN_PLATFORM) -> AppError:
     return AppError(
         422,
         ErrorCode.PLATFORM_NOT_ENABLED,
-        messages.PLATFORM_NOT_ENABLED,
+        _MESSAGE_PLATFORM_NOT_ENABLED,
         {"platform": platform},
     )
 
