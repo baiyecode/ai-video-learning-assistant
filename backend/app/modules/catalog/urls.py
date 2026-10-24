@@ -293,12 +293,13 @@ def _unsupported() -> AppError:
     return AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_URL)
 
 
-def _platform_not_enabled(platform: str = DOUYIN_PLATFORM) -> AppError:
+def _platform_not_enabled() -> AppError:
+    # Only the gated platform (Douyin, ticket #23) can reach this error.
     return AppError(
         422,
         ErrorCode.PLATFORM_NOT_ENABLED,
         _MESSAGE_PLATFORM_NOT_ENABLED,
-        {"platform": platform},
+        {"platform": DOUYIN_PLATFORM},
     )
 
 

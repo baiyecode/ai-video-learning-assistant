@@ -50,7 +50,6 @@ class ErrorCode(StrEnum):
     QUOTA_EXHAUSTED = "quota_exhausted"
     AUTH_REQUIRED = "auth_required"
     INVALID_CREDENTIALS = "invalid_credentials"
-    EMAIL_TAKEN = "email_taken"
     EMAIL_NOT_VERIFIED = "email_not_verified"
     WEAK_PASSWORD = "weak_password"
     SESSION_INVALID = "session_invalid"
