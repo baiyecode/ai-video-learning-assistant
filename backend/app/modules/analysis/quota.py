@@ -5,7 +5,9 @@ reserves one unit, success moves it to ``consumed`` and failure releases it. Vie
 an existing result never touches these counters.
 
 ``reserve`` is a single atomic SQLite upsert so two concurrent create requests can
-never both win the same unit.
+never both win the same unit. VIP Membership lifts the cap by passing the
+``UNLIMITED_DAILY_LIMIT`` sentinel as the ``limit``: the same upsert still counts
+the unit (so failure rollback is untouched), it just never checks a bound.
 """
 
 from __future__ import annotations
@@ -21,6 +23,14 @@ from app.ports import Clock
 from app.timeutil import next_shanghai_midnight
 
 from .models import QuotaUsage
+
+#: Sentinel ``limit``/``daily_limit``/``remaining`` value meaning "no cap" (VIP Membership).
+UNLIMITED_DAILY_LIMIT = -1
+
+
+def is_unlimited(limit: int) -> bool:
+    """Whether a Quota limit expresses VIP Membership's "unlimited" semantics."""
+    return limit == UNLIMITED_DAILY_LIMIT
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,16 +49,24 @@ def next_reset_at(clock: Clock) -> datetime:
 async def reserve(session: AsyncSession, account_id: str, day: date, limit: int) -> bool:
     """Atomically reserve one unit. Returns ``False`` when the daily limit is reached.
 
+    ``limit`` may be :data:`UNLIMITED_DAILY_LIMIT` (VIP Membership): the reservation
+    is then unconditional, but still counted, keeping rollback on failure intact.
     The caller must commit (or roll back) the surrounding transaction.
     """
     statement = sqlite_insert(QuotaUsage).values(
         account_id=account_id, day=day, reserved=1, consumed=0
     )
-    statement = statement.on_conflict_do_update(
-        index_elements=[QuotaUsage.account_id, QuotaUsage.day],
-        set_={"reserved": QuotaUsage.reserved + 1},
-        where=(QuotaUsage.reserved + QuotaUsage.consumed) < limit,
-    )
+    if is_unlimited(limit):
+        statement = statement.on_conflict_do_update(
+            index_elements=[QuotaUsage.account_id, QuotaUsage.day],
+            set_={"reserved": QuotaUsage.reserved + 1},
+        )
+    else:
+        statement = statement.on_conflict_do_update(
+            index_elements=[QuotaUsage.account_id, QuotaUsage.day],
+            set_={"reserved": QuotaUsage.reserved + 1},
+            where=(QuotaUsage.reserved + QuotaUsage.consumed) < limit,
+        )
     result = await session.execute(statement)
     return result.rowcount == 1
 

@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
+from app.modules.billing.models import Subscription, is_vip
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import BudgetLedger, Clock
 from app.ratelimit import RateLimiter
@@ -162,7 +163,17 @@ async def _create_once(
         daily_budget_usd=settings.daily_budget_usd,
     )
 
-    if not await quota.reserve(session, account_id, clock.today(), settings.analysis_daily_quota):
+    # VIP Membership lifts the cap without bypassing the atomic reservation: the
+    # sentinel limit keeps counting units, so failure rollback still applies.
+    subscription = await session.scalar(
+        select(Subscription).where(Subscription.account_id == account_id)
+    )
+    effective_limit = (
+        quota.UNLIMITED_DAILY_LIMIT
+        if is_vip(subscription)
+        else settings.analysis_daily_quota
+    )
+    if not await quota.reserve(session, account_id, clock.today(), effective_limit):
         raise _quota_exhausted(clock, settings)
 
     now = clock.now()
