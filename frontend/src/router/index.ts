@@ -28,6 +28,27 @@ export const router = createRouter({
       meta: { title: "登录" },
     },
     {
+      path: "/pricing",
+      name: "pricing",
+      component: () => import("@/views/PricingView.vue"),
+      meta: { title: "升级 VIP 会员" },
+    },
+    {
+      path: "/account",
+      name: "account",
+      component: () => import("@/views/AccountView.vue"),
+      meta: { title: "个人中心", requiresAuth: true, noindex: true },
+    },
+    {
+      // Landing target of the emailed verification link (backend
+      // ``identity/verification.FRONTEND_VERIFY_PATH``): consumes the token via
+      // ``POST /auth/verification/confirm``, which authenticates by the token alone.
+      path: "/verify-email",
+      name: "verify-email",
+      component: () => import("@/views/VerifyEmailView.vue"),
+      meta: { title: "邮箱验证", noindex: true },
+    },
+    {
       path: "/analyses",
       name: "analyses",
       component: () => import("@/views/AnalysesView.vue"),

@@ -6,7 +6,7 @@ import ComplianceNotice from "@/components/ComplianceNotice.vue";
 import DownloadPanel from "@/components/DownloadPanel.vue";
 import SubtitlePanel from "@/components/SubtitlePanel.vue";
 import { acknowledgeCompliance, complianceMessageForCode } from "@/lib/compliance";
-import { asUiError, type UiError } from "@/lib/uiError";
+import { asUiError, isQuotaExhausted, uiErrorMessage, type UiError } from "@/lib/uiError";
 import {
   formatDuration,
   formatFileSize,
@@ -135,7 +135,7 @@ function cancelCompliance(): void {
       role="alert"
       class="space-y-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
     >
-      <p class="font-medium">{{ complianceHint ?? error.message }}</p>
+      <p class="font-medium">{{ complianceHint ?? uiErrorMessage(error) }}</p>
       <div class="flex flex-wrap items-center gap-3 text-xs text-red-600">
         <span>错误代码：{{ error.code }}</span>
         <button
@@ -259,7 +259,21 @@ function cancelCompliance(): void {
           该视频没有可用字幕，暂不支持 AI 分析。
         </span>
         <span v-if="analysisError" role="alert" class="text-xs text-red-600">
-          {{ analysisError.message }}
+          {{ uiErrorMessage(analysisError) }}
+          <RouterLink
+            v-if="isQuotaExhausted(analysisError)"
+            to="/pricing"
+            class="ml-2 font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+          >
+            升级 VIP，Analysis 不限次
+          </RouterLink>
+          <RouterLink
+            v-else-if="analysisError.code === 'email_not_verified'"
+            to="/account"
+            class="ml-2 font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+          >
+            查看验证指引
+          </RouterLink>
         </span>
         <span class="text-xs text-slate-400">{{ result.resolve_notice }}</span>
       </div>

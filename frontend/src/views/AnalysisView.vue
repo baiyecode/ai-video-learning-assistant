@@ -12,6 +12,7 @@ import {
 } from "@/lib/analysis";
 import { ApiError } from "@/lib/api";
 import { renderMarkdown } from "@/lib/markdown";
+import { uiErrorMessage } from "@/lib/uiError";
 import { platformLabel, subtitleSourceLabel } from "@/lib/video";
 import { useAnalysisStore } from "@/stores/analysis";
 
@@ -165,6 +166,13 @@ async function confirmReanalyze(): Promise<void> {
       <span v-if="!reanalysis.allowed" class="text-xs text-slate-500">
         {{ reanalysisBlockedReason }}
       </span>
+      <RouterLink
+        v-if="!reanalysis.allowed"
+        to="/pricing"
+        class="text-xs font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+      >
+        升级 VIP，Analysis 不限次
+      </RouterLink>
     </div>
 
     <p
@@ -187,9 +195,23 @@ async function confirmReanalyze(): Promise<void> {
       role="alert"
       class="space-y-2 rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-800"
     >
-      <p class="font-medium">{{ store.error.message }}</p>
+      <p class="font-medium">{{ uiErrorMessage(store.error) }}</p>
       <div class="flex flex-wrap items-center gap-3 text-xs text-red-600">
         <span>错误代码：{{ store.error.code }}</span>
+        <RouterLink
+          v-if="store.error.code === 'quota_exhausted'"
+          to="/pricing"
+          class="font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+        >
+          升级 VIP，Analysis 不限次
+        </RouterLink>
+        <RouterLink
+          v-else-if="store.error.code === 'email_not_verified'"
+          to="/account"
+          class="font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+        >
+          查看验证指引
+        </RouterLink>
         <span v-if="quotaReset" class="text-red-500">{{ quotaReset }}，届时 Quota 恢复</span>
         <button
           v-if="canRetry"
