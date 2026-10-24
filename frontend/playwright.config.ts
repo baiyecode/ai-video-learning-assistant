@@ -5,9 +5,6 @@ import { defineConfig, devices } from "@playwright/test";
  * automatically with deterministic adapters when PLAYWRIGHT_E2E=1.
  *
  *   PLAYWRIGHT_E2E=1 npx playwright test
- *
- * Add PLAYWRIGHT_CONVERSION_UI=1 to also run the ticket P2-08 conversion-UI chain
- * (定价页 / 升级 CTA / 个人中心 / /verify-email) once that ticket's pages exist.
  */
 const enabled = process.env.PLAYWRIGHT_E2E === "1";
 
@@ -45,6 +42,11 @@ export default defineConfig({
               APP_DATABASE_URL: "sqlite+aiosqlite:///./data/e2e.db",
               APP_DATA_DIR: "./data/e2e",
               APP_AUTH_COOKIE_SECURE: "false",
+              // The dev server proxies ``/api`` with ``changeOrigin``, so the backend sees
+              // its own ``:8000`` origin while the browser sends ``Origin: :5173``. Without
+              // this allowance the cookie refresh (``POST /auth/refresh``) would be refused
+              // and every page reload would drop the Session.
+              APP_CORS_ORIGINS: '["http://127.0.0.1:5173"]',
               // The fake mailer's verification link must open in this very browser
               // session, so the backend builds it against the dev-server origin.
               APP_FRONTEND_BASE_URL: "http://127.0.0.1:5173",

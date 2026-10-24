@@ -68,12 +68,19 @@ export async function backToHome(page: Page): Promise<void> {
 /**
  * Confirm the one-time email link the fake mailer delivered.
  *
- * The demo inbox route hands back the raw token, which is exactly what the ``/verify-email``
- * page posts. Driving it over HTTP keeps the golden path runnable while ticket P2-08
- * builds that page; ``golden-path-subscription.spec.ts`` covers the click-through once
- * the route exists.
+ * The demo inbox route hands back the raw token, which is what the ``/verify-email``
+ * page posts. Two legs of the funnel then stay deterministic: this HTTP confirmation
+ * for the Quota chain, and the real page click-through in
+ * ``golden-path-subscription.spec.ts``.
  */
 export async function verifyEmailFromDemoInbox(request: APIRequestContext, email: string): Promise<void> {
+  const token = await demoVerificationToken(request, email);
+  const confirmed = await request.post("/api/auth/verification/confirm", { data: { token } });
+  expect(confirmed.status(), await confirmed.text()).toBe(200);
+}
+
+/** The one-time token the fake mailer put in the verification link. */
+export async function demoVerificationToken(request: APIRequestContext, email: string): Promise<string> {
   const inbox = await request.get(`/api/demo/inbox?to=${encodeURIComponent(email)}`);
   expect(inbox.status(), await inbox.text()).toBe(200);
   const messages = (await inbox.json()) as { verification_token: string | null }[];
@@ -81,9 +88,7 @@ export async function verifyEmailFromDemoInbox(request: APIRequestContext, email
 
   const token = messages[0].verification_token;
   expect(token, "the demo inbox must carry the verification token").toBeTruthy();
-
-  const confirmed = await request.post("/api/auth/verification/confirm", { data: { token } });
-  expect(confirmed.status(), await confirmed.text()).toBe(200);
+  return token as string;
 }
 
 /**

@@ -75,7 +75,7 @@ test.describe("golden path", () => {
 
     // --- Account: Analysis waits for the confirmed email (ticket #22) -------
     await page.getByRole("button", { name: "AI 分析" }).click();
-    await expect(page.getByText("请先验证邮箱后再发起 Analysis")).toBeVisible();
+    await expect(page.getByText("邮箱尚未验证，验证后即可发起 Analysis。")).toBeVisible();
 
     await verifyEmailFromDemoInbox(page.request, email);
 
