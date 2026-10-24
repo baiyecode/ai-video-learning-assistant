@@ -32,6 +32,7 @@ _YOUTUBE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _BILIBILI_BVID = re.compile(r"BV[0-9A-Za-z]{10}")
 _BILIBILI_AVID = re.compile(r"av\d+", re.IGNORECASE)
 _SHORT_LINK_CODE = re.compile(r"[A-Za-z0-9_-]+")
+_DOUYIN_VIDEO_ID = re.compile(r"\d{5,23}")
 
 YOUTUBE_PLATFORM = "youtube"
 BILIBILI_PLATFORM = "bilibili"
@@ -113,7 +114,7 @@ def normalize_video_url(raw: str, *, enabled_platforms: frozenset[str] = DEFAULT
     if host in _DOUYIN_VIDEO_HOSTS or host in _DOUYIN_SHORT_HOSTS:
         if DOUYIN_PLATFORM not in enabled_platforms:
             raise _platform_not_enabled()
-        raise _unsupported()
+        return _normalise_douyin(host, parsed.path)
     raise _unsupported()
 
 
@@ -219,6 +220,22 @@ def _normalise_bilibili_short(path: str) -> str:
     if not code or "/" in code or not _SHORT_LINK_CODE.fullmatch(code):
         raise _unsupported()
     return f"https://b23.tv/{code}"
+
+
+def _normalise_douyin(host: str, path: str) -> str:
+    if host in _DOUYIN_SHORT_HOSTS:
+        code = path.strip("/")
+        if not code or "/" in code or not _SHORT_LINK_CODE.fullmatch(code):
+            raise _unsupported()
+        return f"https://v.douyin.com/{code}"
+
+    clean_path = path.rstrip("/") or "/"
+    if not clean_path.startswith("/video/"):
+        raise _unsupported()
+    video_id = clean_path[len("/video/") :].split("/")[0]
+    if not _DOUYIN_VIDEO_ID.fullmatch(video_id):
+        raise _unsupported()
+    return f"https://www.douyin.com/video/{video_id}"
 
 
 def _normalise_bilibili(host: str, path: str, query: str) -> str:
