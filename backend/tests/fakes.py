@@ -74,6 +74,32 @@ def checkout_completed_body(
         session_object["current_period_end"] = int(period_end.timestamp())
     return webhook_event_body(event_id, "checkout.session.completed", created, session_object)
 
+
+def lifecycle_event_body(
+    event_id: str,
+    event_type: str,
+    created: datetime,
+    *,
+    account_id: str | None = None,
+    subscription_id: str = "sub_fake_1",
+    customer_id: str = "cus_fake_1",
+    period_end: datetime | None = None,
+    subscription_status: str | None = None,
+) -> bytes:
+    """The wire shape of an invoice/subscription lifecycle event (Stripe-style object).
+
+    ``account_id`` is optional on purpose: real invoice and subscription events name
+    only Stripe ids, and the state machine must still find the local subscription.
+    """
+    obj: dict[str, object] = {"subscription": subscription_id, "customer": customer_id}
+    if account_id is not None:
+        obj["metadata"] = {"account_id": account_id}
+    if period_end is not None:
+        obj["current_period_end"] = int(period_end.timestamp())
+    if subscription_status is not None:
+        obj["status"] = subscription_status
+    return webhook_event_body(event_id, event_type, created, obj)
+
 #: The one Douyin Video the fake short-link wrapper unwraps to.
 DOUYIN_DEFAULT_VIDEO_ID = "7123456789012345678"
 _DOUYIN_SHARE_URL = re.compile(r"^https://www\.douyin\.com/video/(\d{5,23})$")

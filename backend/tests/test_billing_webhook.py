@@ -76,6 +76,7 @@ async def test_checkout_completed_event_activates_membership(client: AsyncClient
         "status": "active",
         "period_end": PERIOD_END,
         "portal_url": None,
+        "is_vip": True,
     }
 
 
@@ -346,7 +347,12 @@ async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscri
 
     assert webhook.status_code == 200, webhook.text
     membership = await client.get("/api/me/membership", headers=auth)
-    assert membership.json() == {"status": "active", "period_end": PERIOD_END, "portal_url": None}
+    assert membership.json() == {
+        "status": "active",
+        "period_end": PERIOD_END,
+        "portal_url": None,
+        "is_vip": True,
+    }
 
     async with app.state.sessionmaker() as session:
         rows = (

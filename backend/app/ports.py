@@ -156,6 +156,9 @@ class WebhookEvent:
     stripe_subscription_id: str | None = None
     current_period_end: datetime | None = None
     price_id: str | None = None
+    subscription_status: str | None = None
+    """Raw provider subscription status (``active``/``trialing``/``canceled``/``past_due``)
+    carried by subscription objects; the state machine maps it, unknown values never guess."""
 
 
 @runtime_checkable

@@ -15,7 +15,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.modules.billing.models import BillingEvent, Subscription, SubscriptionStatus
+from app.modules.billing.models import BillingEvent, Subscription, SubscriptionStatus, is_vip
 from app.modules.billing.schemas import CheckoutOut, MembershipOut
 from app.modules.identity.models import Account
 from app.ports import BillingGateway, Clock, WebhookEvent
@@ -27,7 +27,18 @@ STATUS_FREE = "free"
 """Membership status for an Account with no subscription record."""
 
 CHECKOUT_COMPLETED = "checkout.session.completed"
-"""The one event this ticket's state machine acts on (spec: payment success takes effect)."""
+"""The event that grants a membership: the Checkout Session finished being paid."""
+
+INVOICE_PAYMENT_FAILED = "invoice.payment_failed"
+INVOICE_PAYMENT_SUCCEEDED = "invoice.payment_succeeded"
+CUSTOMER_SUBSCRIPTION_DELETED = "customer.subscription.deleted"
+
+_LIFECYCLE_STATUS: dict[str, SubscriptionStatus] = {
+    INVOICE_PAYMENT_FAILED: SubscriptionStatus.PAST_DUE,
+    INVOICE_PAYMENT_SUCCEEDED: SubscriptionStatus.ACTIVE,
+    CUSTOMER_SUBSCRIPTION_DELETED: SubscriptionStatus.CANCELED,
+}
+"""State-machine edges (spec): the recorded status only ever moves on these events."""
 
 
 def _new_id() -> str:
@@ -58,7 +69,7 @@ async def membership(session: AsyncSession, account_id: str) -> MembershipOut:
         select(Subscription).where(Subscription.account_id == account_id)
     )
     if subscription is None:
-        return MembershipOut(status=STATUS_FREE, period_end=None, portal_url=None)
+        return MembershipOut(status=STATUS_FREE, period_end=None, portal_url=None, is_vip=False)
     return MembershipOut(
         status=subscription.status,
         period_end=(
@@ -67,6 +78,7 @@ async def membership(session: AsyncSession, account_id: str) -> MembershipOut:
             else None
         ),
         portal_url=None,
+        is_vip=is_vip(subscription),
     )
 
 
@@ -75,9 +87,8 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
 
     The ``BillingEvent`` unique ``event_id`` is claimed first: losing the conflict means
     Stripe is redelivering an already-processed event, so nothing changes and the caller
-    still answers 2xx. Slice scope (P2-02): ``checkout.session.completed`` makes the
-    Account Active with the recorded period end; every other event type is recorded
-    only (the rest of the state machine ships with P2-04).
+    still answers 2xx. Events older than the newest recorded one (out-of-order delivery)
+    are audit-only, and event types the state machine does not own never move state.
     """
     claim = await session.execute(
         sqlite_insert(BillingEvent)
@@ -143,8 +154,22 @@ async def _is_stale(session: AsyncSession, event: WebhookEvent) -> bool:
 
 
 async def _transition(session: AsyncSession, event: WebhookEvent) -> bool:
-    """Apply the state change this event type owns; True when state moved."""
-    if event.type != CHECKOUT_COMPLETED or not event.account_id:
+    """Apply the state change this event type owns; True when state moved.
+
+    ``checkout.session.completed`` creates or reactivates the record (payment success
+    takes effect, P2-02); the lifecycle statuses ride the ``_LIFECYCLE_STATUS`` edges:
+    invoice failure lands on Past Due, a paid invoice restores Active, a deleted
+    subscription is Canceled. A lifecycle event that names an Account without a
+    subscription record never invents one - only a checkout mints a record.
+    """
+    if event.type == CHECKOUT_COMPLETED:
+        return await _apply_checkout(session, event)
+    return await _apply_lifecycle(session, event)
+
+
+async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
+    """Payment success takes effect immediately: mint or reactivate the Account record."""
+    if not event.account_id:
         return False
     if await session.get(Account, event.account_id) is None:
         return False
@@ -170,6 +195,58 @@ async def _transition(session: AsyncSession, event: WebhookEvent) -> bool:
             subscription.stripe_customer_id = event.stripe_customer_id
         if event.price_id:
             subscription.price_id = event.price_id
+    _log_membership(event, SubscriptionStatus.ACTIVE.value)
+    return True
+
+
+async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
+    """Advance an existing record along a spec edge; never guess state, never mint one."""
+    target = _LIFECYCLE_STATUS.get(event.type)
+    if target is None:
+        return False
+    subscription = await _find_subscription(session, event)
+    if subscription is None:
+        return False
+    changed = False
+    if subscription.status != target.value:
+        subscription.status = target.value
+        changed = True
+    if event.current_period_end is not None and (
+        subscription.current_period_end is None
+        or required_utc(subscription.current_period_end) != event.current_period_end
+    ):
+        subscription.current_period_end = event.current_period_end
+        changed = True
+    if event.stripe_subscription_id and subscription.stripe_subscription_id != event.stripe_subscription_id:
+        subscription.stripe_subscription_id = event.stripe_subscription_id
+        changed = True
+    if event.stripe_customer_id and not subscription.stripe_customer_id:
+        subscription.stripe_customer_id = event.stripe_customer_id
+        changed = True
+    if changed:
+        _log_membership(event, target.value)
+    return changed
+
+
+async def _find_subscription(session: AsyncSession, event: WebhookEvent) -> Subscription | None:
+    """Locate the record an event speaks about: Stripe id first, then Account owner."""
+    if event.stripe_subscription_id:
+        subscription = await session.scalar(
+            select(Subscription).where(
+                Subscription.stripe_subscription_id == event.stripe_subscription_id
+            )
+        )
+        if subscription is not None:
+            return subscription
+    if event.account_id:
+        return await session.scalar(
+            select(Subscription).where(Subscription.account_id == event.account_id)
+        )
+    return None
+
+
+def _log_membership(event: WebhookEvent, status: str) -> None:
+    """Structured transition log, traceable to the provider event id (P2-02 whitelist)."""
     logger.info(
         "billing_membership_changed",
         extra={
@@ -177,8 +254,7 @@ async def _transition(session: AsyncSession, event: WebhookEvent) -> bool:
             "event_id": event.event_id,
             "event_type": event.type,
             "account_id": event.account_id,
-            "subscription_status": SubscriptionStatus.ACTIVE.value,
+            "subscription_status": status,
             "outcome": "applied",
         },
     )
-    return True
