@@ -34,6 +34,18 @@ export interface RegisterResponse {
   message: string;
 }
 
+/**
+ * POST /auth/verification/request (P2-08): 202 ack.
+ *
+ * ``email_verified`` reflects the Account after the call: a re-send to an
+ * already-verified address sends nothing and says so. Frequency rejection is a
+ * 429 ``too_many_requests`` whose ``details`` carry ``retry_after``/``reset_at``.
+ */
+export interface VerificationResponse {
+  message: string;
+  email_verified: boolean;
+}
+
 interface AuthState {
   account: Account | null;
   accessToken: string | null;
@@ -57,6 +69,8 @@ export const useAuthStore = defineStore("auth", {
   }),
   getters: {
     isAuthenticated: (state): boolean => state.account !== null,
+    /** False while signed out: the verification banner only guards a live session. */
+    emailVerified: (state): boolean => state.account?.email_verified_at != null,
   },
   actions: {
     setSession(token: string, account: Account): void {
@@ -124,6 +138,35 @@ export const useAuthStore = defineStore("auth", {
         this.clearSession();
         this.restored = true;
       }
+    },
+    /**
+     * POST /auth/verification/request: re-send the verification email for the
+     * signed-in Account. A frequency refusal surfaces as a 429 ``too_many_requests``
+     * whose ``details`` carry ``retry_after``/``reset_at`` for the caller to show.
+     */
+    async requestVerification(): Promise<VerificationResponse> {
+      const body = await api.post<VerificationResponse>("/auth/verification/request", {});
+      if (body.email_verified && this.account && this.account.email_verified_at == null) {
+        // Keep the banner honest when the backend reports the email is already verified.
+        this.account = { ...this.account, email_verified_at: new Date().toISOString() };
+      }
+      return body;
+    },
+    /**
+     * POST /auth/verification/confirm: the token itself authenticates (no session).
+     * A signed-in Account adopts the fresh ``email_verified_at``; invalid or expired
+     * tokens surface as ``ApiError`` for the caller to explain.
+     */
+    async confirmVerification(token: string): Promise<Account> {
+      const account = await api.post<Account>(
+        "/auth/verification/confirm",
+        { token },
+        { retryOn401: false },
+      );
+      if (this.account && this.account.id === account.id) {
+        this.account = account;
+      }
+      return account;
     },
   },
 });

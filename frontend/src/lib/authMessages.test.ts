@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { authErrorMessage } from "@/lib/authMessages";
+import { authErrorMessage, verificationResendNotice } from "@/lib/authMessages";
 
 describe("authErrorMessage", () => {
   it("maps stable backend codes to Chinese user-facing messages", () => {
@@ -17,5 +17,24 @@ describe("authErrorMessage", () => {
   it("falls back to a generic message for unknown or missing codes", () => {
     expect(authErrorMessage("something_new")).toBe("操作失败，请稍后重试");
     expect(authErrorMessage(undefined)).toBe("操作失败，请稍后重试");
+  });
+});
+
+describe("verificationResendNotice", () => {
+  it("shows the retryable minutes and instant when the rate limit refuses", () => {
+    const notice = verificationResendNotice({ retry_after: 240, reset_at: "2026-01-16T02:15:00+00:00" });
+    expect(notice).toContain("4 分钟");
+    expect(notice).toContain("01-16 10:15");
+  });
+
+  it("rounds any positive retry_after up to whole minutes", () => {
+    expect(verificationResendNotice({ retry_after: 5 })).toContain("1 分钟");
+  });
+
+  it("degrades gracefully when envelope details are missing", () => {
+    expect(verificationResendNotice({})).toBe("发送验证邮件过于频繁，请稍后再试。");
+    expect(verificationResendNotice({ reset_at: "not-a-date" })).toBe(
+      "发送验证邮件过于频繁，请稍后再试。"
+    );
   });
 });

@@ -153,6 +153,21 @@ describe("reanalysis availability", () => {
     expect(availability.resetsAt).toBe("2026-01-16T00:00:00+08:00");
   });
 
+  it("lets a VIP Membership reanalyze without spending or blocking (unlimited sentinel)", () => {
+    const availability = reanalysisAvailability({
+      daily_limit: -1,
+      used: 41,
+      remaining: -1,
+      resets_at: "2026-01-16T00:00:00+08:00",
+      membership: "active",
+    });
+
+    expect(availability.allowed).toBe(true);
+    expect(availability.cost).toBe(0);
+    expect(availability.message).toContain("不限次");
+    expect(availability.message).not.toContain("已用完");
+  });
+
   it("allows the attempt when Quota is still loading, stating the cost", () => {
     const availability = reanalysisAvailability(null);
 

@@ -1,16 +1,39 @@
 <script setup lang="ts">
-import { useRouter } from "vue-router";
+import { onMounted, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 import AppFooter from "@/components/AppFooter.vue";
+import EmailVerificationBanner from "@/components/EmailVerificationBanner.vue";
 import { useAuthStore } from "@/stores/auth";
+import { useBillingStore } from "@/stores/billing";
 
 const auth = useAuthStore();
+const billing = useBillingStore();
+const route = useRoute();
 const router = useRouter();
 
 async function logout(): Promise<void> {
   await auth.logout();
+  billing.reset();
   await router.push({ name: "home" });
 }
+
+/**
+ * Coming back from the payment provider (``/?checkout=…`` or ``/?portal=finished``)
+ * is a hint to re-read ``/me/membership`` — never proof of anything itself. The
+ * query parameters are dropped and the subscriber lands on the Account page where
+ * the refreshed truth is shown.
+ */
+function consumeProviderReturn(): void {
+  const fromCheckout = typeof route.query.checkout === "string";
+  const fromPortal = route.query.portal === "finished";
+  if (!fromCheckout && !fromPortal) return;
+  void billing.loadMembership();
+  void router.replace(auth.isAuthenticated ? "/account" : "/");
+}
+
+onMounted(consumeProviderReturn);
+watch(() => route.query, consumeProviderReturn);
 </script>
 
 <template>
@@ -22,12 +45,18 @@ async function logout(): Promise<void> {
         </RouterLink>
         <nav class="flex items-center gap-4 text-sm text-slate-600">
           <RouterLink to="/" class="transition-colors hover:text-slate-900">首页</RouterLink>
+          <RouterLink to="/pricing" class="transition-colors hover:text-slate-900">
+            升级会员
+          </RouterLink>
           <template v-if="auth.isAuthenticated">
             <RouterLink
               to="/analyses"
               class="transition-colors hover:text-slate-900"
             >
               我的分析
+            </RouterLink>
+            <RouterLink to="/account" class="transition-colors hover:text-slate-900">
+              个人中心
             </RouterLink>
             <span class="max-w-48 truncate text-slate-500" :title="auth.account?.email">
               {{ auth.account?.email }}
@@ -50,6 +79,8 @@ async function logout(): Promise<void> {
         </nav>
       </div>
     </header>
+
+    <EmailVerificationBanner />
 
     <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
       <slot />

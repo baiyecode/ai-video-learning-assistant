@@ -228,6 +228,17 @@ export function reanalysisAvailability(
     };
   }
 
+  // VIP Membership carries the -1 unlimited sentinel: nothing to block and nothing to spend.
+  if (quota.daily_limit < 0) {
+    return {
+      allowed: true,
+      remaining: null,
+      cost: 0,
+      message: "VIP Membership：Analysis 不限次，本次不消耗 Quota",
+      resetsAt: null,
+    };
+  }
+
   const limit = Math.max(0, quota.daily_limit);
   const remaining = Math.max(0, Math.min(quota.remaining, limit));
   if (remaining < REANALYSIS_COST) {

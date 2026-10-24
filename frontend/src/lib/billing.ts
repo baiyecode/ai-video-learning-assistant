@@ -14,8 +14,68 @@ export interface MembershipDto {
 }
 
 export const FREE_STATUS = "free";
+export const ACTIVE_STATUS = "active";
 export const PAST_DUE_STATUS = "past_due";
 export const TRIAL_ENDING_STATUS = "trial_ending";
+export const CANCELED_STATUS = "canceled";
+
+/**
+ * The single monthly plan (spec: "$4.99/月、Analysis 不限次").
+ * Mirrors backend ``Settings.subscription_monthly_usd``; the hosted checkout page of
+ * the payment provider is the final word on the charged amount (已注明「以支付方为准」).
+ */
+export const MONTHLY_PRICE_USD = 4.99;
+export const PRICE_HEADLINE = `$${MONTHLY_PRICE_USD.toFixed(2)}/月`;
+export const PRICE_BENEFIT = "Analysis 不限次";
+export const PRICE_PROVIDER_NOTICE = "以上为当前标价，实际扣款以支付方（Stripe）结账页展示的条款为准。";
+
+const STATUS_LABELS: Record<string, string> = {
+  [FREE_STATUS]: "免费版",
+  [ACTIVE_STATUS]: "VIP 订阅中",
+  [PAST_DUE_STATUS]: "扣款未成功，VIP 已暂停",
+  [TRIAL_ENDING_STATUS]: "试用中",
+  [CANCELED_STATUS]: "已取消订阅",
+};
+
+export function membershipStatusLabel(membership: MembershipDto | null): string {
+  if (!membership) return "订阅状态加载中";
+  return STATUS_LABELS[membership.status] ?? membership.status;
+}
+
+/** True when ``period_end`` is strictly in the future relative to ``now``. */
+export function periodEndInFuture(iso: string | null, now: Date = new Date()): boolean {
+  if (!iso) return false;
+  const end = new Date(iso);
+  return !Number.isNaN(end.getTime()) && end.getTime() > now.getTime();
+}
+
+/** "下次续费日期" for a running subscription, or null when nothing renews. */
+export function renewalNotice(membership: MembershipDto | null): string | null {
+  if (!membership || membership.status !== ACTIVE_STATUS) return null;
+  const day = formatPeriodEnd(membership.period_end);
+  return day ? `下次续费日期：${day}` : null;
+}
+
+/**
+ * The "到期预告" shown once access is winding down (stories 9/10):
+ * a canceled (or trial) subscription that still keeps VIP until ``period_end``.
+ */
+export function expirationNotice(membership: MembershipDto | null): string | null {
+  if (!membership) return null;
+  if (membership.status === CANCELED_STATUS && membership.period_end) {
+    // `canceled` with a future period end is the grace preview the UI promised the
+    // user before deletion; the backend already flipped the flag, period_end still speaks.
+    if (!periodEndInFuture(membership.period_end)) return null;
+    const day = formatPeriodEnd(membership.period_end);
+    return day ? `订阅已取消，VIP 将保留至 ${day}，届时失去 VIP 并恢复免费额度。` : null;
+  }
+  if (membership.status === TRIAL_ENDING_STATUS && membership.is_vip) {
+    if (!periodEndInFuture(membership.period_end)) return null;
+    const day = formatPeriodEnd(membership.period_end);
+    return day ? `将于 ${day} 失去 VIP。` : null;
+  }
+  return null;
+}
 
 export function isVipMembership(membership: MembershipDto | null): boolean {
   return membership?.is_vip === true;
