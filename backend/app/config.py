@@ -85,6 +85,9 @@ class Settings(BaseSettings):
     rate_limit_register_per_hour: int = 5
     rate_limit_analysis_seconds: float = 10.0
     rate_limit_report_per_hour: int = 5
+    # Email-verification resend (ticket #22): per Account, not per IP, since the
+    # endpoint requires a login. Guards against the product being used as a mail relay.
+    rate_limit_verification_request_per_hour: int = 3
 
     # Deterministic in-process adapters (seeded demo video + canned Summarizer) for
     # the Playwright golden path. Never enable this in production.
