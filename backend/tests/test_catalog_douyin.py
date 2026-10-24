@@ -6,6 +6,8 @@ with ``FakeVideoSource``: no test ever contacts real Douyin.
 
 from __future__ import annotations
 
+import asyncio
+import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -23,7 +25,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
-from tests.fakes import make_fake_adapters, sample_video
+from tests.fakes import make_fake_adapters, sample_douyin_video, sample_video
 
 DOUYIN_SHARE_URL = "https://www.douyin.com/video/7123456789012345678"
 DOUYIN_SHORT_URL = "https://v.douyin.com/AbC123"
@@ -191,3 +193,102 @@ async def test_bilibili_and_youtube_resolve_unchanged_when_douyin_is_enabled(
     assert youtube.json()["video"]["platform"] == "youtube"
     assert bilibili.status_code == 200, bilibili.text
     assert bilibili.json()["video"]["platform"] == "bilibili"
+
+
+async def _resolve_douyin(client: AsyncClient, url: str = DOUYIN_SHARE_URL) -> dict:
+    response = await client.post("/api/videos/resolve", json={"url": url})
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+async def _await_terminal(client: AsyncClient, download_id: str) -> dict:
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        response = await client.get(f"/api/downloads/{download_id}")
+        assert response.status_code == 200, response.text
+        body = response.json()
+        if body["status"] in {"ready", "failed", "expired"}:
+            return body
+        await asyncio.sleep(0.005)
+    raise AssertionError(f"download {download_id} never reached a terminal status")
+
+
+async def test_douyin_video_downloads_via_the_proxied_chain_and_temporary_link(
+    tmp_path: Path,
+) -> None:
+    async with douyin_enabled_client(tmp_path) as (client, _adapters, _app):
+        resolved = await _resolve_douyin(client)
+        created = await client.post(
+            "/api/downloads",
+            json={
+                "video_id": resolved["video"]["id"],
+                "format_id": resolved["formats"][0]["format_id"],
+            },
+        )
+        assert created.status_code == 202, created.text
+        final = await _await_terminal(client, created.json()["id"])
+
+        assert final["status"] == "ready", final
+        assert final["download_url"] and "sig=" in final["download_url"]
+        file_response = await client.get(final["download_url"])
+        assert file_response.status_code == 200
+        assert file_response.content == b"fake-media-bytes"
+
+
+async def test_douyin_download_respects_the_existing_duration_cap(tmp_path: Path) -> None:
+    async with douyin_enabled_client(tmp_path) as (client, adapters, _app):
+        adapters.video_source.videos = {  # type: ignore[attr-defined]
+            DOUYIN_SHARE_URL: sample_douyin_video(duration_seconds=3 * 60 * 60)
+        }
+        resolved = await _resolve_douyin(client)
+
+        created = await client.post(
+            "/api/downloads",
+            json={
+                "video_id": resolved["video"]["id"],
+                "format_id": resolved["formats"][0]["format_id"],
+            },
+        )
+
+    assert created.status_code == 422, created.text
+    assert created.json()["error"]["code"] == "download_too_long"
+
+
+async def test_douyin_download_respects_the_existing_size_cap(tmp_path: Path) -> None:
+    async with douyin_enabled_client(tmp_path, download_max_file_size_bytes=1024) as (
+        client,
+        _adapters,
+        _app,
+    ):
+        resolved = await _resolve_douyin(client)
+
+        created = await client.post(
+            "/api/downloads",
+            json={
+                "video_id": resolved["video"]["id"],
+                "format_id": resolved["formats"][0]["format_id"],
+            },
+        )
+
+    assert created.status_code == 422, created.text
+    assert created.json()["error"]["code"] == "download_too_large"
+
+
+async def test_douyin_video_without_subtitle_cannot_be_analysed(tmp_path: Path) -> None:
+    async with douyin_enabled_client(tmp_path) as (client, _adapters, _app):
+        resolved = await _resolve_douyin(client)
+        assert resolved["can_analyze"] is False
+
+        register = await client.post(
+            "/api/auth/register",
+            json={"email": "douyin@example.com", "password": "correct-horse"},
+        )
+        assert register.status_code == 201, register.text
+        headers = {"Authorization": f"Bearer {register.json()['access_token']}"}
+
+        response = await client.post(
+            "/api/analyses", json={"video_id": resolved["video"]["id"]}, headers=headers
+        )
+
+    assert response.status_code == 409, response.text
+    assert response.json()["error"]["code"] == "subtitles_unavailable"
