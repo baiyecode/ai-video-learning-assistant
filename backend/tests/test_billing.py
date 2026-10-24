@@ -40,3 +40,12 @@ async def test_logged_in_account_receives_the_gateway_checkout_url(client: Async
 
     assert response.status_code == 200, response.text
     assert response.json() == {"url": FAKE_CHECKOUT_URL}
+
+
+async def test_membership_is_free_before_any_subscription(client: AsyncClient) -> None:
+    auth = bearer(await register(client))
+
+    response = await client.get("/api/me/membership", headers=auth)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"status": "free", "period_end": None, "portal_url": None}
