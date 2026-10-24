@@ -25,6 +25,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
+from tests.auth_flows import login as auth_login
+from tests.auth_flows import register as auth_register
 from tests.fakes import make_fake_adapters, sample_video
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -351,13 +353,10 @@ async def test_logged_in_download_still_works_and_records_the_account(
     client: AsyncClient, adapters: Adapters, app: FastAPI
 ) -> None:
     video_id = await _resolved_video_id(client, adapters)
-    registered = await client.post(
-        "/api/auth/register",
-        json={"email": "downloader@example.com", "password": "correct-horse"},
-    )
-    assert registered.status_code == 201, registered.text
-    account_id = registered.json()["account"]["id"]
-    headers = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+    await auth_register(client, email="downloader@example.com", password="correct-horse")
+    logged_in = await auth_login(client, email="downloader@example.com", password="correct-horse")
+    account_id = logged_in.json()["account"]["id"]
+    headers = {"Authorization": f"Bearer {logged_in.json()['access_token']}"}
 
     created = await client.post(
         "/api/downloads",
