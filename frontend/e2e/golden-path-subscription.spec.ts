@@ -31,7 +31,7 @@ const enabled = process.env.PLAYWRIGHT_E2E === "1";
 const SUMMARY_LINE = "间隔重复依据遗忘曲线安排复习：一天、三天，然后逐步拉长间隔。";
 /** P2-08's conversion-aware copy for the two refusals (story 36/37). */
 const QUOTA_SPENT = "今日 Quota 已用完，升级 VIP 后 Analysis 不限次。";
-const EMAIL_UNVERIFIED = "邮箱尚未验证，验证后即可发起 Analysis。";
+const EMAIL_UNVERIFIED = "请先验证邮箱后再发起 Analysis";
 
 test.describe("golden path: quota exhausted → upgrade → unlimited Analysis", () => {
   test.skip(!enabled, "Set PLAYWRIGHT_E2E=1 to start both servers with fake adapters");

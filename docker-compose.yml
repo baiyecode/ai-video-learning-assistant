@@ -49,6 +49,7 @@ services:
       APP_FRONTEND_BASE_URL: ${APP_FRONTEND_BASE_URL:-http://localhost:8080}
       # Per-Account hourly cap for verification resends (0 disables).
       APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR: ${APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR:-3}
+      APP_RATE_LIMIT_VERIFICATION_CONFIRM_PER_HOUR: ${APP_RATE_LIMIT_VERIFICATION_CONFIRM_PER_HOUR:-10}
       # Optional error reporting: leave SENTRY_DSN empty to disable it.
       SENTRY_DSN: ${SENTRY_DSN:-}
       SENTRY_TRACES_SAMPLE_RATE: ${SENTRY_TRACES_SAMPLE_RATE:-0}

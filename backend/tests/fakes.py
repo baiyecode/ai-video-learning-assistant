@@ -87,6 +87,7 @@ def lifecycle_event_body(
     customer_id: str = "cus_fake_1",
     period_end: datetime | None = None,
     subscription_status: str | None = None,
+    cancel_at_period_end: bool | None = None,
 ) -> bytes:
     """The wire shape of an invoice/subscription lifecycle event (Stripe-style object).
 
@@ -100,6 +101,8 @@ def lifecycle_event_body(
         obj["current_period_end"] = int(period_end.timestamp())
     if subscription_status is not None:
         obj["status"] = subscription_status
+    if cancel_at_period_end is not None:
+        obj["cancel_at_period_end"] = cancel_at_period_end
     return webhook_event_body(event_id, event_type, created, obj)
 
 #: The one Douyin Video the fake short-link wrapper unwraps to.

@@ -9,7 +9,8 @@
 export interface MembershipDto {
   status: string;
   period_end: string | null;
-  portal_url: string | null;
+  /** Provider's scheduled cancellation: VIP is kept until ``period_end`` (story 8). */
+  cancel_at_period_end: boolean;
   is_vip: boolean;
 }
 
@@ -52,27 +53,32 @@ export function periodEndInFuture(iso: string | null, now: Date = new Date()): b
 /** "下次续费日期" for a running subscription, or null when nothing renews. */
 export function renewalNotice(membership: MembershipDto | null): string | null {
   if (!membership || membership.status !== ACTIVE_STATUS) return null;
+  if (membership.cancel_at_period_end) return null;
   const day = formatPeriodEnd(membership.period_end);
   return day ? `下次续费日期：${day}` : null;
 }
 
 /**
- * The "到期预告" shown once access is winding down (stories 9/10):
- * a canceled (or trial) subscription that still keeps VIP until ``period_end``.
+ * The "到期预告" shown once access is winding down (stories 8/9):
+ * only while the Account truly still holds VIP — ``is_vip`` with the status in
+ * ``active``/``trial_ending`` and ``period_end`` ahead of now. A scheduled
+ * cancellation (``cancel_at_period_end``) promises the retention end date; a
+ * trial promises its loss date. Past Due sells the portal fix and a real
+ * cancellation is already non-VIP: neither gets a retention preview.
  */
 export function expirationNotice(membership: MembershipDto | null): string | null {
-  if (!membership) return null;
-  if (membership.status === CANCELED_STATUS && membership.period_end) {
-    // `canceled` with a future period end is the grace preview the UI promised the
-    // user before deletion; the backend already flipped the flag, period_end still speaks.
-    if (!periodEndInFuture(membership.period_end)) return null;
-    const day = formatPeriodEnd(membership.period_end);
-    return day ? `订阅已取消，VIP 将保留至 ${day}，届时失去 VIP 并恢复免费额度。` : null;
+  if (!membership || !membership.is_vip) return null;
+  const withinPaidPeriod =
+    membership.status === ACTIVE_STATUS || membership.status === TRIAL_ENDING_STATUS;
+  if (!withinPaidPeriod) return null;
+  if (!membership.period_end || !periodEndInFuture(membership.period_end)) return null;
+  const day = formatPeriodEnd(membership.period_end);
+  if (!day) return null;
+  if (membership.cancel_at_period_end) {
+    return `已取消续费，VIP 将保留至 ${day}，届时将失去 VIP 并恢复免费额度。`;
   }
-  if (membership.status === TRIAL_ENDING_STATUS && membership.is_vip) {
-    if (!periodEndInFuture(membership.period_end)) return null;
-    const day = formatPeriodEnd(membership.period_end);
-    return day ? `将于 ${day} 失去 VIP。` : null;
+  if (membership.status === TRIAL_ENDING_STATUS) {
+    return `将于 ${day} 失去 VIP。`;
   }
   return null;
 }

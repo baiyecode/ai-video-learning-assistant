@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { authErrorMessage, verificationResendNotice } from "@/lib/authMessages";
+import { EMAIL_NOT_VERIFIED_MESSAGE, uiErrorMessage } from "@/lib/uiError";
 
 describe("authErrorMessage", () => {
   it("maps stable backend codes to Chinese user-facing messages", () => {
@@ -12,6 +13,13 @@ describe("authErrorMessage", () => {
     expect(authErrorMessage("auth_required")).toBe("登录状态已失效，请重新登录");
     expect(authErrorMessage("too_many_requests")).toBe("尝试过于频繁，请稍后再试");
     expect(authErrorMessage("subscription_not_found")).toBe("还没有可管理的订阅，请先完成升级支付");
+  });
+
+  it("shares the one email-gate sentence with the uiError card", () => {
+    expect(authErrorMessage("email_not_verified")).toBe(EMAIL_NOT_VERIFIED_MESSAGE);
+    expect(authErrorMessage("email_not_verified")).toBe(
+      uiErrorMessage({ code: "email_not_verified", message: "forbidden" })
+    );
   });
 
   it("falls back to a generic message for unknown or missing codes", () => {

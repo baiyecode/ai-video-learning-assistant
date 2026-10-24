@@ -13,10 +13,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.container import Adapters
-from app.deps import get_adapters, get_current_account, get_session, get_settings
+from app.deps import get_adapters, get_clock, get_current_account, get_session, get_settings
 from app.modules.billing import service
 from app.modules.billing.schemas import CheckoutOut, MembershipOut, PortalOut, WebhookOut
 from app.modules.identity.models import Account
+from app.ports import Clock
 
 router = APIRouter(tags=["billing"])
 
@@ -58,8 +59,9 @@ async def create_portal(
 async def get_membership(
     account: Account = Depends(get_current_account),
     session: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(get_clock),
 ) -> MembershipOut:
-    return await service.membership(session, account.id)
+    return await service.membership(session, account.id, now=clock.now())
 
 
 @router.post(

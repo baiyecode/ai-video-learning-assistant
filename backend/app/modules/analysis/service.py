@@ -18,8 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
-from app.modules.billing.models import Subscription, is_vip
-from app.modules.billing.service import STATUS_FREE
+from app.modules.billing.service import membership_state
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import BudgetLedger, Clock
 from app.ratelimit import RateLimiter
@@ -87,17 +86,10 @@ async def _find_active(
     )
 
 
-async def _subscription(session: AsyncSession, account_id: str) -> Subscription | None:
-    """The Account's subscription record, if any (VIP is derived from it)."""
-    return await session.scalar(
-        select(Subscription).where(Subscription.account_id == account_id)
-    )
-
-
-async def membership_status(session: AsyncSession, account_id: str) -> str:
-    """The Account's subscription status as stored by webhooks ("free" without one)."""
-    subscription = await _subscription(session, account_id)
-    return subscription.status if subscription is not None else STATUS_FREE
+async def membership_status(session: AsyncSession, account_id: str, *, now) -> str:
+    """Delegate to billing's single membership read (derivation lives over there)."""
+    state = await membership_state(session, account_id, now=now)
+    return state.status
 
 
 async def _create_once(
@@ -128,14 +120,14 @@ async def _create_once(
             {"video_id": video_id},
         )
 
-    # Read once per request: it decides the Quota gate below and surfaces as the
-    # ``membership`` field on every create response (new or reused).
-    subscription = await _subscription(session, account_id)
-    membership = subscription.status if subscription is not None else STATUS_FREE
+    # Read once per request through billing's single membership port: it decides
+    # the Quota gate below and surfaces as the ``membership`` field on every create
+    # response (new or reused). Expired VIP already presents as canceled/non-VIP.
+    state = await membership_state(session, account_id, now=clock.now())
 
     active = await _find_active(session, account_id, video_id)
     if active is not None:
-        return CreateResult(active, video, False, membership)
+        return CreateResult(active, video, False, state.status)
 
     if not force:
         completed = await session.scalar(
@@ -148,15 +140,14 @@ async def _create_once(
             .order_by(Analysis.created_at.desc())
         )
         if completed is not None:
-            return CreateResult(completed, video, False, membership)
+            return CreateResult(completed, video, False, state.status)
 
     # Gates for a genuinely new Analysis only: reusing an in-progress or completed
-    # result above costs neither rate-limit budget nor Quota. Both run before the
-    # Quota reservation, so a rejection never consumes Quota.
-    if force or rate_limiter.last_tag("analyses.create", account_id) != video_id:
-        # A repeated *non-force* request for the Video that just started is an
-        # idempotent retry (double click / two tabs), not a new-analysis attempt.
-        rate_limiter.ensure("analyses.create", account_id)
+    # result above costs neither rate-limit budget nor Quota. Spec gate order
+    # (ticket #22): 已登录 → 邮箱已验证 (router) → Quota/VIP → 限流. The budget cap
+    # rides with Quota (a rejection there reserves nothing), and the throttle runs
+    # after the reservation: a throttle refusal aborts the transaction, so the
+    # reserved unit is rolled back and stays unconsumed either way.
     # Gate on every call this Analysis will make (chunks + final merge), not on
     # one call: a map-reduce run that starts without its full budget would run
     # out halfway and waste the calls already paid for.
@@ -187,11 +178,17 @@ async def _create_once(
     # sentinel limit keeps counting units, so failure rollback still applies.
     effective_limit = (
         quota.UNLIMITED_DAILY_LIMIT
-        if is_vip(subscription)
+        if state.is_vip
         else settings.analysis_daily_quota
     )
     if not await quota.reserve(session, account_id, clock.today(), effective_limit):
         raise _quota_exhausted(clock, settings)
+
+    if force or rate_limiter.last_tag("analyses.create", account_id) != video_id:
+        # A repeated *non-force* request for the Video that just started is an
+        # idempotent retry (double click / two tabs), not a new-analysis attempt.
+        # A refusal here rolls back the transaction, un-reserving the unit above.
+        rate_limiter.ensure("analyses.create", account_id)
 
     now = clock.now()
     analysis = Analysis(
@@ -221,12 +218,12 @@ async def _create_once(
         if active is None:
             raise
         video = await session.get(Video, video_id)
-        return CreateResult(active, video, False, membership)
+        return CreateResult(active, video, False, state.status)
 
     # Only a committed new row consumes the per-Account creation slot; the winner of
     # a concurrent race records here and the loser above never does.
     rate_limiter.record("analyses.create", account_id, tag=video_id)
-    return CreateResult(analysis, video, True, membership)
+    return CreateResult(analysis, video, True, state.status)
 
 
 async def create_analysis(
@@ -277,11 +274,10 @@ async def daily_quota(
     (``/api/me``) read them here instead of digging through :mod:`.quota`. VIP
     Membership surfaces as the unlimited sentinel plus the raw subscription status.
     """
-    subscription = await _subscription(session, account_id)
-    membership = subscription.status if subscription is not None else STATUS_FREE
+    state = await membership_state(session, account_id, now=clock.now())
     limit = (
         quota.UNLIMITED_DAILY_LIMIT
-        if is_vip(subscription)
+        if state.is_vip
         else settings.analysis_daily_quota
     )
     snapshot = await quota.usage(session, account_id, clock, limit)
@@ -290,7 +286,7 @@ async def daily_quota(
         used=snapshot.used,
         remaining=snapshot.remaining,
         resets_at=snapshot.resets_at.isoformat(),
-        membership=membership,
+        membership=state.status,
     )
 
 

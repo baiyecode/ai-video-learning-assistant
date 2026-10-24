@@ -88,6 +88,9 @@ class Settings(BaseSettings):
     # Email-verification resend (ticket #22): per Account, not per IP, since the
     # endpoint requires a login. Guards against the product being used as a mail relay.
     rate_limit_verification_request_per_hour: int = 3
+    # Verification-link confirmations (story 26): unauthenticated, so keyed per
+    # client address; bounds token-guessing bursts without touching mail sending.
+    rate_limit_verification_confirm_per_hour: int = 10
 
     # Deterministic in-process adapters (seeded demo video + canned Summarizer) for
     # the Playwright golden path. Never enable this in production.

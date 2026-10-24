@@ -21,7 +21,7 @@ function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
   return {
     status: "active",
     period_end: "2026-02-14T09:00:00+00:00",
-    portal_url: null,
+    cancel_at_period_end: false,
     is_vip: true,
     ...overrides,
   };
@@ -85,19 +85,42 @@ describe("membership status presentation", () => {
     expect(renewalNotice(membership({ status: ACTIVE_STATUS }))).toBe("下次续费日期：2月14日");
     expect(renewalNotice(membership({ status: CANCELED_STATUS }))).toBeNull();
     expect(renewalNotice(membership({ status: ACTIVE_STATUS, period_end: null }))).toBeNull();
+    // A scheduled cancellation renews nothing.
+    expect(
+      renewalNotice(membership({ status: ACTIVE_STATUS, cancel_at_period_end: true }))
+    ).toBeNull();
   });
 
-  it("previews the VIP loss for a canceled subscription still inside its period", () => {
+  it("previews the VIP loss for a scheduled cancellation still inside its period", () => {
     const notice = expirationNotice(
-      membership({ status: CANCELED_STATUS, period_end: futureIso(), is_vip: false })
+      membership({ cancel_at_period_end: true, period_end: futureIso() })
     );
-    expect(notice).toContain("订阅已取消");
-    expect(notice).toContain("届时失去 VIP");
+    expect(notice).toContain("取消续费");
+    expect(notice).toContain("保留至");
+    expect(notice).toContain("失去 VIP");
   });
 
   it("previews the VIP loss date for an ending trial", () => {
     const notice = expirationNotice(membership({ status: "trial_ending", period_end: futureIso() }));
     expect(notice).toMatch(/^将于 .+ 失去 VIP。$/);
+  });
+
+  it("only previews retention while the account truly still holds VIP", () => {
+    // Past Due sells the portal fix, not a retention promise (spec Story 11/12).
+    expect(
+      expirationNotice(
+        membership({
+          status: PAST_DUE_STATUS,
+          is_vip: false,
+          cancel_at_period_end: true,
+          period_end: futureIso(),
+        })
+      )
+    ).toBeNull();
+    // A real deletion is already non-VIP: no 「保留至」 promise anymore (Story 8/9 split).
+    expect(
+      expirationNotice(membership({ status: CANCELED_STATUS, is_vip: false, period_end: futureIso() }))
+    ).toBeNull();
   });
 
   it("says nothing once the period has passed or for healthy/free states", () => {

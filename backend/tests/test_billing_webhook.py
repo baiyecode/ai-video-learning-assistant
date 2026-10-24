@@ -75,7 +75,7 @@ async def test_checkout_completed_event_activates_membership(client: AsyncClient
     assert membership.json() == {
         "status": "active",
         "period_end": PERIOD_END,
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": True,
     }
 
@@ -350,7 +350,7 @@ async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscri
     assert membership.json() == {
         "status": "active",
         "period_end": PERIOD_END,
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": True,
     }
 

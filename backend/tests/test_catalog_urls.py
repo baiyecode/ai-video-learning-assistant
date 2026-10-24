@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 from app.errors import AppError
-from app.modules.catalog.urls import normalize_video_url
+from app.modules.catalog.urls import DEFAULT_ENABLED_PLATFORMS, normalize_video_url
 
 
 @pytest.mark.parametrize(
@@ -92,3 +92,47 @@ def test_unsupported_urls_are_rejected(raw: str) -> None:
         normalize_video_url(raw)
     assert raised.value.code == "unsupported_url"
     assert raised.value.message
+
+
+# The Platform registry (``PLATFORM_HOSTS``) is the supported-list truth source the
+# normalise dispatch consumes via ``_HOST_PLATFORM``. This pins the invariant that
+# the two never drift: every host the registry claims must dispatch to its Platform
+# branch, and no host outside the registry may ever be accepted.
+@pytest.mark.parametrize(
+    ("host", "path", "expected"),
+    [
+        ("youtube.com", "/watch?v=dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("www.youtube.com", "/watch?v=dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("m.youtube.com", "/watch?v=dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("youtube-nocookie.com", "/watch?v=dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("www.youtube-nocookie.com", "/watch?v=dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("youtu.be", "/dQw4w9WgXcQ", "https://www.youtube.com/watch?v=dQw4w9WgXcQ"),
+        ("bilibili.com", "/video/BV1xx411c7mD", "https://www.bilibili.com/video/BV1xx411c7mD"),
+        ("m.bilibili.com", "/video/BV1xx411c7mD", "https://www.bilibili.com/video/BV1xx411c7mD"),
+        ("b23.tv", "/abc123", "https://b23.tv/abc123"),
+        ("douyin.com", "/video/7123456789012345678", "https://www.douyin.com/video/7123456789012345678"),
+        ("www.douyin.com", "/video/7123456789012345678", "https://www.douyin.com/video/7123456789012345678"),
+        ("m.douyin.com", "/video/7123456789012345678", "https://www.douyin.com/video/7123456789012345678"),
+        ("v.douyin.com", "/abc123", "https://v.douyin.com/abc123"),
+    ],
+)
+def test_every_registered_host_dispatches_through_the_registry(host, path, expected):
+    from app.modules.catalog.urls import DOUYIN_PLATFORM, PLATFORM_HOSTS
+
+    registered = {h for hosts in PLATFORM_HOSTS.values() for h in hosts}
+    assert host in registered  # the table below mirrors the registry
+    assert normalize_video_url(
+        f"https://{host}{path}",
+        enabled_platforms=frozenset({DOUYIN_PLATFORM}) | DEFAULT_ENABLED_PLATFORMS,
+    ) == expected
+
+
+def test_no_unregistered_host_is_ever_accepted():
+    from app.modules.catalog.urls import PLATFORM_HOSTS
+
+    registered = {h for hosts in PLATFORM_HOSTS.values() for h in hosts}
+    for host in {"notyoutube.com", "youtu.be.evil", "b23.tv.evil", "v.douyin.com.evil"}:
+        assert host not in registered
+        with pytest.raises(AppError) as raised:
+            normalize_video_url(f"https://{host}/watch?v=dQw4w9WgXcQ")
+        assert str(raised.value.code) == "unsupported_url"

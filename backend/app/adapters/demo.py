@@ -207,20 +207,21 @@ class DemoBillingGateway:
 class DemoEmailSender:
     """In-memory inbox standing in for real email delivery in fake-adapter mode.
 
-    The Playwright golden path reads the verification link back out of ``inbox`` through
-    the demo-only ``GET /api/demo/inbox`` route; nothing ever leaves the process
-    (user story 27).
+    The ``sent`` attribute mirrors ``tests.fakes.FakeEmailSender`` exactly: one
+    naming for the delivered-mail list across test and demo seams. The Playwright
+    golden path reads the verification link back out of it through the demo-only
+    ``GET /api/demo/inbox`` route; nothing ever leaves the process (user story 27).
     """
 
-    inbox: list[OutboundEmail] = field(default_factory=list)
+    sent: list[OutboundEmail] = field(default_factory=list)
 
     async def send(self, message: OutboundEmail) -> None:
         logging.getLogger("app.adapters.demo").info(
             "demo_email_queued", extra={"event": "demo_email_queued", "to": message.to}
         )
-        self.inbox.append(message)
+        self.sent.append(message)
 
     def messages_for(self, to: str | None = None) -> list[OutboundEmail]:
         """Newest-first inbox view, optionally narrowed to one address."""
-        messages = [message for message in self.inbox if to is None or message.to == to]
+        messages = [message for message in self.sent if to is None or message.to == to]
         return list(reversed(messages))

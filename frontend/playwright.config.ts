@@ -61,6 +61,7 @@ export default defineConfig({
               APP_RATE_LIMIT_DOWNLOAD_PER_MINUTE: "0",
               APP_RATE_LIMIT_LOGIN_PER_15_MINUTES: "0",
               APP_RATE_LIMIT_REGISTER_PER_HOUR: "0",
+              APP_RATE_LIMIT_VERIFICATION_CONFIRM_PER_HOUR: "0",
               APP_RATE_LIMIT_ANALYSIS_SECONDS: "0",
               APP_RATE_LIMIT_REPORT_PER_HOUR: "0",
               APP_DOWNLOAD_VISITOR_HOURLY_LIMIT: "100",

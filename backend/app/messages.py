@@ -21,8 +21,6 @@ SUBTITLES_UNAVAILABLE = "该视频没有可用字幕，暂不支持 AI 分析"
 
 UNSUPPORTED_URL = "暂不支持该地址，请粘贴 B 站或 YouTube 视频的页面地址"
 UNSUPPORTED_PLATFORM = "暂不支持该平台，请粘贴 B 站或 YouTube 视频的页面地址"
-# Feature-switch rejection: the platform is recognised but not opened yet (ticket #23).
-PLATFORM_NOT_ENABLED = "抖音暂未开放"
 PLAYLIST_NOT_SUPPORTED = "暂不支持播放列表、合集或收藏夹，请粘贴单个视频的页面地址"
 LIVE_NOT_SUPPORTED = "暂不支持直播，请粘贴已发布视频的页面地址"
 
@@ -31,7 +29,7 @@ DOWNLOAD_TIMEOUT = "下载超时，请稍后重试"
 DOWNLOAD_INTERRUPTED = "服务重启导致任务中断，请重试"
 FILE_EXPIRED = "文件已过期，请重新发起下载"
 
-# Email verification (ticket #22): Analysis is gated on a verified email, but login,
-# resolve, Subtitle viewing and Download are not. The same sentence should read
-# identically wherever the gate fires, so it lives here.
-EMAIL_NOT_VERIFIED = "请先验证邮箱后再发起 Analysis"
+# Single-module copy stays in the module that owns it (README convention):
+# - 「抖音暂未开放」 (platform_not_enabled) lives in ``modules/catalog/urls.py``.
+# - 「请先验证邮箱…」 (email_not_verified) lives in ``modules/analysis/router.py``.
+# Only the error *codes* remain centralised in ``errors.py``.

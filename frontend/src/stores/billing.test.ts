@@ -15,7 +15,7 @@ import { useBillingStore } from "@/stores/billing";
 const FREE: MembershipDto = {
   status: "free",
   period_end: null,
-  portal_url: null,
+  cancel_at_period_end: false,
   is_vip: false,
 };
 
@@ -23,7 +23,7 @@ function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
   return {
     status: "active",
     period_end: "2026-02-14T08:00:00+00:00",
-    portal_url: null,
+    cancel_at_period_end: false,
     is_vip: true,
     ...overrides,
   };

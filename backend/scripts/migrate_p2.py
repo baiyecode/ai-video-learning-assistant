@@ -33,6 +33,31 @@ _VERIFICATION_COLUMNS: dict[str, str] = {
     "verification_expires_at": "DATETIME",
 }
 
+# Scheduled-cancellation flag on subscriptions (ticket #20, story 8 preview).
+_SUBSCRIPTION_COLUMNS: dict[str, str] = {
+    "cancel_at_period_end": "BOOLEAN NOT NULL DEFAULT 0",
+}
+
+
+def _add_missing_columns(
+    connection: sqlite3.Connection, table: str, columns: dict[str, str]
+) -> list[str]:
+    """ALTER the missing columns of ``columns`` onto ``table``; return their names."""
+    tables = {
+        row[0]
+        for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+    }
+    if table not in tables:
+        return []
+    existing = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+    added: list[str] = []
+    for name, column_type in columns.items():
+        if name in existing:
+            continue
+        connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {column_type}")
+        added.append(name)
+    return added
+
 
 def migrate_accounts(database_path: Path) -> list[str]:
     """Add missing verification columns to ``accounts``; return the columns added.
@@ -42,19 +67,18 @@ def migrate_accounts(database_path: Path) -> list[str]:
     """
     connection = sqlite3.connect(str(database_path), timeout=30)
     try:
-        tables = {
-            row[0]
-            for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
-        }
-        if "accounts" not in tables:
-            return []
-        existing = {row[1] for row in connection.execute("PRAGMA table_info(accounts)")}
-        added: list[str] = []
-        for name, column_type in _VERIFICATION_COLUMNS.items():
-            if name in existing:
-                continue
-            connection.execute(f"ALTER TABLE accounts ADD COLUMN {name} {column_type}")
-            added.append(name)
+        added = _add_missing_columns(connection, "accounts", _VERIFICATION_COLUMNS)
+        connection.commit()
+        return added
+    finally:
+        connection.close()
+
+
+def migrate_subscriptions(database_path: Path) -> list[str]:
+    """Add missing webhook-decoded columns to ``subscriptions`` (idempotent)."""
+    connection = sqlite3.connect(str(database_path), timeout=30)
+    try:
+        added = _add_missing_columns(connection, "subscriptions", _SUBSCRIPTION_COLUMNS)
         connection.commit()
         return added
     finally:
@@ -88,6 +112,7 @@ def main() -> int:
 
     try:
         added = migrate_accounts(path)
+        added += migrate_subscriptions(path)
     except sqlite3.Error as exc:
         print(json.dumps({"status": "error", "error": str(exc)}, ensure_ascii=False), flush=True)
         return 1
