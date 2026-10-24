@@ -5,7 +5,18 @@ import {
   formatFileSize,
   platformLabel,
   subtitleSourceLabel,
+  videoFlowMessageForCode,
 } from "@/lib/video";
+
+describe("videoFlowMessageForCode", () => {
+  it("owns the not-opened copy for the Douyin switch", () => {
+    expect(videoFlowMessageForCode("platform_not_enabled")).toBe("抖音暂未开放");
+  });
+
+  it("leaves other codes to the server message", () => {
+    expect(videoFlowMessageForCode("unsupported_url")).toBeNull();
+  });
+});
 
 describe("formatDuration", () => {
   it("renders minutes and seconds under an hour", () => {
@@ -50,10 +61,11 @@ describe("platformLabel", () => {
   it("maps known platforms to their Chinese-facing labels", () => {
     expect(platformLabel("youtube")).toBe("YouTube");
     expect(platformLabel("bilibili")).toBe("B 站");
+    expect(platformLabel("douyin")).toBe("抖音");
   });
 
   it("falls back to the raw platform string", () => {
-    expect(platformLabel("douyin")).toBe("douyin");
+    expect(platformLabel("vimeo")).toBe("vimeo");
   });
 });
 
