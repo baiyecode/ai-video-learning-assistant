@@ -17,7 +17,7 @@ from app.main import create_app
 from asgi_lifespan import LifespanManager
 from httpx import AsyncClient
 
-from tests.fakes import FrozenClock, make_fake_adapters
+from tests.fakes import make_fake_adapters
 
 ORIGIN = {"Origin": "http://testserver"}
 PASSWORD = "correct-horse"
@@ -120,7 +120,7 @@ async def test_a_verified_token_cannot_be_reused(client: AsyncClient, adapters: 
 async def test_expired_token_is_rejected_with_a_resend_hint(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    registered = await register(client)
+    await register(client)
     # Default TTL is 24h from issue (2026-01-15T08:00Z); step just past it.
     adapters.clock.advance(days=1, seconds=1)  # type: ignore[attr-defined]
 
@@ -133,7 +133,10 @@ async def test_expired_token_is_rejected_with_a_resend_hint(
     assert error["code"] == "verification_token_expired"
     assert "已过期，请重新发送" in error["message"]
 
-    me = await client.get("/api/me", headers=bearer(registered))
+    # The access token also lapsed after 24h; rotate the Session to inspect /me.
+    refreshed = await client.post("/api/auth/refresh", headers=ORIGIN)
+    assert refreshed.status_code == 200, refreshed.text
+    me = await client.get("/api/me", headers=bearer(refreshed))
     assert me.json()["account"]["email_verified_at"] is None
 
 
