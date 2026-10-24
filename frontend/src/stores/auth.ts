@@ -13,6 +13,8 @@ export interface Account {
   id: string;
   email: string;
   created_at: string;
+  /** Email verification (P2-05): null until the one-time link is confirmed. */
+  email_verified_at: string | null;
 }
 
 export interface AuthResponse {
