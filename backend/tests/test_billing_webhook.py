@@ -9,11 +9,16 @@ talks to Stripe and no port listener is opened.
 
 from __future__ import annotations
 
+import contextlib
+import json
+import logging
+from collections.abc import Iterator
 from datetime import datetime
 from typing import Any
 
 from app.container import Adapters
 from app.errors import AppError, ErrorCode
+from app.logging_setup import JsonFormatter
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
@@ -175,6 +180,85 @@ async def test_unknown_event_type_is_recorded_but_never_moves_state(
 
     rows = await _audit_rows(app, "evt_future_1")
     assert [(row.type, row.applied) for row in rows] == [("customer.subscription.deleted", False)]
+
+
+class _CaptureHandler(logging.Handler):
+    """Formats records exactly like production and keeps the parsed JSON lines."""
+
+    def __init__(self) -> None:
+        super().__init__(level=logging.DEBUG)
+        self.setFormatter(JsonFormatter())
+        self.entries: list[dict] = []
+
+    def emit(self, record: logging.LogRecord) -> None:
+        self.entries.append(json.loads(self.format(record)))
+
+
+@contextlib.contextmanager
+def _capture_json_logs() -> Iterator[list[dict]]:
+    handler = _CaptureHandler()
+    root = logging.getLogger()
+    previous_level = root.level
+    root.setLevel(logging.DEBUG)
+    root.addHandler(handler)
+    try:
+        yield handler.entries
+    finally:
+        root.removeHandler(handler)
+        root.setLevel(previous_level)
+
+
+async def test_state_transitions_and_outcomes_are_logged_with_the_stripe_event_id(
+    client: AsyncClient,
+) -> None:
+    """AC7: every webhook decision is a structured line carrying the provider event id."""
+    response = await register(client, email="logged@example.com")
+    account_id = response.json()["account"]["id"]
+    body = checkout_completed_body(
+        "evt_logged_1", account_id, created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+
+    with _capture_json_logs() as entries:
+        assert (await _post_event(client, body)).status_code == 200
+        assert (await _post_event(client, body)).status_code == 200
+
+    transition = next(entry for entry in entries if entry["message"] == "billing_membership_changed")
+    assert transition["event_id"] == "evt_logged_1"
+    assert transition["event_type"] == "checkout.session.completed"
+    assert transition["account_id"] == account_id
+    assert transition["subscription_status"] == "active"
+    assert transition["outcome"] == "applied"
+
+    duplicate = next(entry for entry in entries if entry["message"] == "billing_event_duplicate_ignored")
+    assert duplicate["event_id"] == "evt_logged_1"
+    assert duplicate["outcome"] == "duplicate"
+
+
+async def test_stale_event_outcome_is_logged_with_the_stripe_event_id(client: AsyncClient) -> None:
+    """The out-of-order guard leaves an audit log line naming the skipped event."""
+    response = await register(client, email="logged-stale@example.com")
+    account_id = response.json()["account"]["id"]
+
+    newest = checkout_completed_body(
+        "evt_logged_new",
+        account_id,
+        created=_dt("2026-01-15T10:00:00+00:00"),
+        period_end=_dt(PERIOD_END),
+    )
+    assert (await _post_event(client, newest)).status_code == 200
+
+    older = checkout_completed_body(
+        "evt_logged_old",
+        account_id,
+        created=_dt("2026-01-15T09:00:00+00:00"),
+        period_end=_dt("2026-01-30T09:00:00+00:00"),
+    )
+    with _capture_json_logs() as entries:
+        assert (await _post_event(client, older)).status_code == 200
+
+    stale = next(entry for entry in entries if entry["message"] == "billing_event_stale_ignored")
+    assert stale["event_id"] == "evt_logged_old"
+    assert stale["outcome"] == "stale"
 
 
 async def test_gateway_failure_answers_retryable_5xx_and_leaves_no_trace(
