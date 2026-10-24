@@ -11,13 +11,17 @@ import re
 from typing import Any
 
 import httpx
+import pytest
+from app.adapters.smtp_email import SmtpEmailSender
 from app.config import Settings
-from app.container import Adapters
+from app.container import Adapters, build_production_adapters
+from app.errors import AppError
 from app.main import create_app
+from app.ports import OutboundEmail
 from asgi_lifespan import LifespanManager
 from httpx import AsyncClient
 
-from tests.fakes import make_fake_adapters
+from tests.fakes import FakeEmailSender, make_fake_adapters
 
 ORIGIN = {"Origin": "http://testserver"}
 PASSWORD = "correct-horse"
@@ -214,3 +218,48 @@ async def test_password_change_rejects_wrong_current_and_weak_new_password(
         "/api/auth/verification/confirm", json={"token": verification_token(adapters)}
     )
     assert still_usable.status_code == 200, still_usable.text
+
+
+async def test_smtp_adapter_refuses_to_send_without_configuration(settings: Settings) -> None:
+    """A deployment without SMTP credentials fails closed with an understandable 503."""
+    sender = SmtpEmailSender(settings)
+
+    with pytest.raises(AppError) as raised:
+        await sender.send(OutboundEmail(to="someone@example.com", subject="s", body="b"))
+
+    assert raised.value.status == 503
+    assert raised.value.code == "service_unavailable"
+    assert "邮件服务未配置" in raised.value.message
+
+
+async def test_registration_survives_a_failed_email_delivery(settings: Settings) -> None:
+    """A broken mail service must not undo the registration; resending comes later."""
+    adapters = make_fake_adapters(
+        email_sender=FakeEmailSender(fail_with=RuntimeError("smtp is down"))
+    )
+    app = create_app(settings=settings, adapters=adapters)
+
+    async with LifespanManager(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/auth/register",
+                json={"email": "learner@example.com", "password": PASSWORD},
+            )
+
+    assert response.status_code == 201, response.text
+    assert adapters.email_sender.sent == []
+
+
+async def test_fake_adapters_mode_ships_an_observable_inbox(settings: Settings) -> None:
+    """``APP_FAKE_ADAPTERS`` wires an in-memory sender; nothing reaches a real network."""
+    tuned = settings.model_copy(update={"fake_adapters": True})
+    adapters = build_production_adapters(tuned)
+
+    await adapters.email_sender.send(OutboundEmail(to="someone@example.com", subject="s", body="b"))
+
+    assert [
+        message.to for message in adapters.email_sender.inbox  # type: ignore[attr-defined]
+    ] == ["someone@example.com"]
