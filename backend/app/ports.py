@@ -116,6 +116,22 @@ class BudgetLedger(Protocol):
 
 
 @dataclass(frozen=True, slots=True)
+class OutboundEmail:
+    """A single plain-text email to deliver. The body carries any links the product needs."""
+
+    to: str
+    subject: str
+    body: str
+
+
+@runtime_checkable
+class EmailSender(Protocol):
+    """Deliver one email. Fake adapters keep an observable in-memory inbox."""
+
+    async def send(self, message: OutboundEmail) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
 class CheckoutSession:
     """A hosted payment page created by the billing gateway; the user is sent to ``url``."""
 

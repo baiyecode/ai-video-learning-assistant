@@ -17,13 +17,14 @@ backend/                 FastAPI 模块化单体（Python 3.12+，uv 管理）
     timeutil.py          UTC 规范化与 Asia/Shanghai 日历日/次日零点
     ratelimit.py         内存滑动窗口限流（429 + Retry-After）
     logging_setup.py     JSON 日志 + request_id 中间件/contextvar
-    ports.py             VideoSource / MediaStore / Summarizer / Clock / BudgetLedger
+    ports.py             VideoSource / MediaStore / Summarizer / Clock / BudgetLedger / EmailSender
     container.py         Adapters 容器与 build_production_adapters()
     deps.py              get_settings / get_adapters / get_session / get_clock
-    adapters/            生产适配器：yt-dlp 解析、文件系统媒体、DeepSeek 摘要、系统时钟、SQLite 预算账本
-    modules/             catalog（Video/Subtitle）、identity（Account/Session）、media（Download）、analysis（Analysis/Quota）、ops（/health、举报、Sentry）
+    adapters/            生产适配器：yt-dlp 解析、文件系统媒体、DeepSeek 摘要、系统时钟、SQLite 预算账本、SMTP 发信
+    modules/             catalog（Video/Subtitle）、identity（Account/Session/邮箱验证）、media（Download）、analysis（Analysis/Quota）、ops（/health、举报、Sentry）
     modules/*/manager.py 下载队列与分析生成两条后台链路，由 main.py 的 lifespan 启动与停止
   scripts/backup.py      SQLite 在线备份 + 保留策略
+  scripts/migrate_p2.py  幂等 DDL：为既有 accounts 补邮箱验证列（无 Alembic，create_all 不加列；升级 P2 后执行一次）
   tests/                 HTTP 接缝测试、fakes.py 测试替身
 frontend/                Vue 3 + Vite + TypeScript + Tailwind + Pinia + vue-router
   src/lib/api.ts         统一 fetch 封装（错误解析、401 刷新一次）

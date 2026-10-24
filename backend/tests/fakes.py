@@ -12,6 +12,7 @@ from pathlib import Path
 from app.container import Adapters
 from app.ports import (
     CheckoutSession,
+    OutboundEmail,
     ResolvedVideo,
     SubtitlePayload,
     SubtitleTrack,
@@ -237,6 +238,23 @@ class FakeBudgetLedger:
 
 
 @dataclass
+class FakeEmailSender:
+    """In-memory inbox for the EmailSender port; never touches a real mail service.
+
+    - ``sent``: every delivered message, so tests can read verification links back out.
+    - ``fail_with``: raise this instead of delivering (scripted delivery failure).
+    """
+
+    sent: list[OutboundEmail] = field(default_factory=list)
+    fail_with: Exception | None = None
+
+    async def send(self, message: OutboundEmail) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.sent.append(message)
+
+
+@dataclass
 class FakeBillingGateway:
     """In-memory Stripe stand-in; programmable failures, zero network.
 
@@ -279,6 +297,7 @@ def make_fake_adapters(
     clock: FrozenClock | None = None,
     budget_ledger: FakeBudgetLedger | None = None,
     billing_gateway: FakeBillingGateway | None = None,
+    email_sender: FakeEmailSender | None = None,
 ) -> Adapters:
     """Build the full Adapters container with fakes. Pass overrides by keyword."""
     return Adapters(
@@ -288,4 +307,5 @@ def make_fake_adapters(
         clock=clock or FrozenClock(),
         budget_ledger=budget_ledger or FakeBudgetLedger(),
         billing_gateway=billing_gateway or FakeBillingGateway(),
+        email_sender=email_sender or FakeEmailSender(),
     )

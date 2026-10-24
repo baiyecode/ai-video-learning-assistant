@@ -8,6 +8,7 @@ rotate on every refresh; the database stores just their SHA-256 hash. Access tok
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -18,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.deps import get_clock, get_current_account, get_rate_limiter, get_session, get_settings
+from app.container import Adapters
+from app.deps import get_adapters, get_clock, get_current_account, get_rate_limiter, get_session, get_settings
 from app.errors import AppError, ErrorCode
 from app.http import client_ip
 from app.modules.analysis import service as analysis_service
@@ -29,16 +31,20 @@ from app.modules.identity.security import (
     encode_access_token,
     hash_password,
     hash_refresh_token,
+    hash_verification_token,
     new_refresh_token,
     set_refresh_cookie,
     verify_dummy_password,
     verify_password,
 )
+from app.modules.identity.verification import issue_verification_token, verification_email
 from app.ports import Clock
 from app.ratelimit import RateLimiter
 from app.timeutil import required_utc
 
 router = APIRouter(tags=["identity"])
+
+logger = logging.getLogger("app.identity")
 
 PASSWORD_MIN_LENGTH = 8
 _MESSAGE_SESSION_INVALID = "登录状态已失效，请重新登录"
@@ -58,6 +64,8 @@ class AccountOut(BaseModel):
     id: str
     email: str
     created_at: str
+    # Email verification state (ticket #21). ``None`` until the one-time link is confirmed.
+    email_verified_at: str | None = None
 
 
 class AuthResponse(BaseModel):
@@ -72,11 +80,22 @@ class MeResponse(BaseModel):
     quota: QuotaOut
 
 
+class ConfirmVerificationRequest(BaseModel):
+    token: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
 def _account_out(account: Account) -> AccountOut:
+    verified_at = account.email_verified_at
     return AccountOut(
         id=account.id,
         email=account.email,
         created_at=required_utc(account.created_at).isoformat(),
+        email_verified_at=required_utc(verified_at).isoformat() if verified_at else None,
     )
 
 
@@ -152,6 +171,7 @@ async def register(
     settings: Settings = Depends(get_settings),
     clock: Clock = Depends(get_clock),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    adapters: Adapters = Depends(get_adapters),
 ) -> dict:
     rate_limiter.hit("auth.register", client_ip(request))
     if len(payload.password) < PASSWORD_MIN_LENGTH:
@@ -173,7 +193,15 @@ async def register(
     refresh_token = await _issue_session(
         db, account, settings, clock, user_agent=request.headers.get("user-agent")
     )
+    verification_token = issue_verification_token(account, settings, clock)
     await db.commit()
+
+    # A delivery failure must not undo a successful registration; the verification
+    # email can be re-sent (ticket #22).
+    try:
+        await adapters.email_sender.send(verification_email(account, settings, verification_token))
+    except Exception:
+        logger.warning("verification_email_delivery_failed", exc_info=True)
 
     access_token, expires_at = encode_access_token(account.id, settings, now=clock.now())
     set_refresh_cookie(response, refresh_token, settings)
@@ -282,6 +310,82 @@ async def logout(
         await db.commit()
 
     clear_refresh_cookie(response, settings)
+
+
+def _verification_token_invalid() -> AppError:
+    return AppError(400, ErrorCode.VERIFICATION_TOKEN_INVALID, "验证链接无效或已被使用")
+
+
+@router.post(
+    "/auth/verification/confirm",
+    response_model=AccountOut,
+    summary="Consume a one-time email verification token",
+)
+async def confirm_verification(
+    payload: ConfirmVerificationRequest,
+    db: AsyncSession = Depends(get_session),
+    clock: Clock = Depends(get_clock),
+) -> AccountOut:
+    """Authenticate by the token itself; no session or cookie is required.
+
+    A successful confirmation persists ``email_verified_at`` and clears the stored
+    token hash, making the link single-use.
+    """
+    token_hash = hash_verification_token(payload.token.strip())
+    account = await db.scalar(
+        select(Account).where(Account.verification_token_hash == token_hash)
+    )
+    if account is None:
+        raise _verification_token_invalid()
+
+    now = clock.now()
+    expires_at = account.verification_expires_at
+    if expires_at is None or required_utc(expires_at) <= now:
+        raise AppError(400, ErrorCode.VERIFICATION_TOKEN_EXPIRED, "验证链接已过期，请重新发送")
+
+    # Atomic single-use consumption: a concurrent replay can only claim the token once.
+    consumed = await db.execute(
+        update(Account)
+        .where(Account.id == account.id, Account.verification_token_hash == token_hash)
+        .values(
+            email_verified_at=now,
+            verification_token_hash=None,
+            verification_expires_at=None,
+        )
+    )
+    if consumed.rowcount != 1:
+        await db.rollback()
+        raise _verification_token_invalid()
+    await db.commit()
+
+    account.email_verified_at = now
+    account.verification_token_hash = None
+    account.verification_expires_at = None
+    return _account_out(account)
+
+
+@router.post("/auth/password", status_code=204, summary="Change the Account password")
+async def change_password(
+    payload: ChangePasswordRequest,
+    account: Account = Depends(get_current_account),
+    db: AsyncSession = Depends(get_session),
+) -> None:
+    """Re-hash the password and invalidate any unused verification token (story 23).
+
+    An already-confirmed Account keeps ``email_verified_at``; only the outstanding
+    one-time link dies.
+    """
+    if len(payload.new_password) < PASSWORD_MIN_LENGTH:
+        raise AppError(400, ErrorCode.WEAK_PASSWORD, f"密码至少需要 {PASSWORD_MIN_LENGTH} 位")
+
+    valid = await asyncio.to_thread(verify_password, payload.current_password, account.password_hash)
+    if not valid:
+        raise AppError(403, ErrorCode.INVALID_CREDENTIALS, "当前密码不正确")
+
+    account.password_hash = await asyncio.to_thread(hash_password, payload.new_password)
+    account.verification_token_hash = None
+    account.verification_expires_at = None
+    await db.commit()
 
 
 @router.get("/me", response_model=MeResponse, summary="Current Account and quota")
