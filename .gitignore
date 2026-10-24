@@ -30,3 +30,6 @@ frontend/.playwright/
 .idea/
 .DS_Store
 Thumbs.db
+
+# P2 implement scratch (agent notes/worktrees)
+.p2-work/
