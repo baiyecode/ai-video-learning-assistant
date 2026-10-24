@@ -13,6 +13,7 @@ from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from app.adapters.webhook_codec import verify_and_decode
 from app.ports import (
     CheckoutSession,
     OutboundEmail,
@@ -20,7 +21,10 @@ from app.ports import (
     SubtitlePayload,
     SubtitleTrack,
     VideoFormat,
+    WebhookEvent,
 )
+
+DEMO_WEBHOOK_SECRET = "whsec_demo"
 
 _DEMO_ID = "demoP1Video"
 _DEMO_TITLE = "演示视频：从零理解间隔重复"
@@ -140,6 +144,10 @@ class DemoBillingGateway:
     ) -> CheckoutSession:
         await asyncio.sleep(0.01)
         return CheckoutSession(id="cs_demo_checkout", url="https://checkout.demo.invalid/cs_demo")
+
+    def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
+        """Offline replay of Stripe-style events; the golden path signs with the demo secret."""
+        return verify_and_decode(payload=payload, signature_header=signature, secret=DEMO_WEBHOOK_SECRET)
 
 
 @dataclass

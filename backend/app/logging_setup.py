@@ -28,6 +28,13 @@ _EXTRA_FIELDS = (
     "path",
     "duration_ms",
     "env",
+    # Billing webhook decisions (P2-02): state changes must be traceable to the
+    # provider event id for accounting disputes.
+    "event_id",
+    "event_type",
+    "account_id",
+    "subscription_status",
+    "outcome",
 )
 
 

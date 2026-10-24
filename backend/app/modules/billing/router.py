@@ -1,7 +1,9 @@
-"""Billing HTTP routes: the upgrade entry point and membership status.
+"""Billing HTTP routes: the upgrade entry point, membership status and the webhook.
 
 Routes are mounted under ``/api`` by ``main.py``. The router carries no prefix so
 ``/me/membership`` can live next to identity's ``/me`` while billing owns its reads.
+``/billing/webhook`` is unauthenticated by design: the signature gate lives inside
+the BillingGateway adapter, and the route never trusts an unsigned body.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ from app.config import Settings
 from app.container import Adapters
 from app.deps import get_adapters, get_current_account, get_session, get_settings
 from app.modules.billing import service
-from app.modules.billing.schemas import CheckoutOut, MembershipOut
+from app.modules.billing.schemas import CheckoutOut, MembershipOut, WebhookOut
 from app.modules.identity.models import Account
 
 router = APIRouter(tags=["billing"])
@@ -45,3 +47,26 @@ async def get_membership(
     session: AsyncSession = Depends(get_session),
 ) -> MembershipOut:
     return await service.membership(session, account.id)
+
+
+@router.post(
+    "/billing/webhook",
+    response_model=WebhookOut,
+    summary="Payment provider webhook (signature-verified, no auth)",
+)
+async def billing_webhook(
+    request: Request,
+    adapters: Adapters = Depends(get_adapters),
+    session: AsyncSession = Depends(get_session),
+) -> WebhookOut:
+    """Verify + decode behind the port, then advance the state machine and answer 2xx.
+
+    Any decoding or processing failure propagates as a non-2xx so the provider retries;
+    the work itself is a couple of indexed SQLite writes, so the path stays fast.
+    """
+    body = await request.body()
+    event = adapters.billing_gateway.verify_webhook(
+        payload=body, signature=request.headers.get("stripe-signature", "")
+    )
+    await service.apply_webhook(session, adapters.clock, event)
+    return WebhookOut(received=True)

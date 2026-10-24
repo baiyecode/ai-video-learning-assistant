@@ -139,6 +139,25 @@ class CheckoutSession:
     url: str
 
 
+@dataclass(frozen=True, slots=True)
+class WebhookEvent:
+    """A signature-verified domain event decoded by a BillingGateway adapter.
+
+    Routes consume only this carrier (type + payload fields + event id + created).
+    Provider-specific fields are optional: events the current state machine does not
+    act on (cancellations, invoices) arrive with just the identity fields filled.
+    """
+
+    event_id: str
+    type: str
+    created: datetime
+    account_id: str | None = None
+    stripe_customer_id: str | None = None
+    stripe_subscription_id: str | None = None
+    current_period_end: datetime | None = None
+    price_id: str | None = None
+
+
 @runtime_checkable
 class BillingGateway(Protocol):
     """Subscription billing provider (Stripe in production). Business modules never
@@ -154,4 +173,10 @@ class BillingGateway(Protocol):
         cancel_url: str,
     ) -> CheckoutSession:
         """Create a subscription Checkout Session for one monthly price."""
+        ...
+
+    def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
+        """Verify the raw webhook body against the provider signature header and
+        decode it into one domain event. Raises ``AppError`` (400) when the signature
+        is invalid or the body is unreadable; the payload is trusted only past this gate."""
         ...

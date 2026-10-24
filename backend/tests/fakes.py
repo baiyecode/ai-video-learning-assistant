@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from app.adapters.webhook_codec import sign_header, verify_and_decode
 from app.container import Adapters
 from app.ports import (
     CheckoutSession,
@@ -17,10 +19,60 @@ from app.ports import (
     SubtitlePayload,
     SubtitleTrack,
     VideoFormat,
+    WebhookEvent,
 )
 from app.timeutil import shanghai_day
 
 FAKE_CHECKOUT_URL = "https://checkout.stripe.test/c/fake-checkout"
+FAKE_WEBHOOK_SECRET = "whsec_fake"
+#: Fixed signature timestamp for emitted webhook headers; the fake codec has no
+#: replay window, so deterministic bytes keep test payloads stable.
+FAKE_WEBHOOK_TIMESTAMP = 1_768_471_200
+
+
+def sign_webhook(body: bytes, *, secret: str = FAKE_WEBHOOK_SECRET) -> str:
+    """A valid ``Stripe-Signature`` header for a fake-gateway webhook body."""
+    return sign_header(secret, FAKE_WEBHOOK_TIMESTAMP, body)
+
+
+def webhook_event_body(
+    event_id: str,
+    event_type: str,
+    created: datetime,
+    object_payload: dict[str, object] | None = None,
+) -> bytes:
+    """A Stripe-style webhook envelope the fake gateway can verify and decode."""
+    return json.dumps(
+        {
+            "id": event_id,
+            "type": event_type,
+            "created": int(created.timestamp()),
+            "data": {"object": object_payload or {}},
+        },
+        sort_keys=True,
+    ).encode()
+
+
+def checkout_completed_body(
+    event_id: str,
+    account_id: str,
+    *,
+    created: datetime,
+    period_end: datetime | None = None,
+    subscription_id: str = "sub_fake_1",
+    customer_id: str = "cus_fake_1",
+    price_id: str = "price_fake_monthly",
+) -> bytes:
+    """The wire shape behind ``checkout.session.completed``: a Checkout Session object."""
+    session_object: dict[str, object] = {
+        "client_reference_id": account_id,
+        "subscription": subscription_id,
+        "customer": customer_id,
+        "metadata": {"account_id": account_id, "price_id": price_id},
+    }
+    if period_end is not None:
+        session_object["current_period_end"] = int(period_end.timestamp())
+    return webhook_event_body(event_id, "checkout.session.completed", created, session_object)
 
 #: The one Douyin Video the fake short-link wrapper unwraps to.
 DOUYIN_DEFAULT_VIDEO_ID = "7123456789012345678"
@@ -258,13 +310,18 @@ class FakeEmailSender:
 class FakeBillingGateway:
     """In-memory Stripe stand-in; programmable failures, zero network.
 
-    - ``fail_with``: raised by every call (e.g. an ``AppError`` for an unavailable gateway).
+    - ``fail_with``: raised by every checkout call (e.g. an ``AppError`` for an unavailable gateway).
     - ``created_checkouts``: every checkout call, for wiring assertions.
+    - ``webhook_secret`` / ``webhook_fail_with``: webhook verification follows the real
+      Stripe signature scheme via the shared codec; ``webhook_fail_with`` makes the
+      gateway raise before decoding (provider-outage tests).
     """
 
     fail_with: Exception | None = None
     checkout_url: str = FAKE_CHECKOUT_URL
     created_checkouts: list[dict[str, object]] = field(default_factory=list)
+    webhook_secret: str = FAKE_WEBHOOK_SECRET
+    webhook_fail_with: Exception | None = None
 
     async def create_checkout(
         self,
@@ -287,6 +344,11 @@ class FakeBillingGateway:
             }
         )
         return CheckoutSession(id=f"cs_fake_{len(self.created_checkouts)}", url=self.checkout_url)
+
+    def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
+        if self.webhook_fail_with is not None:
+            raise self.webhook_fail_with
+        return verify_and_decode(payload=payload, signature_header=signature, secret=self.webhook_secret)
 
 
 def make_fake_adapters(

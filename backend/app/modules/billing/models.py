@@ -1,9 +1,9 @@
-"""SQLAlchemy models for billing: the Subscription record behind VIP Membership.
+"""SQLAlchemy models for billing: Subscription records and the webhook audit trail.
 
 VIP Membership is a derived state: ``status`` in ``VIP_STATUSES`` and nothing else.
 The Account never stores a flag (GLOSSARY: _Avoid_ ``is_vip``). Stripe IDs are the
-idempotency keys the future webhook handler upserts against; ``account_id`` is
-unique because one Account holds at most one subscription.
+idempotency keys the webhook handler upserts against; ``account_id`` is unique because
+one Account holds at most one subscription.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from datetime import datetime
 from enum import StrEnum
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -58,3 +58,24 @@ class Subscription(Base):
 def is_vip(subscription: Subscription | None) -> bool:
     """The single VIP truth: derived from the subscription status, never stored."""
     return subscription is not None and subscription.status in VIP_STATUSES
+
+
+class BillingEvent(Base):
+    """Append-only audit trail of every signature-verified webhook event.
+
+    The unique ``event_id`` doubles as the idempotency gate: a redelivery loses the
+    ``INSERT ... ON CONFLICT DO NOTHING`` and is therefore never applied twice.
+    ``account_id`` is a plain string, not a FK: billing disputes outlive account
+    deletion, and events whose Account cannot be resolved must still be recorded.
+    """
+
+    __tablename__ = "billing_events"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    event_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    type: Mapped[str] = mapped_column(String(64), nullable=False)
+    created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    account_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
+    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
