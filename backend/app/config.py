@@ -95,11 +95,14 @@ class Settings(BaseSettings):
 
     # Subscription billing (ticket P2-01). Development may leave the Stripe
     # credentials unset; billing requests then answer 503 instead of crashing.
-    # Production refuses to start without them (checked in a later ticket).
+    # Production refuses to start without all three (ticket P2-10, below).
     stripe_api_key: str = ""
     stripe_webhook_secret: str = ""
     stripe_price_id: str = ""
     # Display-only monthly price shown by the pricing UI; billing maths lives in Stripe.
+    # If this drifts from the real ``stripe_price_id`` configuration the payment
+    # provider's checkout page wins: 实际扣款以支付方配置为准 (frontend copy and
+    # ``frontend/src/lib/billing.ts`` say the same). Keep the two in sync when repricing.
     subscription_monthly_usd: float = 4.99
 
     # Feature switches (ticket #23). Douyin parsing ships behind this switch so it can
@@ -149,7 +152,9 @@ class Settings(BaseSettings):
 
         File URLs are signed with ``secret_key`` and access tokens with
         ``jwt_secret`` (falling back to ``secret_key``); shipping the development
-        defaults would let anyone forge either.
+        defaults would let anyone forge either. From ticket P2-10 the same guard
+        also refuses a half-set payment (Stripe) or outbound email (SMTP)
+        configuration: both would only fail later, as silent 503s for users.
         """
         if not self.is_production:
             return
@@ -165,6 +170,28 @@ class Settings(BaseSettings):
             )
         if self.fake_adapters:
             raise RuntimeError("APP_FAKE_ADAPTERS is a test-only switch and must be off in production")
+        # Payment (ticket P2-10): a production deployment must never run with a half-set
+        # Stripe configuration; users would see 503s on every upgrade attempt.
+        for field, name in (
+            (self.stripe_api_key, "APP_STRIPE_API_KEY"),
+            (self.stripe_webhook_secret, "APP_STRIPE_WEBHOOK_SECRET"),
+            (self.stripe_price_id, "APP_STRIPE_PRICE_ID"),
+        ):
+            if not field.strip():
+                raise RuntimeError(f"{name} must be set to the real Stripe value when APP_ENV=production")
+        # Outbound email (ticket P2-10): verification links are worthless if the sender
+        # would silently fail closed with a 503. Host + from are the minimum the SMTP
+        # adapter needs (username/password stay optional for unauthenticated relays).
+        if not self.smtp_host.strip():
+            raise RuntimeError(
+                "APP_SMTP_HOST must be set to the outbound mail server when APP_ENV=production "
+                "(development may leave it empty and use the fake sender)"
+            )
+        if not self.smtp_from.strip():
+            raise RuntimeError(
+                "APP_SMTP_FROM must be set to the verified sender address when APP_ENV=production "
+                "(development may leave it empty and use the fake sender)"
+            )
 
 
 @lru_cache
