@@ -1,20 +1,33 @@
 import { expect, test } from "@playwright/test";
 
+import {
+  DEMO_YOUTUBE_TITLE,
+  DEMO_YOUTUBE_URL,
+  randomEmail,
+  signUpAndSignIn,
+  verifyEmailFromDemoInbox,
+} from "./goldenPath";
+
 /**
- * Golden path: Visitor resolve → Subtitle export → Download → register → Analysis → mindmap.
+ * Golden path: Visitor resolve → Subtitle export → Download → register → sign in →
+ * email confirmation → Analysis → mindmap.
  *
  * Requires deterministic adapters; `PLAYWRIGHT_E2E=1` makes Playwright start both
  * servers (see playwright.config.ts). Every run registers a fresh Account.
+ *
+ * P2-06 (ticket #22) split registration from sign-in and put email confirmation in
+ * front of Analysis, so this path now reads the verification link out of the fake
+ * mailbox instead of assuming a session the server never handed out.
  */
 const enabled = process.env.PLAYWRIGHT_E2E === "1";
 
-const VIDEO_URL = "https://www.youtube.com/watch?v=demoP1Video";
-const VIDEO_TITLE = "演示视频：从零理解间隔重复";
+const VIDEO_URL = DEMO_YOUTUBE_URL;
+const VIDEO_TITLE = DEMO_YOUTUBE_TITLE;
 
 test.describe("golden path", () => {
   test.skip(!enabled, "Set PLAYWRIGHT_E2E=1 to start both servers with fake adapters");
 
-  test("resolve, export Subtitle, Download, then register and generate an Analysis", async ({
+  test("resolve, export Subtitle, Download, then register, confirm and generate an Analysis", async ({
     page,
   }) => {
     await page.goto("/");
@@ -52,16 +65,19 @@ test.describe("golden path", () => {
     // --- Account: the Analysis button funnels into registration -------------
     await page.getByRole("button", { name: "AI 分析" }).click();
     await expect(page).toHaveURL(/\/login\?next=/);
-    await page.getByRole("button", { name: "注册", exact: true }).click();
 
-    const email = `e2e-${Date.now()}-${Math.random().toString(36).slice(2, 8)}@example.com`;
-    await page.getByLabel("邮箱").fill(email);
-    await page.getByLabel("密码").fill("e2e-password-123");
-    await page.getByRole("button", { name: "注册并登录" }).click();
+    const email = randomEmail();
+    await signUpAndSignIn(page, email);
 
     // Back on the preserved resolve result.
     await expect(page).toHaveURL(/\/$/);
     await expect(page.getByRole("heading", { level: 2, name: VIDEO_TITLE })).toBeVisible();
+
+    // --- Account: Analysis waits for the confirmed email (ticket #22) -------
+    await page.getByRole("button", { name: "AI 分析" }).click();
+    await expect(page.getByText("邮箱尚未验证，验证后即可发起 Analysis。")).toBeVisible();
+
+    await verifyEmailFromDemoInbox(page.request, email);
 
     // --- Account: create and stream the Analysis ---------------------------
     await page.getByRole("button", { name: "AI 分析" }).click();
@@ -77,7 +93,7 @@ test.describe("golden path", () => {
     await expect(page.getByRole("img", { name: "思维导图" })).toBeVisible({ timeout: 20_000 });
     await expect(page.getByRole("button", { name: "导出 SVG" })).toBeEnabled();
 
-    // The fresh Account still has two of its three daily Quota units.
+    // The fresh Account has used one of its three daily Quota units.
     await expect(page.getByText("Quota 剩余 2 / 3")).toBeVisible();
 
     // ADR-0005: private Analysis pages are never indexed.
