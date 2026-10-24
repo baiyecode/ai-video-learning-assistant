@@ -350,7 +350,7 @@ async def test_fake_adapters_mode_ships_an_observable_inbox(settings: Settings) 
     await adapters.email_sender.send(OutboundEmail(to="someone@example.com", subject="s", body="b"))
 
     assert [
-        message.to for message in adapters.email_sender.inbox  # type: ignore[attr-defined]
+        message.to for message in adapters.email_sender.sent  # type: ignore[attr-defined]
     ] == ["someone@example.com"]
 
 

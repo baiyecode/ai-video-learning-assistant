@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from app.config import Settings
 from app.container import Adapters
+from app.adapters.demo import DemoEmailSender
 from app.deps import get_adapters, get_settings
 from app.errors import AppError, ErrorCode
 
@@ -57,8 +58,8 @@ async def read_inbox(
 ) -> list[DemoEmailOut]:
     """Newest-first view of everything the fake mailer "delivered" in this process."""
     _require_demo_mode(settings)
-    inbox = getattr(adapters.email_sender, "messages_for", None)
-    if inbox is None:
+    sender = adapters.email_sender
+    if sender is None or not isinstance(sender, DemoEmailSender):
         raise AppError(404, ErrorCode.NOT_FOUND, "该接口仅在假适配器模式下可用")
     return [
         DemoEmailOut(
@@ -67,7 +68,7 @@ async def read_inbox(
             body=message.body,
             verification_token=_token_of(message.body),
         )
-        for message in inbox(to)
+        for message in sender.messages_for(to)
     ]
 
 
