@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
-from app.modules.billing.service import membership_state
+from app.modules.billing.service import MembershipState, membership_state
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import BudgetLedger, Clock
 from app.ratelimit import RateLimiter
@@ -86,10 +86,12 @@ async def _find_active(
     )
 
 
-async def membership_status(session: AsyncSession, account_id: str, *, now) -> str:
-    """Delegate to billing's single membership read (derivation lives over there)."""
-    state = await membership_state(session, account_id, now=now)
-    return state.status
+def _effective_daily_limit(state: MembershipState, settings: Settings) -> int:
+    """VIP lifts the cap to the unlimited sentinel; the sentinel still counts.
+
+    The atomic reservation is kept for VIPs so failure rollback stays untouched.
+    """
+    return quota.UNLIMITED_DAILY_LIMIT if state.is_vip else settings.analysis_daily_quota
 
 
 async def _create_once(
@@ -176,11 +178,7 @@ async def _create_once(
 
     # VIP Membership lifts the cap without bypassing the atomic reservation: the
     # sentinel limit keeps counting units, so failure rollback still applies.
-    effective_limit = (
-        quota.UNLIMITED_DAILY_LIMIT
-        if state.is_vip
-        else settings.analysis_daily_quota
-    )
+    effective_limit = _effective_daily_limit(state, settings)
     if not await quota.reserve(session, account_id, clock.today(), effective_limit):
         raise _quota_exhausted(clock, settings)
 
@@ -275,11 +273,7 @@ async def daily_quota(
     Membership surfaces as the unlimited sentinel plus the raw subscription status.
     """
     state = await membership_state(session, account_id, now=clock.now())
-    limit = (
-        quota.UNLIMITED_DAILY_LIMIT
-        if state.is_vip
-        else settings.analysis_daily_quota
-    )
+    limit = _effective_daily_limit(state, settings)
     snapshot = await quota.usage(session, account_id, clock, limit)
     return QuotaOut(
         daily_limit=snapshot.daily_limit,

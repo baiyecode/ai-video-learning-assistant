@@ -34,6 +34,7 @@ from app.deps import (
     get_settings,
 )
 from app.errors import AppError, ErrorCode
+from app.modules.billing.service import membership_state
 from app.modules.identity.models import Account
 from app.ratelimit import RateLimiter
 
@@ -120,8 +121,8 @@ async def get_analysis(
     adapters: Adapters = Depends(get_adapters),
 ) -> AnalysisOut:
     analysis, video = await service.get_analysis(session, account.id, analysis_id)
-    membership = await service.membership_status(session, account.id, now=adapters.clock.now())
-    return service.to_out(analysis, video, membership)
+    state = await membership_state(session, account.id, now=adapters.clock.now())
+    return service.to_out(analysis, video, state.status)
 
 
 @router.get("/{analysis_id}/stream")
