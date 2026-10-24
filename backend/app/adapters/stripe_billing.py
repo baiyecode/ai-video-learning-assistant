@@ -76,14 +76,14 @@ class StripeBillingGateway:
             raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_UNAVAILABLE) from exc
         return CheckoutSession(id=str(session["id"]), url=str(session["url"]))
 
-    async def create_portal(self, *, stripe_customer_id: str, return_url: str) -> CustomerPortal:
+    async def create_portal(self, *, provider_customer_id: str, return_url: str) -> CustomerPortal:
         """Mint a Stripe customer-portal session for the subscription owner.
 
         Same deferred-SDK shape as checkout: no credentials means a clear 503, and an
         empty customer id (webhooks never carried one) cannot open a portal either.
         """
         self._require_config()
-        if not stripe_customer_id.strip():
+        if not provider_customer_id.strip():
             raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_BILLING_UNAVAILABLE)
 
         def _create() -> dict:
@@ -91,7 +91,7 @@ class StripeBillingGateway:
 
             stripe.api_key = self._settings.stripe_api_key
             return stripe.billing_portal.Session.create(
-                customer=stripe_customer_id, return_url=return_url
+                customer=provider_customer_id, return_url=return_url
             )
 
         try:

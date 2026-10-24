@@ -131,6 +131,17 @@ class EmailSender(Protocol):
     async def send(self, message: OutboundEmail) -> None: ...
 
 
+@runtime_checkable
+class ObservableInbox(Protocol):
+    """The in-memory capability a fake mailer adds: read back what was "delivered".
+
+    Business modules check for this port instead of importing a concrete adapter
+    (the demo inbox route is the only consumer); real senders never implement it.
+    """
+
+    def messages_for(self, to: str | None = None) -> list[OutboundEmail]: ...
+
+
 @dataclass(frozen=True, slots=True)
 class CheckoutSession:
     """A hosted payment page created by the billing gateway; the user is sent to ``url``."""
@@ -159,8 +170,8 @@ class WebhookEvent:
     type: str
     created: datetime
     account_id: str | None = None
-    stripe_customer_id: str | None = None
-    stripe_subscription_id: str | None = None
+    provider_customer_id: str | None = None
+    provider_subscription_id: str | None = None
     current_period_end: datetime | None = None
     price_id: str | None = None
     subscription_status: str | None = None
@@ -197,11 +208,11 @@ class BillingGateway(Protocol):
     async def create_portal(
         self,
         *,
-        stripe_customer_id: str,
+        provider_customer_id: str,
         return_url: str,
     ) -> CustomerPortal:
         """Mint a customer portal session for the subscription owner (P2-04 self-service).
 
-        ``stripe_customer_id`` may be blank when the webhooks never carried one; adapters
+        ``provider_customer_id`` may be blank when the webhooks never carried one; adapters
         answer an understandable ``AppError`` instead of an SDK-level failure."""
         ...

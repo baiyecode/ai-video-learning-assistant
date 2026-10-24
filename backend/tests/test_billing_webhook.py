@@ -327,8 +327,8 @@ async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscri
         session.add(
             Subscription(
                 account_id=account_id,
-                stripe_customer_id="cus_old",
-                stripe_subscription_id="sub_old",
+                provider_customer_id="cus_old",
+                provider_subscription_id="sub_old",
                 status="canceled",
                 current_period_end=_dt("2026-01-20T09:00:00+00:00"),
                 price_id="price_fake_monthly",
@@ -359,7 +359,7 @@ async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscri
             await session.scalars(select(Subscription).where(Subscription.account_id == account_id))
         ).all()
     assert len(rows) == 1
-    assert rows[0].stripe_subscription_id == "sub_renewed"
+    assert rows[0].provider_subscription_id == "sub_renewed"
 
 
 async def test_bad_signature_is_rejected_and_changes_nothing(
@@ -420,8 +420,8 @@ def test_stripe_gateway_verifies_and_decodes_without_touching_the_sdk() -> None:
     assert event.type == "checkout.session.completed"
     assert event.created == _dt(EVENT_CREATED)
     assert event.account_id == "acct-7"
-    assert event.stripe_subscription_id == "sub_live"
-    assert event.stripe_customer_id == "cus_live"
+    assert event.provider_subscription_id == "sub_live"
+    assert event.provider_customer_id == "cus_live"
     assert event.current_period_end == _dt(PERIOD_END)
     assert event.price_id == "price_fake_monthly"
 

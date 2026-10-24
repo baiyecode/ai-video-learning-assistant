@@ -162,7 +162,7 @@ async def open_portal(
     if subscription is None:
         raise AppError(404, ErrorCode.SUBSCRIPTION_NOT_FOUND, _MESSAGE_NO_SUBSCRIPTION)
     portal = await gateway.create_portal(
-        stripe_customer_id=subscription.stripe_customer_id or "",
+        provider_customer_id=subscription.provider_customer_id or "",
         return_url=f"{origin}/?portal=finished",
     )
     return PortalOut(url=portal.url)
@@ -197,7 +197,7 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
             created=event.created,
             processed_at=clock.now(),
             account_id=account_id,
-            stripe_subscription_id=event.stripe_subscription_id,
+            provider_subscription_id=event.provider_subscription_id,
             applied=False,
         )
         .on_conflict_do_nothing(index_elements=["event_id"])
@@ -243,10 +243,10 @@ async def _effective_account_id(session: AsyncSession, event: WebhookEvent) -> s
     """
     if event.account_id:
         return event.account_id
-    if event.stripe_subscription_id:
+    if event.provider_subscription_id:
         return await session.scalar(
             select(Subscription.account_id).where(
-                Subscription.stripe_subscription_id == event.stripe_subscription_id
+                Subscription.provider_subscription_id == event.provider_subscription_id
             )
         )
     return None
@@ -297,8 +297,8 @@ async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
     if subscription is None:
         subscription = Subscription(
             account_id=event.account_id,
-            stripe_customer_id=event.stripe_customer_id,
-            stripe_subscription_id=_checkout_subscription_key(event),
+            provider_customer_id=event.provider_customer_id,
+            provider_subscription_id=_checkout_subscription_key(event),
             status=SubscriptionStatus.ACTIVE.value,
             current_period_end=event.current_period_end,
             # A fresh payment cancels any previously scheduled period-end cancellation.
@@ -310,10 +310,10 @@ async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
         subscription.status = SubscriptionStatus.ACTIVE.value
         subscription.current_period_end = event.current_period_end
         subscription.cancel_at_period_end = False
-        if event.stripe_subscription_id:
-            subscription.stripe_subscription_id = event.stripe_subscription_id
-        if event.stripe_customer_id:
-            subscription.stripe_customer_id = event.stripe_customer_id
+        if event.provider_subscription_id:
+            subscription.provider_subscription_id = event.provider_subscription_id
+        if event.provider_customer_id:
+            subscription.provider_customer_id = event.provider_customer_id
         if event.price_id:
             subscription.price_id = event.price_id
     _log_membership(event, SubscriptionStatus.ACTIVE.value)
@@ -323,13 +323,13 @@ async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
 def _checkout_subscription_key(event: WebhookEvent) -> str:
     """The Stripe subscription id, or a provisional unique key when the object lacks one.
 
-    ``stripe_subscription_id`` is NOT NULL/unique (the webhook upsert key), but a
+    ``provider_subscription_id`` is NOT NULL/unique (the webhook upsert key), but a
     checkout object may arrive before the provider created the subscription. The
     event id then parks the row under a key that can never collide with a provider
     id; the first ``customer.subscription.*`` event naming the real id rewrites it
     (:func:`_apply_lifecycle` backfills), exactly like the period-end backfill.
     """
-    return event.stripe_subscription_id or event.event_id
+    return event.provider_subscription_id or event.event_id
 
 
 async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
@@ -361,13 +361,13 @@ async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
         subscription.current_period_end = event.current_period_end
         changed = True
     if (
-        event.stripe_subscription_id
-        and subscription.stripe_subscription_id != event.stripe_subscription_id
+        event.provider_subscription_id
+        and subscription.provider_subscription_id != event.provider_subscription_id
     ):
-        subscription.stripe_subscription_id = event.stripe_subscription_id
+        subscription.provider_subscription_id = event.provider_subscription_id
         changed = True
-    if event.stripe_customer_id and not subscription.stripe_customer_id:
-        subscription.stripe_customer_id = event.stripe_customer_id
+    if event.provider_customer_id and not subscription.provider_customer_id:
+        subscription.provider_customer_id = event.provider_customer_id
         changed = True
     if changed:
         _log_membership(event, subscription.status)
@@ -376,10 +376,10 @@ async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
 
 async def _find_subscription(session: AsyncSession, event: WebhookEvent) -> Subscription | None:
     """Locate the record an event speaks about: Stripe id first, then Account owner."""
-    if event.stripe_subscription_id:
+    if event.provider_subscription_id:
         subscription = await session.scalar(
             select(Subscription).where(
-                Subscription.stripe_subscription_id == event.stripe_subscription_id
+                Subscription.provider_subscription_id == event.provider_subscription_id
             )
         )
         if subscription is not None:

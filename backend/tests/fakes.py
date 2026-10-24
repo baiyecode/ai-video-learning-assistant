@@ -336,6 +336,11 @@ class FakeEmailSender:
             raise self.fail_with
         self.sent.append(message)
 
+    def messages_for(self, to: str | None = None) -> list[OutboundEmail]:
+        """ObservableInbox view, newest-first, optionally narrowed to one address."""
+        messages = [message for message in self.sent if to is None or message.to == to]
+        return list(reversed(messages))
+
 
 @dataclass
 class FakeBillingGateway:
@@ -384,13 +389,13 @@ class FakeBillingGateway:
     async def create_portal(
         self,
         *,
-        stripe_customer_id: str,
+        provider_customer_id: str,
         return_url: str,
     ) -> CustomerPortal:
         if self.portal_fail_with is not None:
             raise self.portal_fail_with
         self.created_portals.append(
-            {"stripe_customer_id": stripe_customer_id, "return_url": return_url}
+            {"provider_customer_id": provider_customer_id, "return_url": return_url}
         )
         return CustomerPortal(url=self.portal_url)
 

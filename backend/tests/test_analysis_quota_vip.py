@@ -59,8 +59,8 @@ async def _seed_subscription(app: FastAPI, account_id: str, status: str) -> None
         session.add(
             Subscription(
                 account_id=account_id,
-                stripe_customer_id="cus_fake_1",
-                stripe_subscription_id=f"sub_{status}_{account_id[:8]}",
+                provider_customer_id="cus_fake_1",
+                provider_subscription_id=f"sub_{status}_{account_id[:8]}",
                 status=status,
                 current_period_end=PERIOD_END,
                 price_id="price_fake_monthly",

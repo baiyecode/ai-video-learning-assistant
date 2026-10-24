@@ -2,8 +2,10 @@
 
 VIP Membership is a derived state: ``status`` in ``VIP_STATUSES`` with the paid period
 not yet elapsed, and nothing else. The Account never stores a flag (GLOSSARY: _Avoid_
-``is_vip``). Stripe IDs are the idempotency keys the webhook handler upserts against;
-``account_id`` is unique because one Account holds at most one subscription.
+``is_vip``). Provider subscription IDs are the idempotency keys the webhook handler
+upserts against (the physical columns keep the ``stripe_*`` names from the spec's
+data model); ``account_id`` is unique because one Account holds at most one
+subscription.
 ``cancel_at_period_end`` mirrors the provider's *scheduled* cancellation: VIP is kept
 until ``current_period_end``, and the read side turns that into the UI preview.
 """
@@ -49,23 +51,16 @@ class Subscription(Base):
         index=True,
         nullable=False,
     )
-    stripe_customer_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
-    stripe_subscription_id: Mapped[str] = mapped_column(
-        String(64), unique=True, index=True, nullable=False
+    provider_customer_id: Mapped[str | None] = mapped_column(
+        "stripe_customer_id", String(64), nullable=True
+    )
+    provider_subscription_id: Mapped[str] = mapped_column(
+        "stripe_subscription_id", String(64), unique=True, index=True, nullable=False
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     price_id: Mapped[str] = mapped_column(String(64), nullable=False)
-
-
-def is_vip(subscription: Subscription | None) -> bool:
-    """The stored-status half of the VIP truth (never stored on the Account).
-
-    Time-aware callers must use :func:`app.modules.billing.service.membership_state`,
-    which also honours the lazy ``current_period_end`` expiry (spec 过期 edge).
-    """
-    return subscription is not None and subscription.status in VIP_STATUSES
 
 
 class BillingEvent(Base):
@@ -85,5 +80,7 @@ class BillingEvent(Base):
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     account_id: Mapped[str | None] = mapped_column(String(36), index=True, nullable=True)
-    stripe_subscription_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    provider_subscription_id: Mapped[str | None] = mapped_column(
+        "stripe_subscription_id", String(64), nullable=True
+    )
     applied: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)

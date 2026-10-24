@@ -357,7 +357,7 @@ async def test_stripe_gateway_portal_reports_unavailable_without_configuration()
         Settings(_env_file=None, env="test", secret_key="test-only-secret")
     )
     with pytest.raises(AppError) as raised:
-        await unconfigured.create_portal(stripe_customer_id="cus_1", return_url="http://testserver/")
+        await unconfigured.create_portal(provider_customer_id="cus_1", return_url="http://testserver/")
     assert raised.value.status == 503
     assert raised.value.code == "service_unavailable"
 
@@ -365,7 +365,7 @@ async def test_stripe_gateway_portal_reports_unavailable_without_configuration()
         Settings(_env_file=None, env="test", secret_key="test-only-secret", stripe_api_key="sk_test_x")
     )
     with pytest.raises(AppError) as raised:
-        await keyed.create_portal(stripe_customer_id="", return_url="http://testserver/")
+        await keyed.create_portal(provider_customer_id="", return_url="http://testserver/")
     assert raised.value.status == 503
     assert raised.value.code == "service_unavailable"
 

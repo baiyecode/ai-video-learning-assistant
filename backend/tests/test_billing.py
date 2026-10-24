@@ -41,7 +41,7 @@ async def seed_subscription(
     account_id: str,
     *,
     status: str = "active",
-    stripe_subscription_id: str = "sub_fake_1",
+    provider_subscription_id: str = "sub_fake_1",
     current_period_end: datetime | None = datetime(2026, 2, 14, 8, 0, tzinfo=UTC),
 ) -> None:
     """Insert a subscription row the way the webhook handler eventually will."""
@@ -49,8 +49,8 @@ async def seed_subscription(
         session.add(
             Subscription(
                 account_id=account_id,
-                stripe_customer_id="cus_fake_1",
-                stripe_subscription_id=stripe_subscription_id,
+                provider_customer_id="cus_fake_1",
+                provider_subscription_id=provider_subscription_id,
                 status=status,
                 current_period_end=current_period_end,
                 price_id="price_fake_monthly",
@@ -129,18 +129,18 @@ async def test_stripe_subscription_id_is_the_idempotency_key(
 ) -> None:
     first = (await register(client, email="one@example.com")).json()["account"]["id"]
     second = (await register(client, email="two@example.com")).json()["account"]["id"]
-    await seed_subscription(app, first, stripe_subscription_id="sub_shared")
+    await seed_subscription(app, first, provider_subscription_id="sub_shared")
 
     with pytest.raises(IntegrityError):
-        await seed_subscription(app, second, stripe_subscription_id="sub_shared")
+        await seed_subscription(app, second, provider_subscription_id="sub_shared")
 
 
 async def test_one_subscription_per_account(client: AsyncClient, app: FastAPI) -> None:
     account_id = (await register(client, email="solo@example.com")).json()["account"]["id"]
-    await seed_subscription(app, account_id, stripe_subscription_id="sub_first")
+    await seed_subscription(app, account_id, provider_subscription_id="sub_first")
 
     with pytest.raises(IntegrityError):
-        await seed_subscription(app, account_id, stripe_subscription_id="sub_second")
+        await seed_subscription(app, account_id, provider_subscription_id="sub_second")
 
 
 def _bare_settings(**overrides: object):

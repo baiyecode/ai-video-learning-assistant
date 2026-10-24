@@ -16,11 +16,11 @@ import re
 from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 
-from app.adapters.demo import DemoEmailSender
 from app.config import Settings
 from app.container import Adapters
 from app.deps import get_adapters, get_settings
 from app.errors import AppError, ErrorCode
+from app.ports import ObservableInbox
 
 router = APIRouter(tags=["demo"])
 
@@ -59,7 +59,7 @@ async def read_inbox(
     """Newest-first view of everything the fake mailer "delivered" in this process."""
     _require_demo_mode(settings)
     sender = adapters.email_sender
-    if sender is None or not isinstance(sender, DemoEmailSender):
+    if sender is None or not isinstance(sender, ObservableInbox):
         raise AppError(404, ErrorCode.NOT_FOUND, "该接口仅在假适配器模式下可用")
     return [
         DemoEmailOut(
