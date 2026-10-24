@@ -184,3 +184,52 @@ async def test_canceled_subscription_kept_until_period_end_is_not_exempt(
     fourth = await _create(client, headers, await _resolve(client, adapters, "cancel00004"))
     assert fourth.status_code == 429, fourth.text
     assert fourth.json()["error"]["code"] == "quota_exhausted"
+
+
+async def test_vip_quota_snapshot_reports_the_unlimited_sentinel_with_membership(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """AC3: /api/me quota carries the sentinel daily_limit next to the membership status."""
+    headers, account_id = await _register(client, "sentinel@example.com")
+    await _activate_membership(client, account_id)
+    video_id = await _resolve(client, adapters, "sentinel001")
+    await _create_completed(client, adapters, headers, video_id)
+
+    quota = await _me(client, headers)
+    assert quota == {
+        "daily_limit": -1,
+        "used": 1,
+        "remaining": -1,
+        "resets_at": "2026-01-16T00:00:00+08:00",
+        "membership": "active",
+    }
+
+
+async def test_analysis_create_response_includes_quota_snapshot_and_membership(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """AC3: the create response schema returns the snapshot alongside membership."""
+    headers, account_id = await _register(client, "created@example.com")
+    await _activate_membership(client, account_id)
+    video_id = await _resolve(client, adapters, "created0001")
+
+    created = await _create(client, headers, video_id)
+    assert created.status_code == 201, created.text
+
+    assert created.json()["membership"] == "active"
+    quota = created.json()["quota"]
+    assert quota["daily_limit"] == -1
+    assert quota["remaining"] == -1
+    assert quota["membership"] == "active"
+
+
+async def test_free_account_quota_snapshot_keeps_numeric_limit_and_free_membership(
+    client: AsyncClient,
+) -> None:
+    """The same snapshot without membership: numeric cap today, "free" status."""
+    headers, _ = await _register(client, "plain@example.com")
+
+    quota = await _me(client, headers)
+    assert quota["daily_limit"] == 3
+    assert quota["remaining"] == 3
+    assert quota["membership"] == "free"

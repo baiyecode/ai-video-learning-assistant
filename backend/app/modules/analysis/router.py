@@ -61,11 +61,15 @@ async def create_analysis(
     account: Account = Depends(get_current_account),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> AnalysisOut:
+    # Read the id before any service-side commit/rollback: a rollback expires the
+    # bound ORM object and touching ``account.id`` afterwards would lazy-load outside
+    # the greenlet (MissingGreenlet).
+    account_id = account.id
     result = await service.create_analysis(
         session,
         adapters.clock,
         settings,
-        account_id=account.id,
+        account_id=account_id,
         video_id=payload.video_id,
         force=payload.force,
         rate_limiter=rate_limiter,
@@ -76,7 +80,11 @@ async def create_analysis(
     else:
         # Reused in-progress or already completed Analysis: nothing new was reserved.
         response.status_code = 200
-    return service.to_out(result.analysis, result.video)
+    out = service.to_out(result.analysis, result.video, result.membership)
+    # Snapshot taken after the (non-)reservation so the SPA sees the unlimited
+    # sentinel and membership right where the request was made.
+    out.quota = await service.daily_quota(session, account_id, adapters.clock, settings)
+    return out
 
 
 @router.get("", response_model=list[AnalysisHistoryItemOut])
@@ -95,7 +103,8 @@ async def get_analysis(
     account: Account = Depends(get_current_account),
 ) -> AnalysisOut:
     analysis, video = await service.get_analysis(session, account.id, analysis_id)
-    return service.to_out(analysis, video)
+    membership = await service.membership_status(session, account.id)
+    return service.to_out(analysis, video, membership)
 
 
 @router.get("/{analysis_id}/stream")

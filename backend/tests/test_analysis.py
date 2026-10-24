@@ -468,6 +468,7 @@ async def test_me_reports_quota_with_reset_time(
         "used": 0,
         "remaining": 3,
         "resets_at": "2026-01-16T00:00:00+08:00",
+        "membership": "free",
     }
 
     video_id = await _resolve(client, adapters)

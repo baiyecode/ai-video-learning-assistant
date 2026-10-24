@@ -55,6 +55,7 @@ async def test_register_login_and_me_round_trip(client: AsyncClient) -> None:
         "used": 0,
         "remaining": 3,
         "resets_at": "2026-01-16T00:00:00+08:00",
+        "membership": "free",
     }
 
     # Email is normalised, so logging in with different casing works.

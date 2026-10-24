@@ -108,6 +108,6 @@ async def usage(session: AsyncSession, account_id: str, clock: Clock, limit: int
     return QuotaSnapshot(
         daily_limit=limit,
         used=used,
-        remaining=max(0, limit - used),
+        remaining=UNLIMITED_DAILY_LIMIT if is_unlimited(limit) else max(0, limit - used),
         resets_at=next_reset_at(clock),
     )
