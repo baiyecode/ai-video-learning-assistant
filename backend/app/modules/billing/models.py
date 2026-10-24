@@ -1,9 +1,11 @@
 """SQLAlchemy models for billing: Subscription records and the webhook audit trail.
 
-VIP Membership is a derived state: ``status`` in ``VIP_STATUSES`` and nothing else.
-The Account never stores a flag (GLOSSARY: _Avoid_ ``is_vip``). Stripe IDs are the
-idempotency keys the webhook handler upserts against; ``account_id`` is unique because
-one Account holds at most one subscription.
+VIP Membership is a derived state: ``status`` in ``VIP_STATUSES`` with the paid period
+not yet elapsed, and nothing else. The Account never stores a flag (GLOSSARY: _Avoid_
+``is_vip``). Stripe IDs are the idempotency keys the webhook handler upserts against;
+``account_id`` is unique because one Account holds at most one subscription.
+``cancel_at_period_end`` mirrors the provider's *scheduled* cancellation: VIP is kept
+until ``current_period_end``, and the read side turns that into the UI preview.
 """
 
 from __future__ import annotations
@@ -18,7 +20,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 
 
-def _uuid() -> str:
+def new_id() -> str:
+    """The one id generator shared by this module's models and the webhook writer."""
     return str(uuid4())
 
 
@@ -38,7 +41,7 @@ VIP_STATUSES = frozenset({SubscriptionStatus.ACTIVE, SubscriptionStatus.TRIAL_EN
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     account_id: Mapped[str] = mapped_column(
         String(36),
         ForeignKey("accounts.id", ondelete="CASCADE"),
@@ -52,11 +55,16 @@ class Subscription(Base):
     )
     status: Mapped[str] = mapped_column(String(32), nullable=False)
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    cancel_at_period_end: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     price_id: Mapped[str] = mapped_column(String(64), nullable=False)
 
 
 def is_vip(subscription: Subscription | None) -> bool:
-    """The single VIP truth: derived from the subscription status, never stored."""
+    """The stored-status half of the VIP truth (never stored on the Account).
+
+    Time-aware callers must use :func:`app.modules.billing.service.membership_state`,
+    which also honours the lazy ``current_period_end`` expiry (spec 过期 edge).
+    """
     return subscription is not None and subscription.status in VIP_STATUSES
 
 
@@ -71,7 +79,7 @@ class BillingEvent(Base):
 
     __tablename__ = "billing_events"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
     event_id: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
     type: Mapped[str] = mapped_column(String(64), nullable=False)
     created: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)

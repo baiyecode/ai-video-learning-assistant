@@ -81,7 +81,12 @@ async def test_membership_is_free_before_any_subscription(client: AsyncClient) -
     response = await client.get("/api/me/membership", headers=auth)
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"status": "free", "period_end": None, "portal_url": None, "is_vip": False}
+    assert response.json() == {
+        "status": "free",
+        "period_end": None,
+        "cancel_at_period_end": False,
+        "is_vip": False,
+    }
 
 
 async def test_membership_reports_a_recorded_subscription(client: AsyncClient, app: FastAPI) -> None:
@@ -94,7 +99,7 @@ async def test_membership_reports_a_recorded_subscription(client: AsyncClient, a
     assert membership.json() == {
         "status": "active",
         "period_end": "2026-02-14T08:00:00+00:00",
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": True,
     }
 

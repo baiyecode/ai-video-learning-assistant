@@ -79,6 +79,7 @@ def _decode_event(payload: bytes) -> WebhookEvent:
     obj = document.get("data", {}).get("object") or {}
     metadata = obj.get("metadata") or {}
     raw_status = obj.get("status")
+    raw_cancel = obj.get("cancel_at_period_end")
     return WebhookEvent(
         event_id=event_id,
         type=event_type,
@@ -89,6 +90,7 @@ def _decode_event(payload: bytes) -> WebhookEvent:
         current_period_end=_epoch_to_utc(obj.get("current_period_end")),
         price_id=metadata.get("price_id"),
         subscription_status=raw_status if isinstance(raw_status, str) else None,
+        cancel_at_period_end=raw_cancel if isinstance(raw_cancel, bool) else None,
     )
 
 

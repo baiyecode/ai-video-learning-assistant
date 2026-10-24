@@ -166,6 +166,9 @@ class WebhookEvent:
     subscription_status: str | None = None
     """Raw provider subscription status (``active``/``trialing``/``canceled``/``past_due``)
     carried by subscription objects; the state machine maps it, unknown values never guess."""
+    cancel_at_period_end: bool | None = None
+    """The provider's *scheduled* cancellation flag carried by subscription objects:
+    VIP is retained until ``current_period_end``. ``None`` (invoice events) never writes."""
 
 
 @runtime_checkable

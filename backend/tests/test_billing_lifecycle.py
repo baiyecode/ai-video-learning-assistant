@@ -103,7 +103,7 @@ async def test_lifecycle_events_advance_the_membership_status(
     assert await _membership(client, auth) == {
         "status": expected_status,
         "period_end": PERIOD_END,
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": False,
     }
 
@@ -131,7 +131,7 @@ async def test_payment_succeeded_restores_an_active_membership(client: AsyncClie
     assert await _membership(client, auth) == {
         "status": "active",
         "period_end": "2026-03-14T10:00:00+00:00",
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": True,
     }
 
@@ -162,7 +162,7 @@ async def test_subscription_updated_backfills_the_period_end_the_checkout_omitte
     assert await _membership(client, auth) == {
         "status": "active",
         "period_end": PERIOD_END,
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": True,
     }
 
@@ -370,6 +370,133 @@ async def test_stripe_gateway_portal_reports_unavailable_without_configuration()
     assert raised.value.code == "service_unavailable"
 
 
+async def test_subscription_updated_records_cancel_at_period_end_for_the_vip_preview(
+    client: AsyncClient,
+) -> None:
+    """Story 8: a cancellation *at period end* is not a cancellation yet.
+
+    The updated event carries ``cancel_at_period_end``; the membership read keeps
+    VIP (status/flag unchanged) and surfaces the flag so the UI can promise the
+    「VIP 保留至 X」 preview. Only the deleted event really flips the status.
+    """
+    response = await register(client, email="canceling@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    updated = lifecycle_event_body(
+        "evt_lc_cancel_at_end",
+        "customer.subscription.updated",
+        _dt("2026-01-15T10:00:00+00:00"),
+        account_id=account_id,
+        subscription_status="active",
+        cancel_at_period_end=True,
+    )
+    assert (await _post_event(client, updated)).status_code == 200
+
+    assert await _membership(client, auth) == {
+        "status": "active",
+        "period_end": PERIOD_END,
+        "cancel_at_period_end": True,
+        "is_vip": True,
+    }
+
+    # The real deletion ends the membership regardless of the outstanding flag.
+    deleted = lifecycle_event_body(
+        "evt_lc_delete_after_cancel",
+        "customer.subscription.deleted",
+        _dt("2026-01-16T10:00:00+00:00"),
+        account_id=account_id,
+    )
+    assert (await _post_event(client, deleted)).status_code == 200
+    membership = await _membership(client, auth)
+    assert membership["status"] == "canceled"
+    assert membership["is_vip"] is False
+
+
+async def test_active_subscription_past_period_end_presents_as_canceled(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Story 10 (spec state machine 过期 edge): expiry is derived at read time.
+
+    No webhook says anything - the stored status still reads ``active`` - but the
+    derived membership must not grant VIP past ``current_period_end``. The
+    comparison is lazy: the record itself is never rewritten by a read.
+    """
+    response = await register(client, email="expired@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+    await _activate(client, account_id)
+
+    # 2026-01-15 + 31 days lands past PERIOD_END (2026-02-14T09:00Z). The clock
+    # jump also ages out the access token, so authenticate again for the reads.
+    app.state.adapters.clock.advance(days=31)  # type: ignore[attr-defined]
+    auth = bearer(await auth_login(client, email="expired@example.com", password=PASSWORD))
+
+    membership = await _membership(client, auth)
+    assert membership["status"] == "canceled"
+    assert membership["is_vip"] is False
+    assert membership["period_end"] == PERIOD_END
+
+
+async def test_expired_membership_is_downgraded_on_the_next_analysis_read(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """The spec acceptance for Story 10: the very next Analysis sees the free Quota.
+
+    VIP carried the Account past the free cap; after ``current_period_end`` passes
+    (no event yet) the Quota snapshot reads as free and a fresh day admits the
+    first three free Analyses, refusing only at the free cap.
+    """
+    headers = await verified_account(client, adapters, email="expired-analysis@example.com")
+    account_id = (await client.get("/api/me", headers=headers)).json()["account"]["id"]
+    await _activate(client, account_id)
+
+    # Past the free cap today: only VIP's unlimited sentinel let these through.
+    for index in range(4):
+        video_id = await _resolve_video(client, adapters, headers, f"lcexp0{index:05d}")
+        created = await _create_analysis(client, headers, video_id)
+        assert created.status_code == 201, created.text
+        await _wait_completed(client, headers, created.json()["id"])
+        adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
+
+    # A new day after period end: free Quota applies again without any webhook.
+    # (The clock jump ages the bearer token; re-login keeps the reads authenticated.)
+    adapters.clock.advance(days=31)  # type: ignore[attr-defined]
+    headers = bearer(await auth_login(client, email="expired-analysis@example.com", password=PASSWORD))
+    quota = (await client.get("/api/me", headers=headers)).json()["quota"]
+    assert quota["daily_limit"] == 3
+    assert quota["membership"] == "canceled"
+
+    membership = await _membership(client, headers)
+    assert membership["status"] == "canceled"
+    assert membership["is_vip"] is False
+
+    first = await _create_analysis(
+        client, headers, await _resolve_video(client, adapters, headers, "lcexp100000")
+    )
+    assert first.status_code == 201, first.text
+    assert first.json()["membership"] == "canceled"
+
+    adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
+    second = await _create_analysis(
+        client, headers, await _resolve_video(client, adapters, headers, "lcexp100001")
+    )
+    assert second.status_code == 201, second.text
+    adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
+    third = await _create_analysis(
+        client, headers, await _resolve_video(client, adapters, headers, "lcexp100002")
+    )
+    assert third.status_code == 201, third.text
+    adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
+    fourth = await _create_analysis(
+        client, headers, await _resolve_video(client, adapters, headers, "lcexp100003")
+    )
+    assert fourth.status_code == 429, fourth.text
+    assert fourth.json()["error"]["code"] == "quota_exhausted"
+    assert fourth.json()["error"]["details"]["daily_limit"] == 3
+
+
 async def _create_analysis(client: AsyncClient, headers: dict[str, str], video_id: str) -> Any:
     return await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
 
@@ -475,7 +602,7 @@ async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
     assert membership == {
         "status": "canceled",
         "period_end": PERIOD_END,
-        "portal_url": None,
+        "cancel_at_period_end": False,
         "is_vip": False,
     }
 

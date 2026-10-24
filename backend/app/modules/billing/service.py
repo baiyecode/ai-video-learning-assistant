@@ -2,13 +2,17 @@
 
 State policy (spec): the subscription record is only advanced by gateway webhooks,
 never guessed elsewhere. Creating a checkout therefore stores nothing - it just asks the
-port for a hosted payment page - and membership is a pure read of the record.
+port for a hosted payment page - and membership is a pure read of the record. The one
+exception is the spec's expiry edge (``current_period_end`` 过期 → canceled): the read
+side derives it lazily against the injected Clock without rewriting the row, so state
+stays webhook-driven while no expired VIP is ever granted.
 """
 
 from __future__ import annotations
 
 import logging
-from uuid import uuid4
+from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -16,7 +20,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.errors import AppError, ErrorCode
-from app.modules.billing.models import BillingEvent, Subscription, SubscriptionStatus, is_vip
+from app.modules.billing.models import (
+    VIP_STATUSES,
+    BillingEvent,
+    Subscription,
+    SubscriptionStatus,
+    new_id,
+)
 from app.modules.billing.schemas import CheckoutOut, MembershipOut, PortalOut
 from app.modules.identity.models import Account
 from app.ports import BillingGateway, Clock, WebhookEvent
@@ -56,8 +66,62 @@ _STRIPE_SUBSCRIPTION_STATUS: dict[str, SubscriptionStatus] = {
 the last status an event of authority wrote."""
 
 
-def _new_id() -> str:
-    return str(uuid4())
+@dataclass(frozen=True, slots=True)
+class MembershipState:
+    """The one derived membership truth for one Account at one instant.
+
+    ``status`` and ``is_vip`` already honour the lazy expiry edge: an ``active`` /
+    ``trial_ending`` record past ``current_period_end`` presents as ``canceled`` /
+    non-VIP (spec Story 10) without the row being rewritten. ``cancel_at_period_end``
+    is the provider's *scheduled* cancellation: VIP is retained until ``period_end``
+    and the UI turns that pair into the 「VIP 保留至 X」 preview.
+    """
+
+    status: str
+    is_vip: bool
+    period_end: datetime | None
+    cancel_at_period_end: bool
+
+
+def _period_end(subscription: Subscription) -> datetime | None:
+    return (
+        required_utc(subscription.current_period_end)
+        if subscription.current_period_end is not None
+        else None
+    )
+
+
+def _past_period_end(subscription: Subscription, now: datetime) -> bool:
+    """The spec's 过期 edge evaluated at read time; unknown end dates never expire."""
+    if subscription.status not in VIP_STATUSES:
+        return False
+    period_end = _period_end(subscription)
+    return period_end is not None and period_end <= now
+
+
+async def membership_state(
+    session: AsyncSession, account_id: str, *, now: datetime
+) -> MembershipState:
+    """The single subscription read for the whole application (billing and Analysis).
+
+    Other modules must read membership through this function, never by selecting
+    ``Subscription`` themselves: the status/flag derivation (including the lazy
+    expiry edge) then lives in exactly one place.
+    """
+    subscription = await session.scalar(
+        select(Subscription).where(Subscription.account_id == account_id)
+    )
+    if subscription is None:
+        return MembershipState(
+            status=STATUS_FREE, is_vip=False, period_end=None, cancel_at_period_end=False
+        )
+    expired = _past_period_end(subscription, now)
+    return MembershipState(
+        status=SubscriptionStatus.CANCELED.value if expired else subscription.status,
+        is_vip=not expired and subscription.status in VIP_STATUSES,
+        period_end=_period_end(subscription),
+        cancel_at_period_end=subscription.cancel_at_period_end,
+    )
 
 
 async def open_checkout(
@@ -104,22 +168,14 @@ async def open_portal(
     return PortalOut(url=portal.url)
 
 
-async def membership(session: AsyncSession, account_id: str) -> MembershipOut:
-    """The Account's subscription truth, as stored by webhooks (never recomputed)."""
-    subscription = await session.scalar(
-        select(Subscription).where(Subscription.account_id == account_id)
-    )
-    if subscription is None:
-        return MembershipOut(status=STATUS_FREE, period_end=None, portal_url=None, is_vip=False)
+async def membership(session: AsyncSession, account_id: str, *, now: datetime) -> MembershipOut:
+    """The Account's subscription truth: the derived read, never a recomputing write."""
+    state = await membership_state(session, account_id, now=now)
     return MembershipOut(
-        status=subscription.status,
-        period_end=(
-            required_utc(subscription.current_period_end).isoformat()
-            if subscription.current_period_end is not None
-            else None
-        ),
-        portal_url=None,
-        is_vip=is_vip(subscription),
+        status=state.status,
+        period_end=state.period_end.isoformat() if state.period_end is not None else None,
+        cancel_at_period_end=state.cancel_at_period_end,
+        is_vip=state.is_vip,
     )
 
 
@@ -135,7 +191,7 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
     claim = await session.execute(
         sqlite_insert(BillingEvent)
         .values(
-            id=_new_id(),
+            id=new_id(),
             event_id=event.event_id,
             type=event.type,
             created=event.created,
@@ -242,15 +298,18 @@ async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
         subscription = Subscription(
             account_id=event.account_id,
             stripe_customer_id=event.stripe_customer_id,
-            stripe_subscription_id=event.stripe_subscription_id or event.event_id,
+            stripe_subscription_id=_checkout_subscription_key(event),
             status=SubscriptionStatus.ACTIVE.value,
             current_period_end=event.current_period_end,
+            # A fresh payment cancels any previously scheduled period-end cancellation.
+            cancel_at_period_end=False,
             price_id=event.price_id or "",
         )
         session.add(subscription)
     else:
         subscription.status = SubscriptionStatus.ACTIVE.value
         subscription.current_period_end = event.current_period_end
+        subscription.cancel_at_period_end = False
         if event.stripe_subscription_id:
             subscription.stripe_subscription_id = event.stripe_subscription_id
         if event.stripe_customer_id:
@@ -259,6 +318,18 @@ async def _apply_checkout(session: AsyncSession, event: WebhookEvent) -> bool:
             subscription.price_id = event.price_id
     _log_membership(event, SubscriptionStatus.ACTIVE.value)
     return True
+
+
+def _checkout_subscription_key(event: WebhookEvent) -> str:
+    """The Stripe subscription id, or a provisional unique key when the object lacks one.
+
+    ``stripe_subscription_id`` is NOT NULL/unique (the webhook upsert key), but a
+    checkout object may arrive before the provider created the subscription. The
+    event id then parks the row under a key that can never collide with a provider
+    id; the first ``customer.subscription.*`` event naming the real id rewrites it
+    (:func:`_apply_lifecycle` backfills), exactly like the period-end backfill.
+    """
+    return event.stripe_subscription_id or event.event_id
 
 
 async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
@@ -275,6 +346,13 @@ async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
     changed = False
     if target is not None and subscription.status != target.value:
         subscription.status = target.value
+        changed = True
+    if (
+        object_event
+        and event.cancel_at_period_end is not None
+        and subscription.cancel_at_period_end != event.cancel_at_period_end
+    ):
+        subscription.cancel_at_period_end = event.cancel_at_period_end
         changed = True
     if event.current_period_end is not None and (
         subscription.current_period_end is None

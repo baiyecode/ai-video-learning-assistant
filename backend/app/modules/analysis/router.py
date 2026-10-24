@@ -116,9 +116,10 @@ async def get_analysis(
     analysis_id: str,
     session: AsyncSession = Depends(get_session),
     account: Account = Depends(get_current_account),
+    adapters: Adapters = Depends(get_adapters),
 ) -> AnalysisOut:
     analysis, video = await service.get_analysis(session, account.id, analysis_id)
-    membership = await service.membership_status(session, account.id)
+    membership = await service.membership_status(session, account.id, now=adapters.clock.now())
     return service.to_out(analysis, video, membership)
 
 
