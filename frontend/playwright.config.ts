@@ -1,10 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
 
 /**
- * One golden path only (see e2e/golden-path.spec.ts). Both servers start
+ * Golden paths only (see e2e/golden-path*.spec.ts). Both servers start
  * automatically with deterministic adapters when PLAYWRIGHT_E2E=1.
  *
  *   PLAYWRIGHT_E2E=1 npx playwright test
+ *
+ * Add PLAYWRIGHT_CONVERSION_UI=1 to also run the ticket P2-08 conversion-UI chain
+ * (定价页 / 升级 CTA / 个人中心 / /verify-email) once that ticket's pages exist.
  */
 const enabled = process.env.PLAYWRIGHT_E2E === "1";
 
@@ -42,6 +45,14 @@ export default defineConfig({
               APP_DATABASE_URL: "sqlite+aiosqlite:///./data/e2e.db",
               APP_DATA_DIR: "./data/e2e",
               APP_AUTH_COOKIE_SECURE: "false",
+              // The fake mailer's verification link must open in this very browser
+              // session, so the backend builds it against the dev-server origin.
+              APP_FRONTEND_BASE_URL: "http://127.0.0.1:5173",
+              // P2-09's second golden path covers 抖音 parsing + Download, so the
+              // feature switch ships open in fake-adapter mode. The 429 leg counts on
+              // the default free allowance; Stripe keys stay empty (demo gateway).
+              APP_DOUYIN_ENABLED: "1",
+              APP_ANALYSIS_DAILY_QUOTA: "3",
               // Rate limits and the visitor hourly cap would make repeat runs flaky;
               // the backend suite covers them at the HTTP seam.
               APP_RATE_LIMIT_RESOLVE_PER_MINUTE: "0",

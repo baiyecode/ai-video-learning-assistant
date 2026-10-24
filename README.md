@@ -74,12 +74,21 @@ cd frontend && npm run build
 ```
 
 Playwright 黄金路径默认跳过。设置 `PLAYWRIGHT_E2E=1` 时它会用假适配器自动启动后端与前端 dev server，
-完整跑通「访客解析 → 导出字幕 → 服务端下载 → 注册 → 流式 Analysis 与思维导图」：
+跑通两条链路（`frontend/e2e/`）：
+
+1. `golden-path.spec.ts`：访客解析 → 导出字幕 → 服务端下载 → 注册 → 登录 → 验证邮箱 → 流式 Analysis 与思维导图。
+2. `golden-path-subscription.spec.ts`：免费 Quota 用尽（第 4 次 429）→ 假网关 checkout + 注入支付成功 webhook
+   → 验证邮箱 → Analysis 不限次；同一开关下另测抖音地址的解析与下载。
+
+假邮件收件箱通过 `GET /api/demo/inbox`（仅 `APP_FAKE_ADAPTERS=1` 暴露）交回一次性验证链接，
+支付成功用与产品同一个 `POST /api/billing/webhook`（以 `whsec_demo` 签名）注入，因此不开任何真实端口。
 
 ```bash
 cd frontend
 npx playwright install chromium          # 首次
 PLAYWRIGHT_E2E=1 npx playwright test
+# 待 P2-08 的定价页 / 升级 CTA / 个人中心 /verify-email 合入后：
+PLAYWRIGHT_E2E=1 PLAYWRIGHT_CONVERSION_UI=1 npx playwright test
 ```
 
 ## Docker Compose
