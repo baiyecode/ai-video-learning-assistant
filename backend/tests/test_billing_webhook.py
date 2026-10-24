@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
-from tests.fakes import checkout_completed_body, sign_webhook
+from tests.fakes import checkout_completed_body, sign_webhook, webhook_event_body
 
 PASSWORD = "correct-horse"
 EVENT_CREATED = "2026-01-15T09:00:00+00:00"
@@ -149,3 +149,27 @@ async def test_event_older_than_the_latest_record_never_rolls_state_back(
     assert [row.applied for row in old_rows] == [False], "stale events keep the audit trail"
     new_rows = await _audit_rows(app, "evt_new")
     assert [row.applied for row in new_rows] == [True]
+
+
+async def test_unknown_event_type_is_recorded_but_never_moves_state(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Lifecycle events beyond this ticket's scope are audited, acknowledged, ignored."""
+    response = await register(client, email="mystery@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+
+    body = webhook_event_body(
+        "evt_future_1",
+        "customer.subscription.deleted",
+        _dt(EVENT_CREATED),
+        {"subscription": "sub_fake_1", "metadata": {"account_id": account_id}},
+    )
+    webhook = await _post_event(client, body)
+
+    assert webhook.status_code == 200, webhook.text
+    membership = await client.get("/api/me/membership", headers=auth)
+    assert membership.json()["status"] == "free"
+
+    rows = await _audit_rows(app, "evt_future_1")
+    assert [(row.type, row.applied) for row in rows] == [("customer.subscription.deleted", False)]
