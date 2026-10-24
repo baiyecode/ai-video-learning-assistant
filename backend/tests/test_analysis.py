@@ -21,6 +21,8 @@ from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from tests.auth_flows import login as _login_flow
+from tests.auth_flows import verified_account
 from tests.fakes import FakeSummarizer, make_fake_adapters, sample_video
 
 PASSWORD = "correct-horse"
@@ -42,17 +44,15 @@ def _url(platform_video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={platform_video_id}"
 
 
-async def _register(client: AsyncClient, email: str = "learner@example.com") -> dict[str, str]:
-    response = await client.post(
-        "/api/auth/register", json={"email": email, "password": PASSWORD}
-    )
-    assert response.status_code == 201, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+async def _register(
+    adapters: Adapters, client: AsyncClient, email: str = "learner@example.com"
+) -> dict[str, str]:
+    """Register, verify the email and log in: an Account allowed to create Analyses."""
+    return await verified_account(client, adapters, email=email, password=PASSWORD)
 
 
 async def _login(client: AsyncClient, email: str = "learner@example.com") -> dict[str, str]:
-    response = await client.post("/api/auth/login", json={"email": email, "password": PASSWORD})
-    assert response.status_code == 200, response.text
+    response = await _login_flow(client, email=email, password=PASSWORD)
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
@@ -145,7 +145,7 @@ async def test_stream_events_in_order_and_result_is_persisted(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
 
     created = await _create(client, headers, video_id)
@@ -192,7 +192,7 @@ async def test_stream_replays_persisted_result_for_reconnecting_clients(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "replayvid01")
     analysis_id = (await _create(client, headers, video_id)).json()["id"]
     await _wait_terminal(client, headers, analysis_id)
@@ -209,7 +209,7 @@ async def test_partial_summary_is_persisted_while_streaming(
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
     adapters.summarizer.delay_seconds = 0.05  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "partialvid1")
     analysis_id = (await _create(client, headers, video_id)).json()["id"]
 
@@ -236,7 +236,7 @@ async def test_partial_summary_is_persisted_while_streaming(
 async def test_fourth_analysis_is_rejected_with_reset_time_then_resets_next_day(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     for index in range(3):
         video_id = await _resolve(client, adapters, f"quotavid00{index + 1}")
         if index:
@@ -272,7 +272,7 @@ async def test_failure_releases_quota_and_allows_retry(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.error = RuntimeError("upstream exploded")  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
 
     created = await _create(client, headers, video_id)
@@ -306,7 +306,7 @@ async def test_duplicate_clicks_reuse_the_in_progress_analysis_and_reserve_once(
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
     adapters.summarizer.delay_seconds = 0.05  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
 
     first = await _create(client, headers, video_id)
@@ -329,7 +329,7 @@ async def test_concurrent_creates_reserve_only_once(
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
     adapters.summarizer.delay_seconds = 0.05  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
 
     responses = await asyncio.gather(
@@ -346,7 +346,7 @@ async def test_concurrent_creates_reserve_only_once(
 async def test_no_subtitle_is_rejected_before_reserving_quota(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "nosubvid001", subtitles=False)
 
     rejected = await _create(client, headers, video_id)
@@ -359,7 +359,7 @@ async def test_no_subtitle_is_rejected_before_reserving_quota(
 
 
 async def test_drm_and_members_only_videos_are_rejected(
-    client: AsyncClient, app: FastAPI
+    client: AsyncClient, adapters: Adapters, app: FastAPI
 ) -> None:
     async with app.state.sessionmaker() as session:
         drm = Video(
@@ -386,7 +386,7 @@ async def test_drm_and_members_only_videos_are_rejected(
         await session.commit()
         drm_id, members_id = drm.id, members.id
 
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     drm_response = await _create(client, headers, drm_id)
     members_response = await _create(client, headers, members_id)
 
@@ -400,8 +400,8 @@ async def test_drm_and_members_only_videos_are_rejected(
 async def test_ownership_is_enforced_for_detail_and_stream(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    owner = await _register(client, "owner@example.com")
-    other = await _register(client, "other@example.com")
+    owner = await _register(adapters, client, "owner@example.com")
+    other = await _register(adapters, client, "other@example.com")
     video_id = await _resolve(client, adapters)
     analysis_id = (await _create(client, owner, video_id)).json()["id"]
     await _wait_terminal(client, owner, analysis_id)
@@ -425,7 +425,7 @@ async def test_ownership_is_enforced_for_detail_and_stream(
 async def test_viewing_existing_result_never_consumes_quota(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
     analysis_id = (await _create(client, headers, video_id)).json()["id"]
     await _wait_terminal(client, headers, analysis_id)
@@ -444,7 +444,7 @@ async def test_force_creates_a_new_analysis_and_consumes_quota(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
     first_id = (await _create(client, headers, video_id)).json()["id"]
     await _wait_terminal(client, headers, first_id)
@@ -460,7 +460,7 @@ async def test_force_creates_a_new_analysis_and_consumes_quota(
 async def test_me_reports_quota_with_reset_time(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
 
     fresh = await _me(client, headers)
     assert fresh == {
@@ -495,7 +495,7 @@ async def test_generation_timeout_marks_failed_and_releases_quota(settings: Sett
         async with httpx.AsyncClient(
             transport=transport, base_url="http://testserver"
         ) as scoped:
-            headers = await _register(scoped, "timeout@example.com")
+            headers = await _register(custom_adapters, scoped, "timeout@example.com")
             video_id = await _resolve(scoped, custom_adapters, "timeoutvid1")
             created = await _create(scoped, headers, video_id)
             assert created.status_code == 201
@@ -509,14 +509,14 @@ async def test_generation_timeout_marks_failed_and_releases_quota(settings: Sett
 async def test_analysis_detail_reports_unknown_id(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     response = await client.get("/api/analyses/nope", headers=headers)
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "analysis_not_found"
 
 
-async def test_create_rejects_unknown_video(client: AsyncClient) -> None:
-    headers = await _register(client)
+async def test_create_rejects_unknown_video(client: AsyncClient, adapters: Adapters) -> None:
+    headers = await _register(adapters, client)
     response = await _create(client, headers, "does-not-exist")
     assert response.status_code == 404
     assert response.json()["error"]["code"] == "video_not_found"

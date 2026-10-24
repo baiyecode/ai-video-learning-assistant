@@ -24,6 +24,7 @@ from fastapi import APIRouter, Depends, Request, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.config import Settings
 from app.container import Adapters
 from app.deps import (
@@ -33,7 +34,7 @@ from app.deps import (
     get_session,
     get_settings,
 )
-from app.errors import ErrorCode
+from app.errors import AppError, ErrorCode
 from app.modules.identity.models import Account
 from app.ratelimit import RateLimiter
 
@@ -61,6 +62,16 @@ async def create_analysis(
     account: Account = Depends(get_current_account),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> AnalysisOut:
+    # Pre-creation gate order (ticket #22): logged in (dependency) → email verified →
+    # Quota/VIP → rate limit. The verification gate runs first, before the service
+    # touches Quota or the creation throttle, so a rejection never consumes Quota.
+    if account.email_verified_at is None:
+        raise AppError(
+            403,
+            ErrorCode.EMAIL_NOT_VERIFIED,
+            messages.EMAIL_NOT_VERIFIED,
+            {"video_id": payload.video_id},
+        )
     result = await service.create_analysis(
         session,
         adapters.clock,

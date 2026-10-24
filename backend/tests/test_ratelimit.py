@@ -20,6 +20,8 @@ from typing import Any
 from app.container import Adapters
 from httpx import AsyncClient
 
+from tests.auth_flows import register as auth_register
+from tests.auth_flows import verified_account
 from tests.fakes import sample_video
 
 PASSWORD = "correct-horse"
@@ -39,12 +41,10 @@ def _assert_rate_limited(response: Any, *, scope: str, now: datetime) -> dict[st
     return error
 
 
-async def _register(client: AsyncClient, email: str = "learner@example.com") -> dict[str, str]:
-    response = await client.post(
-        "/api/auth/register", json={"email": email, "password": PASSWORD}
-    )
-    assert response.status_code == 201, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+async def _register(
+    adapters: Adapters, client: AsyncClient, email: str = "learner@example.com"
+) -> dict[str, str]:
+    return await verified_account(client, adapters, email=email, password=PASSWORD)
 
 
 async def _resolve(client: AsyncClient, adapters: Adapters, video_id: str = "rlvideo0001") -> str:
@@ -142,7 +142,8 @@ async def test_download_hourly_cap_still_reports_download_limit_reached(
 async def test_login_is_limited_to_ten_per_fifteen_minutes_per_ip(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    await _register(client)
+    # Only create the Account: a bare register must not spend a login-limit slot.
+    await auth_register(client, email="learner@example.com", password=PASSWORD)
 
     for _ in range(10):
         attempt = await client.post(
@@ -189,7 +190,7 @@ async def test_register_is_limited_to_five_per_hour_per_ip(
 async def test_new_analysis_is_limited_to_one_per_ten_seconds_per_account(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     first_video = await _resolve(client, adapters, "rlanalysis1")
     second_video = await _resolve(client, adapters, "rlanalysis2")
 
@@ -211,7 +212,7 @@ async def test_new_analysis_is_limited_to_one_per_ten_seconds_per_account(
 async def test_analysis_rate_limit_does_not_block_reusing_an_existing_result(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "rlreuse0001")
 
     first = await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
@@ -239,9 +240,9 @@ async def test_analysis_rate_limit_does_not_block_reusing_an_existing_result(
 async def test_analysis_rate_limit_is_per_account(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    first = await _register(client, "first@example.com")
+    first = await _register(adapters, client, "first@example.com")
     adapters.clock.advance(seconds=1)  # type: ignore[attr-defined]  # separate register window
-    second = await _register(client, "second@example.com")
+    second = await _register(adapters, client, "second@example.com")
     adapters.clock.advance(seconds=1)  # type: ignore[attr-defined]
 
     video_id = await _resolve(client, adapters, "rlaccount01")
@@ -280,7 +281,7 @@ async def test_analysis_rejections_before_creation_do_not_consume_the_creation_w
     client: AsyncClient, adapters: Adapters
 ) -> None:
     """A reviewable rejection (unknown Video) never reserves a rate-limit slot."""
-    headers = await _register(client)
+    headers = await _register(adapters, client)
 
     missing = await client.post("/api/analyses", json={"video_id": "nope"}, headers=headers)
     assert missing.status_code == 404

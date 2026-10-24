@@ -25,6 +25,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
+from tests.auth_flows import verified_account
 from tests.fakes import make_fake_adapters, sample_douyin_video, sample_video
 
 DOUYIN_SHARE_URL = "https://www.douyin.com/video/7123456789012345678"
@@ -275,16 +276,13 @@ async def test_douyin_download_respects_the_existing_size_cap(tmp_path: Path) ->
 
 
 async def test_douyin_video_without_subtitle_cannot_be_analysed(tmp_path: Path) -> None:
-    async with douyin_enabled_client(tmp_path) as (client, _adapters, _app):
+    async with douyin_enabled_client(tmp_path) as (client, adapters, _app):
         resolved = await _resolve_douyin(client)
         assert resolved["can_analyze"] is False
 
-        register = await client.post(
-            "/api/auth/register",
-            json={"email": "douyin@example.com", "password": "correct-horse"},
-        )
-        assert register.status_code == 201, register.text
-        headers = {"Authorization": f"Bearer {register.json()['access_token']}"}
+        # A verified Account is required to reach the Subtitle gate at all (ticket #22);
+        # only then does the missing-Subtitle rule surface as 409.
+        headers = await verified_account(client, adapters, email="douyin@example.com")
 
         response = await client.post(
             "/api/analyses", json={"video_id": resolved["video"]["id"]}, headers=headers

@@ -11,6 +11,7 @@ from __future__ import annotations
 from app.container import Adapters
 from httpx import AsyncClient
 
+from tests.auth_flows import logged_in_account
 from tests.fakes import sample_video
 
 PASSWORD = "correct-horse"
@@ -31,11 +32,8 @@ async def _resolve(client: AsyncClient, adapters: Adapters, key: str = "ownvideo
 
 
 async def _register(client: AsyncClient, email: str) -> dict[str, str]:
-    response = await client.post(
-        "/api/auth/register", json={"email": email, "password": PASSWORD}
-    )
-    assert response.status_code == 201, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+    # Downloads ignore verification state, so a logged-in (unverified) Account is enough.
+    return await logged_in_account(client, email=email, password=PASSWORD)
 
 
 async def _create(

@@ -19,6 +19,8 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy.exc import IntegrityError
 
+from tests.auth_flows import login as auth_login
+from tests.auth_flows import register as auth_register
 from tests.fakes import FAKE_CHECKOUT_URL
 
 PASSWORD = "correct-horse"
@@ -29,9 +31,9 @@ def bearer(response: Any) -> dict[str, str]:
 
 
 async def register(client: AsyncClient, *, email: str = "learner@example.com") -> Any:
-    response = await client.post("/api/auth/register", json={"email": email, "password": PASSWORD})
-    assert response.status_code == 201, response.text
-    return response
+    """Register then log in: billing reads the Session, not the verification state."""
+    await auth_register(client, email=email, password=PASSWORD)
+    return await auth_login(client, email=email, password=PASSWORD)
 
 
 async def seed_subscription(

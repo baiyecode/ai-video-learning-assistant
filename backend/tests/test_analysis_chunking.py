@@ -19,6 +19,7 @@ from app.ports import SubtitlePayload
 from asgi_lifespan import LifespanManager
 from httpx import AsyncClient
 
+from tests.auth_flows import verified_account
 from tests.fakes import (
     FakeSummarizer,
     make_fake_adapters,
@@ -190,10 +191,10 @@ def echo_markers_responder(prompt: str) -> str:
     return f"## 归并摘要\n{body}\n## 思维导图\n- 视频结构\n  - 章节\n"
 
 
-async def _register(client: AsyncClient, email: str = "learner@example.com") -> dict[str, str]:
-    response = await client.post("/api/auth/register", json={"email": email, "password": PASSWORD})
-    assert response.status_code == 201, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+async def _register(
+    adapters: Adapters, client: AsyncClient, email: str = "learner@example.com"
+) -> dict[str, str]:
+    return await verified_account(client, adapters, email=email, password=PASSWORD)
 
 
 async def _resolve_long_video(
@@ -278,7 +279,7 @@ async def test_two_hour_subtitle_covers_beginning_middle_and_end(
 ) -> None:
     summarizer = adapters.summarizer
     summarizer.responder = echo_markers_responder  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     cues = long_subtitle_cues(
         1200,
         markers={0: "开头标记内容", 600: "中段标记内容", 1199: "结尾标记内容"},
@@ -318,7 +319,7 @@ async def test_two_hour_subtitle_covers_beginning_middle_and_end(
 async def test_short_subtitle_still_uses_a_single_generation_call(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     cues = long_subtitle_cues(3, duration_seconds=18)
     video_id = await _resolve_long_video(
         client, adapters, platform_video_id="shortvid001", cues=cues, duration_seconds=18
@@ -345,7 +346,7 @@ async def test_input_over_the_budget_keeps_the_tail_and_flags_truncation(
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            headers = await _register(client, "truncated@example.com")
+            headers = await _register(custom_adapters, client, "truncated@example.com")
             cues = long_subtitle_cues(
                 100,
                 markers={
@@ -386,7 +387,7 @@ async def test_long_generation_respects_the_end_to_end_timeout(settings: Setting
     async with LifespanManager(app):
         transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            headers = await _register(client, "longtimeout@example.com")
+            headers = await _register(custom_adapters, client, "longtimeout@example.com")
             cues = long_subtitle_cues(1200, markers={0: "开头标记内容"})
             video_id = await _resolve_long_video(
                 client, custom_adapters, platform_video_id="timeoutvid2", cues=cues

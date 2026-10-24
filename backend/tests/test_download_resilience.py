@@ -27,6 +27,7 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import func, select
 
+from tests.auth_flows import logged_in_account
 from tests.fakes import make_fake_adapters, sample_video
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -308,12 +309,7 @@ async def test_account_downloads_are_not_counted_against_the_visitor_cap(setting
     adapters = make_fake_adapters()
     async with _client_for(settings, adapters) as (client, app):
         video_id = await _resolve(client, adapters)
-        registered = await client.post(
-            "/api/auth/register",
-            json={"email": "capped@example.com", "password": "correct-horse"},
-        )
-        assert registered.status_code == 201, registered.text
-        auth = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+        auth = await logged_in_account(client, email="capped@example.com", password="correct-horse")
 
         for _ in range(6):
             created = await _create(client, video_id, headers=auth)
@@ -400,12 +396,7 @@ async def test_account_concurrency_is_two(settings: Settings) -> None:
     )
     async with _client_for(tuned, adapters) as (client, app):
         video_id = await _resolve(client, adapters)
-        registered = await client.post(
-            "/api/auth/register",
-            json={"email": "queue@example.com", "password": "correct-horse"},
-        )
-        assert registered.status_code == 201, registered.text
-        auth = {"Authorization": f"Bearer {registered.json()['access_token']}"}
+        auth = await logged_in_account(client, email="queue@example.com", password="correct-horse")
 
         ids: list[str] = []
         for _ in range(3):
