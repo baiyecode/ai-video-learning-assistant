@@ -334,6 +334,10 @@ async def confirm_verification(
         raise _verification_token_invalid()
 
     now = clock.now()
+    expires_at = account.verification_expires_at
+    if expires_at is None or required_utc(expires_at) <= now:
+        raise AppError(400, ErrorCode.VERIFICATION_TOKEN_EXPIRED, "验证链接已过期，请重新发送")
+
     # Atomic single-use consumption: a concurrent replay can only claim the token once.
     consumed = await db.execute(
         update(Account)

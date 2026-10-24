@@ -10,8 +10,14 @@ from __future__ import annotations
 import re
 from typing import Any
 
+import httpx
+from app.config import Settings
 from app.container import Adapters
+from app.main import create_app
+from asgi_lifespan import LifespanManager
 from httpx import AsyncClient
+
+from tests.fakes import FrozenClock, make_fake_adapters
 
 ORIGIN = {"Origin": "http://testserver"}
 PASSWORD = "correct-horse"
@@ -97,3 +103,57 @@ async def test_confirm_rejects_an_unknown_token(client: AsyncClient) -> None:
 
     assert response.status_code == 400, response.text
     assert response.json()["error"]["code"] == "verification_token_invalid"
+
+
+async def test_a_verified_token_cannot_be_reused(client: AsyncClient, adapters: Adapters) -> None:
+    await register(client)
+    token = verification_token(adapters)
+
+    first = await client.post("/api/auth/verification/confirm", json={"token": token})
+    assert first.status_code == 200, first.text
+
+    replay = await client.post("/api/auth/verification/confirm", json={"token": token})
+    assert replay.status_code == 400, replay.text
+    assert replay.json()["error"]["code"] == "verification_token_invalid"
+
+
+async def test_expired_token_is_rejected_with_a_resend_hint(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    registered = await register(client)
+    # Default TTL is 24h from issue (2026-01-15T08:00Z); step just past it.
+    adapters.clock.advance(days=1, seconds=1)  # type: ignore[attr-defined]
+
+    response = await client.post(
+        "/api/auth/verification/confirm", json={"token": verification_token(adapters)}
+    )
+
+    assert response.status_code == 400, response.text
+    error = response.json()["error"]
+    assert error["code"] == "verification_token_expired"
+    assert "已过期，请重新发送" in error["message"]
+
+    me = await client.get("/api/me", headers=bearer(registered))
+    assert me.json()["account"]["email_verified_at"] is None
+
+
+async def test_token_lifetime_follows_the_configured_ttl(settings: Settings) -> None:
+    """A 1-hour TTL expires the link long before the 24-hour default would."""
+    tuned = settings.model_copy(update={"email_verification_token_ttl_hours": 1})
+    adapters = make_fake_adapters()
+    app = create_app(settings=tuned, adapters=adapters)
+
+    async with LifespanManager(app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app, raise_app_exceptions=False),
+            base_url="http://testserver",
+        ) as client:
+            await register(client)
+            adapters.clock.advance(seconds=3600 + 1)  # type: ignore[attr-defined]
+
+            response = await client.post(
+                "/api/auth/verification/confirm", json={"token": verification_token(adapters)}
+            )
+
+    assert response.status_code == 400, response.text
+    assert response.json()["error"]["code"] == "verification_token_expired"
