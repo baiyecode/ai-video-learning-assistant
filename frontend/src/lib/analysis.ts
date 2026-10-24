@@ -51,6 +51,20 @@ export interface QuotaDto {
   membership?: string;
 }
 
+/** The VIP unlimited sentinel is read in exactly one place. */
+export function isUnlimitedQuota(quota: QuotaDto): boolean {
+  return quota.daily_limit < 0;
+}
+
+/**
+ * True when the free daily cap is spent right now: a finite quota with nothing
+ * left and no VIP lifting it. VIP is read from `/me/membership` — the single
+ * subscription source — never guessed from the sentinel.
+ */
+export function isQuotaDepleted(quota: QuotaDto, isVip: boolean): boolean {
+  return !isUnlimitedQuota(quota) && quota.remaining <= 0 && !isVip;
+}
+
 export const MINDMAP_MARKER = "## 思维导图";
 export const ANALYSIS_FAILED_MESSAGE = "AI 生成失败，请稍后重试";
 
@@ -167,7 +181,7 @@ export function analysisStatusLabel(status: AnalysisStatus): string {
 export function formatQuota(quota: QuotaDto | null | undefined): string {
   if (!quota) return "Quota 加载中";
   // VIP Membership: the backend sends the -1 unlimited sentinel instead of a cap.
-  if (quota.daily_limit < 0) return "Analysis 不限次";
+  if (isUnlimitedQuota(quota)) return "Analysis 不限次";
   const limit = Math.max(0, quota.daily_limit);
   const remaining = Math.max(0, Math.min(quota.remaining, limit));
   return `Quota 剩余 ${remaining} / ${limit}`;
@@ -229,7 +243,7 @@ export function reanalysisAvailability(
   }
 
   // VIP Membership carries the -1 unlimited sentinel: nothing to block and nothing to spend.
-  if (quota.daily_limit < 0) {
+  if (isUnlimitedQuota(quota)) {
     return {
       allowed: true,
       remaining: null,

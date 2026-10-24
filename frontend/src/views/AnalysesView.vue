@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted } from "vue";
 
-import { formatQuota, formatQuotaReset } from "@/lib/analysis";
+import { formatQuota, formatQuotaReset, isQuotaDepleted } from "@/lib/analysis";
 import { membershipStatusLabel } from "@/lib/billing";
 import { historyRows } from "@/lib/history";
 import { useAuthStore } from "@/stores/auth";
@@ -17,11 +17,7 @@ const quotaLabel = computed(() => (store.quota ? formatQuota(store.quota) : ""))
 const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
 // The free-plan cap exhausted today is the strongest moment to offer the upgrade.
 const quotaDepleted = computed(
-  () =>
-    !!store.quota &&
-    store.quota.daily_limit >= 0 &&
-    store.quota.remaining <= 0 &&
-    !billing.isVip,
+  () => !!store.quota && isQuotaDepleted(store.quota, billing.isVip),
 );
 
 onMounted(() => {

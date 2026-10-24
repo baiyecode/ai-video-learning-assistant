@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 
 import MindmapPanel from "@/components/MindmapPanel.vue";
@@ -7,6 +7,7 @@ import {
   analysisStatusLabel,
   formatQuota,
   formatQuotaReset,
+  isQuotaDepleted,
   reanalysisAvailability,
   visibleSummary,
 } from "@/lib/analysis";
@@ -16,10 +17,14 @@ import { renderMarkdown } from "@/lib/markdown";
 import { uiErrorMessage } from "@/lib/uiError";
 import { platformLabel, subtitleSourceLabel } from "@/lib/video";
 import { useAnalysisStore } from "@/stores/analysis";
+import { useAuthStore } from "@/stores/auth";
+import { useBillingStore } from "@/stores/billing";
 
 const route = useRoute();
 const router = useRouter();
 const store = useAnalysisStore();
+const auth = useAuthStore();
+const billing = useBillingStore();
 const retrying = ref(false);
 const retryError = ref<string | null>(null);
 const confirmOpen = ref(false);
@@ -38,20 +43,13 @@ const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
 const canRetry = computed(() => store.status === "failed" && store.videoId !== null);
 const canReanalyze = computed(() => store.status === "completed" && store.videoId !== null);
 const reanalysis = computed(() => reanalysisAvailability(store.quota));
-// Subscription state rides along on the quota snapshot (``/me`` keeps ``{account, quota}``),
-// so the badge mirrors the membership truth source without a second request.
-const membershipBadge = computed(() => {
-  const quota = store.quota;
-  if (!quota?.membership) return "";
-  return membershipStatusLabel({
-    status: quota.membership,
-    period_end: null,
-    cancel_at_period_end: false,
-    is_vip: quota.daily_limit < 0,
-  });
-});
+// Subscription state comes from the billing store (``GET /me/membership`` is the single
+// source, spec ticket #24 wording); the quota snapshot only ever carries the status string.
+const membershipBadge = computed(() =>
+  auth.isAuthenticated && billing.membership ? membershipStatusLabel(billing.membership) : "",
+);
 const quotaDepleted = computed(
-  () => !!store.quota && store.quota.daily_limit >= 0 && store.quota.remaining <= 0,
+  () => !!store.quota && isQuotaDepleted(store.quota, billing.isVip),
 );
 const reanalysisBlockedReason = computed(() => {
   if (reanalysis.value.allowed) return "";
@@ -71,6 +69,10 @@ watch(
 );
 
 onBeforeUnmount(() => store.close());
+
+onMounted(() => {
+  if (auth.isAuthenticated) void billing.loadMembership();
+});
 
 async function retry(): Promise<void> {
   if (!canRetry.value || retrying.value) return;
@@ -131,9 +133,7 @@ async function confirmReanalyze(): Promise<void> {
         <span
           v-if="membershipBadge"
           class="rounded-full px-2 py-0.5 font-medium"
-          :class="store.quota && store.quota.daily_limit < 0
-            ? 'bg-emerald-50 text-emerald-700'
-            : 'bg-slate-100 text-slate-600'"
+          :class="billing.isVip ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
         >
           {{ membershipBadge }}
         </span>
