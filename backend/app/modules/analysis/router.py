@@ -66,9 +66,10 @@ async def create_analysis(
     account: Account = Depends(get_current_account),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> AnalysisOut:
-    # Pre-creation gate order (ticket #22): logged in (dependency) → email verified →
-    # Quota/VIP → rate limit. The verification gate runs first, before the service
-    # touches Quota or the creation throttle, so a rejection never consumes Quota.
+    # Pre-creation gate order (ticket #22, spec): 已登录 (dependency) → 邮箱已验证 →
+    # Quota/VIP → 限流. The verification gate is this router's share; the rest runs
+    # inside ``service.create_analysis`` in the same order, and every refusal
+    # reserves no Quota (the reservation only commits alongside a created row).
     if account.email_verified_at is None:
         raise AppError(
             403,

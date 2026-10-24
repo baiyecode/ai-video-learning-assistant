@@ -143,12 +143,11 @@ async def _create_once(
             return CreateResult(completed, video, False, state.status)
 
     # Gates for a genuinely new Analysis only: reusing an in-progress or completed
-    # result above costs neither rate-limit budget nor Quota. Both run before the
-    # Quota reservation, so a rejection never consumes Quota.
-    if force or rate_limiter.last_tag("analyses.create", account_id) != video_id:
-        # A repeated *non-force* request for the Video that just started is an
-        # idempotent retry (double click / two tabs), not a new-analysis attempt.
-        rate_limiter.ensure("analyses.create", account_id)
+    # result above costs neither rate-limit budget nor Quota. Spec gate order
+    # (ticket #22): 已登录 → 邮箱已验证 (router) → Quota/VIP → 限流. The budget cap
+    # rides with Quota (a rejection there reserves nothing), and the throttle runs
+    # after the reservation: a throttle refusal aborts the transaction, so the
+    # reserved unit is rolled back and stays unconsumed either way.
     # Gate on every call this Analysis will make (chunks + final merge), not on
     # one call: a map-reduce run that starts without its full budget would run
     # out halfway and waste the calls already paid for.
@@ -184,6 +183,12 @@ async def _create_once(
     )
     if not await quota.reserve(session, account_id, clock.today(), effective_limit):
         raise _quota_exhausted(clock, settings)
+
+    if force or rate_limiter.last_tag("analyses.create", account_id) != video_id:
+        # A repeated *non-force* request for the Video that just started is an
+        # idempotent retry (double click / two tabs), not a new-analysis attempt.
+        # A refusal here rolls back the transaction, un-reserving the unit above.
+        rate_limiter.ensure("analyses.create", account_id)
 
     now = clock.now()
     analysis = Analysis(

@@ -268,6 +268,37 @@ async def test_fourth_analysis_is_rejected_with_reset_time_then_resets_next_day(
     assert (await _me(client, headers))["used"] == 1
 
 
+async def test_quota_gate_answers_before_the_creation_throttle(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """Spec gate order (ticket #22): 已登录 → 已验证 → Quota/VIP → 限流.
+
+    The fourth same-day request breaches both the daily cap and the 10-second
+    creation throttle. The conversion moment must not be blurred by the throttle:
+    ``quota_exhausted`` answers first, and the refused attempt still consumes
+    nothing.
+    """
+    headers = await _register(adapters, client)
+    for index in range(3):
+        video_id = await _resolve(client, adapters, f"gatevid{index:04d}")
+        if index:
+            adapters.clock.advance(seconds=10)  # type: ignore[attr-defined]
+        created = await _create(client, headers, video_id)
+        assert created.status_code == 201, created.text
+        await _wait_terminal(client, headers, created.json()["id"])
+
+    # No clock jump: the throttle window from the third create is still open while
+    # the Quota is already exhausted. Quota has to win.
+    fourth = await _resolve(client, adapters, "gatevid9999")
+    rejected = await _create(client, headers, fourth)
+    assert rejected.status_code == 429, rejected.text
+    assert rejected.json()["error"]["code"] == "quota_exhausted"
+
+    # And the refusal consumed nothing beyond the cap already reported.
+    quota = await _me(client, headers)
+    assert (quota["used"], quota["remaining"]) == (3, 0)
+
+
 async def test_failure_releases_quota_and_allows_retry(
     client: AsyncClient, adapters: Adapters
 ) -> None:
