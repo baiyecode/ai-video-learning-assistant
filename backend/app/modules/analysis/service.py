@@ -18,6 +18,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
+from app.modules.billing.models import Subscription, is_vip
+from app.modules.billing.service import STATUS_FREE
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import BudgetLedger, Clock
 from app.ratelimit import RateLimiter
@@ -47,6 +49,7 @@ class CreateResult:
     analysis: Analysis
     video: Video | None
     created: bool
+    membership: str
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -84,6 +87,19 @@ async def _find_active(
     )
 
 
+async def _subscription(session: AsyncSession, account_id: str) -> Subscription | None:
+    """The Account's subscription record, if any (VIP is derived from it)."""
+    return await session.scalar(
+        select(Subscription).where(Subscription.account_id == account_id)
+    )
+
+
+async def membership_status(session: AsyncSession, account_id: str) -> str:
+    """The Account's subscription status as stored by webhooks ("free" without one)."""
+    subscription = await _subscription(session, account_id)
+    return subscription.status if subscription is not None else STATUS_FREE
+
+
 async def _create_once(
     session: AsyncSession,
     clock: Clock,
@@ -112,9 +128,14 @@ async def _create_once(
             {"video_id": video_id},
         )
 
+    # Read once per request: it decides the Quota gate below and surfaces as the
+    # ``membership`` field on every create response (new or reused).
+    subscription = await _subscription(session, account_id)
+    membership = subscription.status if subscription is not None else STATUS_FREE
+
     active = await _find_active(session, account_id, video_id)
     if active is not None:
-        return CreateResult(active, video, False)
+        return CreateResult(active, video, False, membership)
 
     if not force:
         completed = await session.scalar(
@@ -127,7 +148,7 @@ async def _create_once(
             .order_by(Analysis.created_at.desc())
         )
         if completed is not None:
-            return CreateResult(completed, video, False)
+            return CreateResult(completed, video, False, membership)
 
     # Gates for a genuinely new Analysis only: reusing an in-progress or completed
     # result above costs neither rate-limit budget nor Quota. Both run before the
@@ -162,7 +183,14 @@ async def _create_once(
         daily_budget_usd=settings.daily_budget_usd,
     )
 
-    if not await quota.reserve(session, account_id, clock.today(), settings.analysis_daily_quota):
+    # VIP Membership lifts the cap without bypassing the atomic reservation: the
+    # sentinel limit keeps counting units, so failure rollback still applies.
+    effective_limit = (
+        quota.UNLIMITED_DAILY_LIMIT
+        if is_vip(subscription)
+        else settings.analysis_daily_quota
+    )
+    if not await quota.reserve(session, account_id, clock.today(), effective_limit):
         raise _quota_exhausted(clock, settings)
 
     now = clock.now()
@@ -193,12 +221,12 @@ async def _create_once(
         if active is None:
             raise
         video = await session.get(Video, video_id)
-        return CreateResult(active, video, False)
+        return CreateResult(active, video, False, membership)
 
     # Only a committed new row consumes the per-Account creation slot; the winner of
     # a concurrent race records here and the loser above never does.
     rate_limiter.record("analyses.create", account_id, tag=video_id)
-    return CreateResult(analysis, video, True)
+    return CreateResult(analysis, video, True, membership)
 
 
 async def create_analysis(
@@ -246,14 +274,23 @@ async def daily_quota(
     """This Account's Quota for the current day.
 
     The Quota counters belong to this module: callers that only need to *show* them
-    (``/api/me``) read them here instead of digging through :mod:`.quota`.
+    (``/api/me``) read them here instead of digging through :mod:`.quota`. VIP
+    Membership surfaces as the unlimited sentinel plus the raw subscription status.
     """
-    snapshot = await quota.usage(session, account_id, clock, settings.analysis_daily_quota)
+    subscription = await _subscription(session, account_id)
+    membership = subscription.status if subscription is not None else STATUS_FREE
+    limit = (
+        quota.UNLIMITED_DAILY_LIMIT
+        if is_vip(subscription)
+        else settings.analysis_daily_quota
+    )
+    snapshot = await quota.usage(session, account_id, clock, limit)
     return QuotaOut(
         daily_limit=snapshot.daily_limit,
         used=snapshot.used,
         remaining=snapshot.remaining,
         resets_at=snapshot.resets_at.isoformat(),
+        membership=membership,
     )
 
 
@@ -274,7 +311,7 @@ def error_message(code: str | None) -> str:
     return _MESSAGE_BY_ERROR_CODE.get(code, MESSAGE_ANALYSIS_FAILED)
 
 
-def to_out(analysis: Analysis, video: Video | None) -> AnalysisOut:
+def to_out(analysis: Analysis, video: Video | None, membership: str) -> AnalysisOut:
     error = None
     if analysis.status == AnalysisStatus.FAILED.value:
         code = analysis.error_code or ErrorCode.ANALYSIS_FAILED.value
@@ -304,4 +341,5 @@ def to_out(analysis: Analysis, video: Video | None) -> AnalysisOut:
         updated_at=_iso(analysis.updated_at) or "",
         completed_at=_iso(analysis.completed_at),
         video=video_out,
+        membership=membership,
     )

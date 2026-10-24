@@ -90,6 +90,7 @@ async def test_login_returns_the_session_and_me_round_trip(client: AsyncClient) 
         "used": 0,
         "remaining": 3,
         "resets_at": "2026-01-16T00:00:00+08:00",
+        "membership": "free",
     }
 
 

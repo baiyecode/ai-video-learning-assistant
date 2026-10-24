@@ -395,6 +395,7 @@ async def test_unverified_email_cannot_create_an_analysis_and_spends_no_quota(
         "used": 0,
         "remaining": 3,
         "resets_at": "2026-01-16T00:00:00+08:00",
+        "membership": "free",
     }
 
 

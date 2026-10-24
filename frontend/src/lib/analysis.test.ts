@@ -101,6 +101,12 @@ describe("summary and quota presentation", () => {
     expect(formatQuota(null)).toBe("Quota 加载中");
   });
 
+  it("renders the VIP unlimited sentinel as an unlimited allowance", () => {
+    expect(
+      formatQuota({ daily_limit: -1, used: 41, remaining: -1, resets_at: "", membership: "active" }),
+    ).toBe("Analysis 不限次");
+  });
+
   it("formats the Quota reset time in Asia/Shanghai", () => {
     expect(formatShanghaiDateTime("2026-01-16T00:00:00+08:00")).toBe("01-16 00:00");
     expect(formatQuotaReset("2026-01-16T00:00:00+08:00")).toBe("将于 01-16 00:00 重置");
