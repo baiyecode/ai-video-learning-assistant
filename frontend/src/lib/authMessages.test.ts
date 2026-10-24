@@ -11,6 +11,7 @@ describe("authErrorMessage", () => {
     expect(authErrorMessage("session_invalid")).toBe("登录状态已失效，请重新登录");
     expect(authErrorMessage("auth_required")).toBe("登录状态已失效，请重新登录");
     expect(authErrorMessage("too_many_requests")).toBe("尝试过于频繁，请稍后再试");
+    expect(authErrorMessage("subscription_not_found")).toBe("还没有可管理的订阅，请先完成升级支付");
   });
 
   it("falls back to a generic message for unknown or missing codes", () => {
