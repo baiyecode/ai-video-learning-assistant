@@ -6,16 +6,33 @@ Routes are mounted under ``/api`` by ``main.py``. The router carries no prefix s
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
-from app.deps import get_current_account
+from app.config import Settings
+from app.container import Adapters
+from app.deps import get_adapters, get_current_account, get_settings
+from app.modules.billing import service
+from app.modules.billing.schemas import CheckoutOut
 from app.modules.identity.models import Account
 
 router = APIRouter(tags=["billing"])
 
 
-@router.post("/billing/checkout", summary="Start a hosted checkout session")
+def _origin(request: Request) -> str:
+    """Browser origin used to build Stripe's success/cancel redirects."""
+    header = request.headers.get("origin")
+    if header:
+        return header.rstrip("/")
+    return str(request.base_url).rstrip("/")
+
+
+@router.post("/billing/checkout", response_model=CheckoutOut, summary="Start a checkout session")
 async def create_checkout(
+    request: Request,
     account: Account = Depends(get_current_account),
-) -> dict:
-    raise NotImplementedError
+    adapters: Adapters = Depends(get_adapters),
+    settings: Settings = Depends(get_settings),
+) -> CheckoutOut:
+    return await service.open_checkout(
+        adapters.billing_gateway, settings, account, origin=_origin(request)
+    )

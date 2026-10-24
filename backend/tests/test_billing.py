@@ -11,6 +11,8 @@ from typing import Any
 
 from httpx import AsyncClient
 
+from tests.fakes import FAKE_CHECKOUT_URL
+
 PASSWORD = "correct-horse"
 
 
@@ -29,3 +31,12 @@ async def test_anonymous_cannot_open_a_checkout(client: AsyncClient) -> None:
 
     assert response.status_code == 401, response.text
     assert response.json()["error"]["code"] == "auth_required"
+
+
+async def test_logged_in_account_receives_the_gateway_checkout_url(client: AsyncClient) -> None:
+    auth = bearer(await register(client))
+
+    response = await client.post("/api/billing/checkout", headers=auth)
+
+    assert response.status_code == 200, response.text
+    assert response.json() == {"url": FAKE_CHECKOUT_URL}

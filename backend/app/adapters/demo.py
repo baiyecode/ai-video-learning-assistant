@@ -11,7 +11,7 @@ import asyncio
 from collections.abc import AsyncIterator, Callable
 from pathlib import Path
 
-from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
+from app.ports import CheckoutSession, ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
 
 _DEMO_ID = "demoP1Video"
 _DEMO_TITLE = "演示视频：从零理解间隔重复"
@@ -115,3 +115,19 @@ class DemoSummarizer:
                 yield chunk
 
         return _generate()
+
+
+class DemoBillingGateway:
+    """Serves a deterministic offline checkout page URL for the golden path."""
+
+    async def create_checkout(
+        self,
+        *,
+        account_id: str,
+        email: str | None,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        await asyncio.sleep(0.01)
+        return CheckoutSession(id="cs_demo_checkout", url="https://checkout.demo.invalid/cs_demo")

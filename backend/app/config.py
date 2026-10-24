@@ -90,6 +90,15 @@ class Settings(BaseSettings):
     # the Playwright golden path. Never enable this in production.
     fake_adapters: bool = False
 
+    # Subscription billing (ticket P2-01). Development may leave the Stripe
+    # credentials unset; billing requests then answer 503 instead of crashing.
+    # Production refuses to start without them (checked in a later ticket).
+    stripe_api_key: str = ""
+    stripe_webhook_secret: str = ""
+    stripe_price_id: str = ""
+    # Display-only monthly price shown by the pricing UI; billing maths lives in Stripe.
+    subscription_monthly_usd: float = 4.99
+
     @property
     def media_dir(self) -> Path:
         return self.media_root if self.media_root is not None else self.data_dir / "media"

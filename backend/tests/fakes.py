@@ -9,8 +9,16 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from app.container import Adapters
-from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
+from app.ports import (
+    CheckoutSession,
+    ResolvedVideo,
+    SubtitlePayload,
+    SubtitleTrack,
+    VideoFormat,
+)
 from app.timeutil import shanghai_day
+
+FAKE_CHECKOUT_URL = "https://checkout.stripe.test/c/fake-checkout"
 
 
 def sample_subtitle_track(language: str = "zh-Hans", *, automatic: bool = False) -> SubtitleTrack:
@@ -182,6 +190,41 @@ class FakeBudgetLedger:
         self.recorded.append(usd)
 
 
+@dataclass
+class FakeBillingGateway:
+    """In-memory Stripe stand-in; programmable failures, zero network.
+
+    - ``fail_with``: raised by every call (e.g. an ``AppError`` for an unavailable gateway).
+    - ``created_checkouts``: every checkout call, for wiring assertions.
+    """
+
+    fail_with: Exception | None = None
+    checkout_url: str = FAKE_CHECKOUT_URL
+    created_checkouts: list[dict[str, object]] = field(default_factory=list)
+
+    async def create_checkout(
+        self,
+        *,
+        account_id: str,
+        email: str | None,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.created_checkouts.append(
+            {
+                "account_id": account_id,
+                "email": email,
+                "price_id": price_id,
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+            }
+        )
+        return CheckoutSession(id=f"cs_fake_{len(self.created_checkouts)}", url=self.checkout_url)
+
+
 def make_fake_adapters(
     *,
     video_source: FakeVideoSource | None = None,
@@ -189,6 +232,7 @@ def make_fake_adapters(
     summarizer: FakeSummarizer | None = None,
     clock: FrozenClock | None = None,
     budget_ledger: FakeBudgetLedger | None = None,
+    billing_gateway: FakeBillingGateway | None = None,
 ) -> Adapters:
     """Build the full Adapters container with fakes. Pass overrides by keyword."""
     return Adapters(
@@ -197,4 +241,5 @@ def make_fake_adapters(
         summarizer=summarizer or FakeSummarizer(),
         clock=clock or FrozenClock(),
         budget_ledger=budget_ledger or FakeBudgetLedger(),
+        billing_gateway=billing_gateway or FakeBillingGateway(),
     )
