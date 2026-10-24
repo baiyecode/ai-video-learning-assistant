@@ -8,6 +8,7 @@ rotate on every refresh; the database stores just their SHA-256 hash. Access tok
 from __future__ import annotations
 
 import asyncio
+import logging
 from datetime import datetime, timedelta
 from typing import Literal
 
@@ -18,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
-from app.deps import get_clock, get_current_account, get_rate_limiter, get_session, get_settings
+from app.container import Adapters
+from app.deps import get_adapters, get_clock, get_current_account, get_rate_limiter, get_session, get_settings
 from app.errors import AppError, ErrorCode
 from app.http import client_ip
 from app.modules.analysis import service as analysis_service
@@ -34,11 +36,14 @@ from app.modules.identity.security import (
     verify_dummy_password,
     verify_password,
 )
+from app.modules.identity.verification import issue_verification_token, verification_email
 from app.ports import Clock
 from app.ratelimit import RateLimiter
 from app.timeutil import required_utc
 
 router = APIRouter(tags=["identity"])
+
+logger = logging.getLogger("app.identity")
 
 PASSWORD_MIN_LENGTH = 8
 _MESSAGE_SESSION_INVALID = "登录状态已失效，请重新登录"
@@ -152,6 +157,7 @@ async def register(
     settings: Settings = Depends(get_settings),
     clock: Clock = Depends(get_clock),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
+    adapters: Adapters = Depends(get_adapters),
 ) -> dict:
     rate_limiter.hit("auth.register", client_ip(request))
     if len(payload.password) < PASSWORD_MIN_LENGTH:
@@ -173,7 +179,15 @@ async def register(
     refresh_token = await _issue_session(
         db, account, settings, clock, user_agent=request.headers.get("user-agent")
     )
+    verification_token = issue_verification_token(account, settings, clock)
     await db.commit()
+
+    # A delivery failure must not undo a successful registration; the verification
+    # email can be re-sent (ticket #22).
+    try:
+        await adapters.email_sender.send(verification_email(account, settings, verification_token))
+    except Exception:
+        logger.warning("verification_email_delivery_failed", exc_info=True)
 
     access_token, expires_at = encode_access_token(account.id, settings, now=clock.now())
     set_refresh_cookie(response, refresh_token, settings)

@@ -9,7 +9,7 @@ from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
 from app.container import Adapters
-from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
+from app.ports import OutboundEmail, ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
 from app.timeutil import shanghai_day
 
 
@@ -182,6 +182,23 @@ class FakeBudgetLedger:
         self.recorded.append(usd)
 
 
+@dataclass
+class FakeEmailSender:
+    """In-memory inbox for the EmailSender port; never touches a real mail service.
+
+    - ``sent``: every delivered message, so tests can read verification links back out.
+    - ``fail_with``: raise this instead of delivering (scripted delivery failure).
+    """
+
+    sent: list[OutboundEmail] = field(default_factory=list)
+    fail_with: Exception | None = None
+
+    async def send(self, message: OutboundEmail) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.sent.append(message)
+
+
 def make_fake_adapters(
     *,
     video_source: FakeVideoSource | None = None,
@@ -189,6 +206,7 @@ def make_fake_adapters(
     summarizer: FakeSummarizer | None = None,
     clock: FrozenClock | None = None,
     budget_ledger: FakeBudgetLedger | None = None,
+    email_sender: FakeEmailSender | None = None,
 ) -> Adapters:
     """Build the full Adapters container with fakes. Pass overrides by keyword."""
     return Adapters(
@@ -197,4 +215,5 @@ def make_fake_adapters(
         summarizer=summarizer or FakeSummarizer(),
         clock=clock or FrozenClock(),
         budget_ledger=budget_ledger or FakeBudgetLedger(),
+        email_sender=email_sender or FakeEmailSender(),
     )

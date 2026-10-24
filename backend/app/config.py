@@ -90,6 +90,19 @@ class Settings(BaseSettings):
     # the Playwright golden path. Never enable this in production.
     fake_adapters: bool = False
 
+    # Email verification (ticket #21): lifetime of the one-time verification token
+    # (kept short on purpose; 24h is the cap) and the product page the email links back to.
+    email_verification_token_ttl_hours: int = 24
+    frontend_base_url: str = "http://localhost:5173"
+
+    # SMTP email delivery (thin wrapper; credential enforcement is production hardening).
+    smtp_host: str = ""
+    smtp_port: int = 587
+    smtp_username: str = ""
+    smtp_password: str = ""
+    smtp_use_tls: bool = True
+    smtp_from: str = ""
+
     @property
     def media_dir(self) -> Path:
         return self.media_root if self.media_root is not None else self.data_dir / "media"

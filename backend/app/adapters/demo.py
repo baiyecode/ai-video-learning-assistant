@@ -8,10 +8,12 @@ database and download paths with stable content.
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
-from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
+from app.ports import OutboundEmail, ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
 
 _DEMO_ID = "demoP1Video"
 _DEMO_TITLE = "演示视频：从零理解间隔重复"
@@ -115,3 +117,20 @@ class DemoSummarizer:
                 yield chunk
 
         return _generate()
+
+
+@dataclass
+class DemoEmailSender:
+    """In-memory inbox standing in for real email delivery in fake-adapter mode.
+
+    The Playwright golden path reads the verification link back out of ``inbox``;
+    nothing ever leaves the process (user story 27).
+    """
+
+    inbox: list[OutboundEmail] = field(default_factory=list)
+
+    async def send(self, message: OutboundEmail) -> None:
+        logging.getLogger("app.adapters.demo").info(
+            "demo_email_queued", extra={"event": "demo_email_queued", "to": message.to}
+        )
+        self.inbox.append(message)
