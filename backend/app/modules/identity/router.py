@@ -191,6 +191,21 @@ async def _deliver(adapters: Adapters, message) -> None:
         logger.warning("email_delivery_failed", exc_info=True)
 
 
+async def _neutral_register_ack(
+    adapters: Adapters, settings: Settings, email: str, password: str
+) -> RegisterResponse:
+    """One identical answer for a taken email - in content *and* in work done.
+
+    The new-Account path's only expensive step is bcrypt-hashing the password; an
+    instantly returning taken-email path would leak existence by timing. Burn the
+    login path's ``verify_dummy_password`` equalizer first (same precedent as
+    unknown-email logins), then send the reminder and the neutral ack.
+    """
+    await asyncio.to_thread(verify_dummy_password, password)
+    await _deliver(adapters, reminder_email(email, settings))
+    return RegisterResponse(message=_MESSAGE_REGISTER_ACK)
+
+
 @router.post(
     "/auth/register",
     response_model=RegisterResponse,
@@ -219,8 +234,7 @@ async def register(
 
     email = payload.email.strip().lower()
     if await db.scalar(select(Account).where(Account.email == email)) is not None:
-        await _deliver(adapters, reminder_email(email, settings))
-        return RegisterResponse(message=_MESSAGE_REGISTER_ACK)
+        return await _neutral_register_ack(adapters, settings, email, payload.password)
 
     password_hash = await asyncio.to_thread(hash_password, payload.password)
     account = Account(email=email, password_hash=password_hash, created_at=clock.now())
@@ -230,8 +244,7 @@ async def register(
     except IntegrityError:
         # Lost a registration race for the same email: behave exactly like the taken path.
         await db.rollback()
-        await _deliver(adapters, reminder_email(email, settings))
-        return RegisterResponse(message=_MESSAGE_REGISTER_ACK)
+        return await _neutral_register_ack(adapters, settings, email, payload.password)
 
     verification_token = issue_verification_token(account, settings, clock)
     await db.commit()
@@ -354,14 +367,19 @@ def _verification_token_invalid() -> AppError:
 )
 async def confirm_verification(
     payload: ConfirmVerificationRequest,
+    request: Request,
     db: AsyncSession = Depends(get_session),
     clock: Clock = Depends(get_clock),
+    rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> AccountOut:
     """Authenticate by the token itself; no session or cookie is required.
 
     A successful confirmation persists ``email_verified_at`` and clears the stored
-    token hash, making the link single-use.
+    token hash, making the link single-use. The endpoint is unauthenticated, so it
+    carries its own frequency ceiling (story 26): per-client hits beyond the rule
+    answer ``429 too_many_requests`` like every other rate-limited scope.
     """
+    rate_limiter.hit("auth.verification.confirm", client_ip(request))
     token_hash = hash_verification_token(payload.token.strip())
     account = await db.scalar(
         select(Account).where(Account.verification_token_hash == token_hash)

@@ -129,6 +129,57 @@ async def test_confirm_rejects_an_unknown_token(client: AsyncClient) -> None:
     assert response.json()["error"]["code"] == "verification_token_invalid"
 
 
+async def test_confirm_hits_a_frequency_limit_per_client(
+    client: AsyncClient, settings: Settings
+) -> None:
+    """Story 26: link hits are throttled too, not just mail sends.
+
+    The dedicated ``auth.verification.confirm`` scope bounds token-guessing bursts
+    per client: every earlier attempt still reads as the neutral invalid-token 400,
+    and once the ceiling is reached the endpoint answers 429 like the other scopes.
+    """
+    ceiling = settings.rate_limit_verification_confirm_per_hour
+    for attempt in range(ceiling):
+        response = await confirm(client, f"guess-{attempt}")
+        assert response.status_code == 400, response.text
+        assert response.json()["error"]["code"] == "verification_token_invalid"
+
+    limited = await confirm(client, "one-guess-too-many")
+    assert limited.status_code == 429, limited.text
+    error = limited.json()["error"]
+    assert error["code"] == "too_many_requests"
+    assert error["details"]["scope"] == "auth.verification.confirm"
+
+
+async def test_taken_email_registration_burns_the_same_bcrypt_work(
+    client: AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Story 22 timing side channel: a taken email must cost what a new one costs.
+
+    The new-Account path's only bcrypt work is hashing the submitted password; the
+    taken-email path used to answer instantly, leaking existence by timing. It now
+    runs the login path's dummy-hash equalizer first. Observed through the bcrypt
+    ``verify_password`` seam (not wall-clock): exactly one verification against the
+    module's fixed dummy hash, with the submitted password.
+    """
+    from app.modules.identity import security
+
+    checks: list[tuple[str, str]] = []
+
+    def _spy(password: str, password_hash: str) -> bool:
+        checks.append((password, password_hash))
+        return False
+
+    monkeypatch.setattr(security, "verify_password", _spy)
+
+    await register(client, email="taken@example.com")  # the new-Account path: hash only
+    assert checks == []
+
+    response = await register(client, email="taken@example.com")
+    assert response.status_code == 201, response.text
+    assert checks == [("correct-horse", security._DUMMY_PASSWORD_HASH)]
+
+
 async def test_a_verified_token_cannot_be_reused(client: AsyncClient, adapters: Adapters) -> None:
     await register(client)
     token = verification_token(adapters)

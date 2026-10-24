@@ -76,6 +76,12 @@ def build_rules(settings: Settings) -> dict[str, RateLimitRule]:
             60 * 60.0,
             "验证邮件发送过于频繁，请 {retry_after} 秒后再试",
         ),
+        "auth.verification.confirm": RateLimitRule(
+            "auth.verification.confirm",
+            settings.rate_limit_verification_confirm_per_hour,
+            60 * 60.0,
+            "验证链接使用过于频繁，请 {retry_after} 秒后再试",
+        ),
     }
 
 
