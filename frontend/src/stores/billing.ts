@@ -2,12 +2,13 @@
  * Subscription state: the Account's membership as reported by the backend.
  *
  * Membership is supplementary context: a failed read clears the state and keeps the
- * rest of the app usable, mirroring how the history store treats Quota.
+ * rest of the app usable, mirroring how the history store treats Quota. VIP is the
+ * backend-derived flag from `/me/membership`; the frontend never guesses it.
  */
 
 import { defineStore } from "pinia";
 
-import { isVipMembership, type MembershipDto } from "@/lib/billing";
+import type { MembershipDto } from "@/lib/billing";
 import { ApiError, api } from "@/lib/api";
 
 interface BillingState {
@@ -23,7 +24,7 @@ export const useBillingStore = defineStore("billing", {
     error: null,
   }),
   getters: {
-    isVip: (state): boolean => isVipMembership(state.membership),
+    isVip: (state): boolean => state.membership?.is_vip === true,
   },
   actions: {
     async loadMembership(): Promise<void> {

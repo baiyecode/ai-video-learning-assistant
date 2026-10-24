@@ -12,13 +12,19 @@ import { ApiError } from "@/lib/api";
 import type { MembershipDto } from "@/lib/billing";
 import { useBillingStore } from "@/stores/billing";
 
-const FREE: MembershipDto = { status: "free", period_end: null, portal_url: null };
+const FREE: MembershipDto = {
+  status: "free",
+  period_end: null,
+  portal_url: null,
+  is_vip: false,
+};
 
 function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
   return {
     status: "active",
     period_end: "2026-02-14T08:00:00+00:00",
     portal_url: null,
+    is_vip: true,
     ...overrides,
   };
 }
@@ -42,17 +48,22 @@ describe("billing store", () => {
     expect(store.error).toBeNull();
   });
 
-  it("treats active and trial-ending subscriptions as VIP", async () => {
+  it("reads VIP from the backend-derived membership flag", async () => {
     mocks.get.mockResolvedValue(membership());
     const store = useBillingStore();
     await store.loadMembership();
     expect(store.isVip).toBe(true);
 
-    mocks.get.mockResolvedValue(membership({ status: "trial_ending" }));
+    mocks.get.mockResolvedValue(membership({ status: "past_due", is_vip: false }));
     await store.loadMembership();
-    expect(store.isVip).toBe(true);
+    expect(store.isVip).toBe(false);
+  });
 
-    mocks.get.mockResolvedValue(membership({ status: "past_due" }));
+  it("never guesses VIP from a checkout redirect: with no membership loaded isVip is false", async () => {
+    const store = useBillingStore();
+    expect(store.isVip).toBe(false);
+
+    mocks.get.mockRejectedValue(new ApiError("auth_required", "请先登录", 401));
     await store.loadMembership();
     expect(store.isVip).toBe(false);
   });

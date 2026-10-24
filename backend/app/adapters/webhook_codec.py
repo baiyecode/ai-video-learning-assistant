@@ -78,6 +78,7 @@ def _decode_event(payload: bytes) -> WebhookEvent:
         raise AppError(400, ErrorCode.INVALID_REQUEST, _MESSAGE_EVENT_UNREADABLE)
     obj = document.get("data", {}).get("object") or {}
     metadata = obj.get("metadata") or {}
+    raw_status = obj.get("status")
     return WebhookEvent(
         event_id=event_id,
         type=event_type,
@@ -87,6 +88,7 @@ def _decode_event(payload: bytes) -> WebhookEvent:
         stripe_subscription_id=obj.get("subscription"),
         current_period_end=_epoch_to_utc(obj.get("current_period_end")),
         price_id=metadata.get("price_id"),
+        subscription_status=raw_status if isinstance(raw_status, str) else None,
     )
 
 

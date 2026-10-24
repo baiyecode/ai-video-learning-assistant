@@ -16,6 +16,7 @@ from pathlib import Path
 from app.adapters.webhook_codec import verify_and_decode
 from app.ports import (
     CheckoutSession,
+    CustomerPortal,
     OutboundEmail,
     ResolvedVideo,
     SubtitlePayload,
@@ -148,6 +149,11 @@ class DemoBillingGateway:
     def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
         """Offline replay of Stripe-style events; the golden path signs with the demo secret."""
         return verify_and_decode(payload=payload, signature_header=signature, secret=DEMO_WEBHOOK_SECRET)
+
+    async def create_portal(self, *, stripe_customer_id: str, return_url: str) -> CustomerPortal:
+        """Deterministic offline customer-portal page for the golden path."""
+        await asyncio.sleep(0.01)
+        return CustomerPortal(url="https://portal.demo.invalid/portal_demo")
 
 
 @dataclass

@@ -11,17 +11,27 @@ class CheckoutOut(BaseModel):
     url: str
 
 
+class PortalOut(BaseModel):
+    """The self-service customer portal page (card updates, invoices) for a subscriber."""
+
+    url: str
+
+
 class MembershipOut(BaseModel):
     """The one subscription truth for the frontend (spec API contract).
 
-    ``status`` is ``"free"`` without an active Subscription record, otherwise the
-    recorded Stripe status. ``period_end`` is written by the webhook state machine;
-    ``portal_url`` stays a placeholder until the portal ticket (P2-03) lands.
+    ``status`` is ``"free"`` without a Subscription record, otherwise the recorded
+    Stripe status. ``period_end`` is written by the webhook state machine and gives
+    the UI what it needs for the Past Due warning and the "VIP ends on ..." notice.
+    ``is_vip`` is the backend-derived Membership flag (status-based, never stored).
+    ``portal_url`` is not a GET field: the managed portal link is minted per call by
+    ``POST /billing/portal``.
     """
 
     status: str
     period_end: str | None = None
     portal_url: str | None = None
+    is_vip: bool = False
 
 
 class WebhookOut(BaseModel):

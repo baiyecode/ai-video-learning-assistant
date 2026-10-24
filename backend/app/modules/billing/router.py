@@ -1,4 +1,4 @@
-"""Billing HTTP routes: the upgrade entry point, membership status and the webhook.
+"""Billing HTTP routes: the upgrade entry point, the customer portal, membership status and the webhook.
 
 Routes are mounted under ``/api`` by ``main.py``. The router carries no prefix so
 ``/me/membership`` can live next to identity's ``/me`` while billing owns its reads.
@@ -15,7 +15,7 @@ from app.config import Settings
 from app.container import Adapters
 from app.deps import get_adapters, get_current_account, get_session, get_settings
 from app.modules.billing import service
-from app.modules.billing.schemas import CheckoutOut, MembershipOut, WebhookOut
+from app.modules.billing.schemas import CheckoutOut, MembershipOut, PortalOut, WebhookOut
 from app.modules.identity.models import Account
 
 router = APIRouter(tags=["billing"])
@@ -38,6 +38,19 @@ async def create_checkout(
 ) -> CheckoutOut:
     return await service.open_checkout(
         adapters.billing_gateway, settings, account, origin=_origin(request)
+    )
+
+
+@router.post("/billing/portal", response_model=PortalOut, summary="Open the customer portal")
+async def create_portal(
+    request: Request,
+    account: Account = Depends(get_current_account),
+    session: AsyncSession = Depends(get_session),
+    adapters: Adapters = Depends(get_adapters),
+) -> PortalOut:
+    """Self-service management link: card updates and invoices stay with the provider."""
+    return await service.open_portal(
+        session, adapters.billing_gateway, account, origin=_origin(request)
     )
 
 

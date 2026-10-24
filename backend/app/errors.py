@@ -58,6 +58,7 @@ class ErrorCode(StrEnum):
     VERIFICATION_TOKEN_EXPIRED = "verification_token_expired"
     ANALYSIS_NOT_FOUND = "analysis_not_found"
     ANALYSIS_FAILED = "analysis_failed"
+    SUBSCRIPTION_NOT_FOUND = "subscription_not_found"
     REPORT_INVALID = "report_invalid"
     INTERNAL_ERROR = "internal_error"
     SERVICE_UNAVAILABLE = "service_unavailable"

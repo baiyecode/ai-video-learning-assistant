@@ -14,6 +14,7 @@ from app.adapters.webhook_codec import sign_header, verify_and_decode
 from app.container import Adapters
 from app.ports import (
     CheckoutSession,
+    CustomerPortal,
     OutboundEmail,
     ResolvedVideo,
     SubtitlePayload,
@@ -24,6 +25,7 @@ from app.ports import (
 from app.timeutil import shanghai_day
 
 FAKE_CHECKOUT_URL = "https://checkout.stripe.test/c/fake-checkout"
+FAKE_PORTAL_URL = "https://portal.stripe.test/b/fake-portal"
 FAKE_WEBHOOK_SECRET = "whsec_fake"
 #: Fixed signature timestamp for emitted webhook headers; the fake codec has no
 #: replay window, so deterministic bytes keep test payloads stable.
@@ -73,6 +75,32 @@ def checkout_completed_body(
     if period_end is not None:
         session_object["current_period_end"] = int(period_end.timestamp())
     return webhook_event_body(event_id, "checkout.session.completed", created, session_object)
+
+
+def lifecycle_event_body(
+    event_id: str,
+    event_type: str,
+    created: datetime,
+    *,
+    account_id: str | None = None,
+    subscription_id: str = "sub_fake_1",
+    customer_id: str = "cus_fake_1",
+    period_end: datetime | None = None,
+    subscription_status: str | None = None,
+) -> bytes:
+    """The wire shape of an invoice/subscription lifecycle event (Stripe-style object).
+
+    ``account_id`` is optional on purpose: real invoice and subscription events name
+    only Stripe ids, and the state machine must still find the local subscription.
+    """
+    obj: dict[str, object] = {"subscription": subscription_id, "customer": customer_id}
+    if account_id is not None:
+        obj["metadata"] = {"account_id": account_id}
+    if period_end is not None:
+        obj["current_period_end"] = int(period_end.timestamp())
+    if subscription_status is not None:
+        obj["status"] = subscription_status
+    return webhook_event_body(event_id, event_type, created, obj)
 
 #: The one Douyin Video the fake short-link wrapper unwraps to.
 DOUYIN_DEFAULT_VIDEO_ID = "7123456789012345678"
@@ -315,6 +343,8 @@ class FakeBillingGateway:
     - ``webhook_secret`` / ``webhook_fail_with``: webhook verification follows the real
       Stripe signature scheme via the shared codec; ``webhook_fail_with`` makes the
       gateway raise before decoding (provider-outage tests).
+    - ``portal_url`` / ``created_portals`` / ``portal_fail_with``: the customer-portal
+      mint (P2-04 self-service entry), programmable like checkout.
     """
 
     fail_with: Exception | None = None
@@ -322,6 +352,9 @@ class FakeBillingGateway:
     created_checkouts: list[dict[str, object]] = field(default_factory=list)
     webhook_secret: str = FAKE_WEBHOOK_SECRET
     webhook_fail_with: Exception | None = None
+    portal_url: str = FAKE_PORTAL_URL
+    created_portals: list[dict[str, object]] = field(default_factory=list)
+    portal_fail_with: Exception | None = None
 
     async def create_checkout(
         self,
@@ -344,6 +377,19 @@ class FakeBillingGateway:
             }
         )
         return CheckoutSession(id=f"cs_fake_{len(self.created_checkouts)}", url=self.checkout_url)
+
+    async def create_portal(
+        self,
+        *,
+        stripe_customer_id: str,
+        return_url: str,
+    ) -> CustomerPortal:
+        if self.portal_fail_with is not None:
+            raise self.portal_fail_with
+        self.created_portals.append(
+            {"stripe_customer_id": stripe_customer_id, "return_url": return_url}
+        )
+        return CustomerPortal(url=self.portal_url)
 
     def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
         if self.webhook_fail_with is not None:
