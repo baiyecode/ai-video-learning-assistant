@@ -113,3 +113,39 @@ async def test_replayed_event_id_applies_once_and_still_answers_2xx(
 
     rows = await _audit_rows(app, "evt_replay_1")
     assert len(rows) == 1, "one event_id must leave exactly one audit row"
+
+
+async def test_event_older_than_the_latest_record_never_rolls_state_back(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """AC3: an out-of-order delivery older than the newest local event is audit-only."""
+    response = await register(client, email="ordered@example.com")
+    account_id = response.json()["account"]["id"]
+    auth = bearer(response)
+
+    newest = checkout_completed_body(
+        "evt_new",
+        account_id,
+        created=_dt("2026-01-15T10:00:00+00:00"),
+        period_end=_dt(PERIOD_END),
+    )
+    assert (await _post_event(client, newest)).status_code == 200
+
+    older = checkout_completed_body(
+        "evt_old",
+        account_id,
+        created=_dt("2026-01-15T09:00:00+00:00"),
+        period_end=_dt("2026-01-30T09:00:00+00:00"),
+        subscription_id="sub_older",
+    )
+    replay = await _post_event(client, older)
+
+    assert replay.status_code == 200, replay.text
+    membership = await client.get("/api/me/membership", headers=auth)
+    assert membership.json()["period_end"] == PERIOD_END
+    assert membership.json()["status"] == "active"
+
+    old_rows = await _audit_rows(app, "evt_old")
+    assert [row.applied for row in old_rows] == [False], "stale events keep the audit trail"
+    new_rows = await _audit_rows(app, "evt_new")
+    assert [row.applied for row in new_rows] == [True]

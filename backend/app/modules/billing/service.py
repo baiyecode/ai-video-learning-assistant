@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from uuid import uuid4
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,12 +104,42 @@ async def apply_webhook(session: AsyncSession, clock: Clock, event: WebhookEvent
             },
         )
         return
+    if await _is_stale(session, event):
+        logger.info(
+            "billing_event_stale_ignored",
+            extra={
+                "event": "billing_event_stale_ignored",
+                "event_id": event.event_id,
+                "event_type": event.type,
+                "account_id": event.account_id,
+                "outcome": "stale",
+            },
+        )
+        await session.commit()
+        return
     applied = await _transition(session, event)
     if applied:
         await session.execute(
             update(BillingEvent).where(BillingEvent.event_id == event.event_id).values(applied=True)
         )
     await session.commit()
+
+
+async def _is_stale(session: AsyncSession, event: WebhookEvent) -> bool:
+    """Out-of-order guard: older-than-newest recorded events never move state (spec 状态机).
+
+    The comparison is per Account over the audit trail, so a replayed historical event
+    can only ever append an audit row, never roll the subscription back.
+    """
+    if not event.account_id:
+        return False
+    newest = await session.scalar(
+        select(func.max(BillingEvent.created)).where(
+            BillingEvent.account_id == event.account_id,
+            BillingEvent.event_id != event.event_id,
+        )
+    )
+    return newest is not None and event.created < required_utc(newest)
 
 
 async def _transition(session: AsyncSession, event: WebhookEvent) -> bool:
