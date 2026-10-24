@@ -90,6 +90,10 @@ class Settings(BaseSettings):
     # the Playwright golden path. Never enable this in production.
     fake_adapters: bool = False
 
+    # Feature switches (ticket #23). Douyin parsing ships behind this switch so it can
+    # be opened and rolled back per deployment without a code change.
+    douyin_enabled: bool = False
+
     @property
     def media_dir(self) -> Path:
         return self.media_root if self.media_root is not None else self.data_dir / "media"
