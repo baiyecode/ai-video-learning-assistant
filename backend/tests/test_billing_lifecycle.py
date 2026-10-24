@@ -8,17 +8,26 @@ them (signature header + Stripe-style body), and the derived truth is read back 
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 from typing import Any
 
 import pytest
+from app.container import Adapters
 from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
 from tests.auth_flows import login as auth_login
 from tests.auth_flows import register as auth_register
-from tests.fakes import FAKE_PORTAL_URL, checkout_completed_body, lifecycle_event_body, sign_webhook
+from tests.auth_flows import verified_account
+from tests.fakes import (
+    FAKE_PORTAL_URL,
+    checkout_completed_body,
+    lifecycle_event_body,
+    sample_video,
+    sign_webhook,
+)
 
 PASSWORD = "correct-horse"
 CHECKOUT_CREATED = "2026-01-15T09:00:00+00:00"
@@ -354,3 +363,69 @@ async def test_stripe_gateway_portal_reports_unavailable_without_configuration()
         await keyed.create_portal(stripe_customer_id="", return_url="http://testserver/")
     assert raised.value.status == 503
     assert raised.value.code == "service_unavailable"
+
+
+async def _create_analysis(client: AsyncClient, headers: dict[str, str], video_id: str) -> Any:
+    return await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
+
+
+async def _wait_completed(client: AsyncClient, headers: dict[str, str], analysis_id: str) -> None:
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + 5.0
+    while loop.time() < deadline:
+        response = await client.get(f"/api/analyses/{analysis_id}", headers=headers)
+        assert response.status_code == 200, response.text
+        if response.json()["status"] == "completed":
+            return
+        await asyncio.sleep(0.01)
+    raise AssertionError(f"analysis {analysis_id} did not complete")
+
+
+async def _resolve_video(
+    client: AsyncClient, adapters: Adapters, headers: dict[str, str], platform_video_id: str
+) -> str:
+    url = f"https://www.youtube.com/watch?v={platform_video_id}"
+    adapters.video_source.videos[url] = sample_video(platform_video_id=platform_video_id)  # type: ignore[attr-defined]
+    resolved = await client.post("/api/videos/resolve", json={"url": url}, headers=headers)
+    assert resolved.status_code == 200, resolved.text
+    return resolved.json()["video"]["id"]
+
+
+async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """AC2: the deleted subscription needs no manual step - the very next Analysis is
+    bound by the free daily Quota again (P2-03's derived VIP lifts off automatically)."""
+    headers = await verified_account(client, adapters, email="downgraded@example.com")
+    me = await client.get("/api/me", headers=headers)
+    account_id = me.json()["account"]["id"]
+    await _activate(client, account_id)
+
+    for index in range(4):  # four completed Analyses: past the free limit, VIP carried it
+        video_id = await _resolve_video(client, adapters, headers, f"lcdown0{index:04d}")
+        created = await _create_analysis(client, headers, video_id)
+        assert created.status_code == 201, created.text
+        await _wait_completed(client, headers, created.json()["id"])
+        adapters.clock.advance(seconds=10)
+
+    deleted = lifecycle_event_body(
+        "evt_lc_delete_final",
+        "customer.subscription.deleted",
+        _dt("2026-01-15T12:00:00+00:00"),
+        account_id=account_id,
+    )
+    assert (await _post_event(client, deleted)).status_code == 200
+    membership = await _membership(client, headers)
+    assert membership == {
+        "status": "canceled",
+        "period_end": PERIOD_END,
+        "portal_url": None,
+        "is_vip": False,
+    }
+
+    fifth = await _create_analysis(
+        client, headers, await _resolve_video(client, adapters, headers, "lcdown09999")
+    )
+    assert fifth.status_code == 429, fifth.text
+    assert fifth.json()["error"]["code"] == "quota_exhausted"
+    assert fifth.json()["error"]["details"]["daily_limit"] == 3
