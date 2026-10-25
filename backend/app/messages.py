@@ -24,6 +24,11 @@ UNSUPPORTED_PLATFORM = "暂不支持该平台，请粘贴 B 站或 YouTube 视�
 PLAYLIST_NOT_SUPPORTED = "暂不支持播放列表、合集或收藏夹，请粘贴单个视频的页面地址"
 LIVE_NOT_SUPPORTED = "暂不支持直播，请粘贴已发布视频的页面地址"
 
+# 抖音's single server-provided tier is labelled by its watermark, never as a 清晰度
+# claim (P2 story 30): the production yt-dlp branch and the offline demo adapter
+# render the same words from this one constant (ticket #43).
+DOUYIN_WATERMARK_LABEL = "带水印"
+
 DOWNLOAD_FAILED = "下载失败，请稍后重试"
 DOWNLOAD_TIMEOUT = "下载超时，请稍后重试"
 DOWNLOAD_INTERRUPTED = "服务重启导致任务中断，请重试"
