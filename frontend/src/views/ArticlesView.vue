@@ -57,7 +57,7 @@ const articles = useArticleCollection().published;
     >
       <h2 class="text-lg font-semibold text-slate-900">读完就试一次</h2>
       <p class="mt-2 text-sm text-slate-600">
-        回到工具粘贴页面地址，解析视频后即可导出 Subtitle；需要 AI 摘要时再登录账号。
+        回到工具粘贴页面地址，解析视频后即可导出字幕；需要 AI 摘要时再登录账号。
       </p>
       <RouterLink
         to="/"

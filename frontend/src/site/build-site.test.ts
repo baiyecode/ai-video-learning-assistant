@@ -160,7 +160,7 @@ describe("buildSite", () => {
     expect(document.querySelector('meta[name="robots"]')?.getAttribute("content")).toBe(
       "index,follow,max-image-preview:large",
     );
-    expect(html).toContain("粘贴视频地址");
+    expect(html).toContain("粘贴页面地址");
   });
 
   it("fails with the offending route when a descriptor is invalid", async () => {

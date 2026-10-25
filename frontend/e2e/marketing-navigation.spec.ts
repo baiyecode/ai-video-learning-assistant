@@ -88,7 +88,7 @@ test.describe("static navigation", () => {
     await nav.getByRole("link", { name: "首页", exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
     await expect(page).toHaveTitle("视频下载、字幕导出与 AI 摘要 · AI 视频学习助手");
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴视频地址");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴页面地址");
 
     expect(consoleErrors).toEqual([]);
   });

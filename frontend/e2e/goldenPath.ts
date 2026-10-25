@@ -54,7 +54,7 @@ export async function signUpAndSignIn(page: Page, email: string): Promise<void> 
 
 /** Resolve a page address on the home screen and wait for its result card. */
 export async function resolveOnHome(page: Page, url: string, title: string): Promise<void> {
-  await page.getByLabel("视频地址").fill(url);
+  await page.getByLabel("页面地址").fill(url);
   await page.getByRole("button", { name: "解析视频" }).click();
   await expect(page.getByRole("heading", { level: 2, name: title })).toBeVisible();
 }

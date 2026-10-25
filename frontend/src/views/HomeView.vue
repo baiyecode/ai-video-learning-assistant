@@ -100,7 +100,7 @@ function cancelCompliance(): void {
   <section class="mx-auto max-w-3xl space-y-6">
     <div class="space-y-3 text-center">
       <h1 class="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-        粘贴视频地址，下载视频、导出字幕并生成 AI 摘要
+        粘贴页面地址，下载视频、导出字幕并生成 AI 摘要
       </h1>
       <p class="text-slate-600">
         解析公开视频，导出字幕，并基于字幕生成简体中文摘要与思维导图。
@@ -117,7 +117,7 @@ function cancelCompliance(): void {
         class="min-w-0 flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none placeholder:text-slate-400 focus:border-slate-500 disabled:cursor-not-allowed disabled:bg-slate-100"
         type="text"
         inputmode="url"
-        aria-label="视频地址"
+        aria-label="页面地址"
         placeholder="https://www.bilibili.com/video/... 或 https://youtu.be/..."
         :disabled="store.loading"
       />

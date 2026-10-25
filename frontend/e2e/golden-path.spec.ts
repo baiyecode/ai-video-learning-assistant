@@ -32,14 +32,14 @@ test.describe("golden path", () => {
   }) => {
     await page.goto("/");
 
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴视频地址");
-    await expect(page.getByLabel("视频地址")).toBeVisible();
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴页面地址");
+    await expect(page.getByLabel("页面地址")).toBeVisible();
     await expect(
       page.getByText("仅限个人备份或已获授权内容，不支持播放列表、直播与 DRM 内容。"),
     ).toBeVisible();
 
     // --- Visitor: resolve ---------------------------------------------------
-    await page.getByLabel("视频地址").fill(VIDEO_URL);
+    await page.getByLabel("页面地址").fill(VIDEO_URL);
     await page.getByRole("button", { name: "解析视频" }).click();
 
     await expect(page.getByRole("heading", { level: 2, name: VIDEO_TITLE })).toBeVisible();

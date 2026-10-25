@@ -108,7 +108,11 @@ describe("home marketing page", () => {
 
     expect(document.querySelectorAll("h1")).toHaveLength(1);
     const h1 = textOf(document.querySelector("h1"));
-    expect(h1).toContain("粘贴视频地址");
+    expect(h1).toContain("粘贴页面地址");
+    // README/GLOSSARY: the address a user pastes is the 页面地址, never a 视频地址 —
+    // the rule ``faq-content.test.ts`` pins for the FAQ now holds for the home H1 too,
+    // because the H1 is the most-visible marketing sentence on the site.
+    expect(h1).not.toContain("视频地址");
     // P3 spec: the home H1 itself carries the core keywords, not just <title>.
     for (const keyword of ["下载", "字幕", "AI 摘要"]) {
       expect(h1, `H1 missing core keyword ${keyword}`).toContain(keyword);
@@ -132,7 +136,8 @@ describe("home marketing page", () => {
     }
 
     // The tool keeps its input and the compliance line the golden path asserts.
-    expect(document.querySelector('input[aria-label="视频地址"]')).not.toBeNull();
+    expect(document.querySelector('input[aria-label="页面地址"]')).not.toBeNull();
+    expect(document.body.textContent).not.toContain("视频地址");
     expect(
       page("index.html").body.textContent,
     ).toContain("仅限个人备份或已获授权内容，不支持播放列表、直播与 DRM 内容。");
@@ -386,6 +391,19 @@ describe("back-to-tool CTA (P3 story 12)", () => {
       expect(ctas.some((node) => textOf(node).includes("回到首页")), `${file} CTA copy`).toBe(true);
     });
   }
+
+  it("keeps the Chinese marketing sentences on the documented terms", () => {
+    // issue #44 (review of #42): these pages' report form and CTAs are Simplified-Chinese
+    // prose, so the pasted address is 页面地址 (never 视频地址) and the CTA says 导出字幕
+    // rather than mixing the Subtitle entity name into a Chinese sentence.
+    for (const file of ["terms.html", "articles.html"]) {
+      const text = bodyText(page(file));
+      expect(text, `${file} calls the pasted address 视频地址`).not.toContain("视频地址");
+      expect(text, `${file} CTA mixes English Subtitle into Chinese copy`).not.toContain(
+        "导出 Subtitle",
+      );
+    }
+  });
 });
 
 describe("site navigation", () => {
