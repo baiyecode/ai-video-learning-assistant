@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
 import type { ArticleCollection } from "@/site/articles";
+import { APP_SHELL_PATH, PRIVATE_APP_ROUTES } from "@/site/routes";
 import {
   SITE_NAME,
   canonicalUrl,
@@ -23,11 +24,8 @@ export const LLMS_FILE = "llms.txt";
 /** Crawl exclusions shared by robots.txt; private app surface only. */
 export const DISALLOWED_PATHS = [
   "/api/",
-  "/login",
-  "/account",
-  "/analyses",
-  "/verify-email",
-  "/app.html",
+  ...PRIVATE_APP_ROUTES,
+  APP_SHELL_PATH,
 ] as const;
 
 /**

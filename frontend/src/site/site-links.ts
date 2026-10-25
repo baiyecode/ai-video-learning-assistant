@@ -17,6 +17,7 @@ import {
   parseInternalHref,
   type InternalLinkRef,
 } from "@/site/articles";
+import { PRIVATE_APP_ROUTES } from "@/site/routes";
 
 export interface GeneratedPage {
   /** Canonical route path, used verbatim in error messages. */
@@ -37,7 +38,7 @@ export interface SiteLinkValidationOptions {
 }
 
 /** Private app routes that legitimately appear in navigation/CTAs. */
-const ALLOWED_APP_ROUTES = new Set(["/login", "/account", "/analyses", "/verify-email"]);
+const ALLOWED_APP_ROUTES = new Set<string>(PRIVATE_APP_ROUTES);
 const ANALYSIS_DETAIL_ROUTE = /^\/analyses\/[^/]+$/;
 
 export function isAllowedAppRoute(path: string): boolean {

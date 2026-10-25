@@ -7,6 +7,7 @@ import { createMemoryHistory } from "vue-router";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createAppRouter } from "@/router";
+import { ANALYSIS_DETAIL_ROUTE, PRIVATE_APP_ROUTES } from "@/site/routes";
 
 afterEach(() => {
   vi.unstubAllEnvs();
@@ -14,6 +15,16 @@ afterEach(() => {
 });
 
 describe("router head updates", () => {
+  it("declares every shared private app route in the real route table", () => {
+    const router = createAppRouter(createMemoryHistory(), { updateHead: false });
+    const paths = new Set(router.getRoutes().map((route) => route.path));
+
+    for (const route of PRIVATE_APP_ROUTES) {
+      expect(paths.has(route), route).toBe(true);
+    }
+    expect(paths.has(ANALYSIS_DETAIL_ROUTE)).toBe(true);
+  });
+
   it("updates title, description and canonical from the shared descriptor", async () => {
     vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
     const router = createAppRouter(createMemoryHistory());
