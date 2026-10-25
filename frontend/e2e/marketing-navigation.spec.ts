@@ -142,13 +142,17 @@ test.describe("private routes", () => {
     );
   });
 
-  test("an unknown path renders the 404 page", async ({ page }) => {
-    await page.goto("/definitely-not-a-page");
-    await expect(page.getByRole("heading", { level: 1 })).toHaveText("页面不存在");
-    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
-      "content",
-      "noindex,nofollow",
-    );
+  test("an unknown path and an unknown Article slug render the same 404 page", async ({
+    page,
+  }) => {
+    for (const route of ["/definitely-not-a-page", "/articles/definitely-not-a-page"]) {
+      await page.goto(route);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText("页面不存在");
+      await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+        "content",
+        "noindex,nofollow",
+      );
+    }
   });
 });
 

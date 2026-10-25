@@ -79,7 +79,7 @@ cd frontend && npm run build
 ```
 
 `npm run build` 串联四步：`typecheck`（vue-tsc）→ `build:client`（Vite 客户端构建，输出带哈希的
-`assets/` 与 manifest）→ `build:ssr`（把路由表、视图与站点模块打成 `dist-ssr/entry-server.js`）→
+`assets/`）→ `build:ssr`（把路由表、视图与站点模块打成 `dist-ssr/entry-server.js`）→
 `prerender`（逐路由渲染、校验并写出静态产物）。产物都在 `frontend/dist/`：
 
 - 每个公开路由一个静态 HTML：`index.html`、`features.html`、`guide.html`、`faq.html`、
@@ -142,7 +142,7 @@ frontmatter 只接受上面六个字段（`title`、`description`、`published` 
 - 不允许外链图片或 `data:` 图片；正文中的站内链接必须指向实际存在的公开路由或已发布文章，否则构建失败。
 
 `draft: true` 的文章仍会被解析和校验，但不会出现在文章列表、sitemap、`llms.txt` 或预渲染产物中，
-直接访问其地址会显示「文章不存在」；去掉该字段（或改为 `false`）并重新构建即可发布。
+直接访问其地址会显示「页面不存在」；去掉该字段（或改为 `false`）并重新构建即可发布。
 
 内容标准（写作时遵守，构建只兜底最底限）：正文不少于 800 个汉字；第一段直接给出答案；至少 3 条指向
 真实公开页面的站内链接；不使用「100% 准确」「永久免费」「破解」「保证」等过度承诺措辞；术语遵守
@@ -154,7 +154,7 @@ frontmatter 只接受上面六个字段（`title`、`description`、`published` 
   canonical、robots、OG/Twitter 与 JSON-LD，客户端路由的 `afterEach` 用同一份描述符更新 head，二者不会漂移。
   私有路由（登录、个人中心、Analysis、邮箱验证）与 404 只有 noindex，没有 canonical。
 - JSON-LD 类型：首页 `WebSite` + `SoftwareApplication/Offer`，营销页 `WebPage`，`/guide` `HowTo`，
-  `/faq` `FAQPage`，文章 `Article`，有面包屑的页面追加 `BreadcrumbList`，全站共享 `Organization`。
+  `/faq` `FAQPage`，文章 `BlogPosting`（列表页 `Blog`，两者都以 `Organization` 为 publisher），有面包屑的页面追加 `BreadcrumbList`，全站共享 `Organization`。
 - `SITE_ORIGIN` 必须是最终公网 https origin，并与 `APP_FRONTEND_BASE_URL` 完全一致；回环 origin 的构建会输出
   `User-agent: *` + `Disallow: /`（仅用于本地自测，不能用来验证收录）。
 - `llms.txt` 是便于 AI 答案引擎发现内容的提案格式，生成它不保证任何引擎会读取；GEO 效果需以实际引用观察。
@@ -185,7 +185,7 @@ docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 前端在构建期把公开营销页与文章预渲染成静态 HTML，并生成 `sitemap.xml`、`robots.txt`、`llms.txt`；私有路由使用无索引外壳 `app.html`，未知路径返回真正的 404 页面 `404.html`。
 
 - **`SITE_ORIGIN`**：写入 canonical、OG 与 sitemap 的公网 origin，经 compose 传入前端构建参数 `VITE_SITE_ORIGIN`（compose 默认 `http://localhost:8080`）。它必须是**裸 origin**：绝对 http(s) 地址，不带用户名密码、路径、查询串、hash 或尾斜杠；格式非法时 `npm run build` / `docker compose build web` 直接失败并打印变量名与非法值。本地 Vite 开发未设置时回退到 `http://localhost:5173` 并警告。
-- **生产必须设置为公网 https origin，并与 `APP_FRONTEND_BASE_URL` 完全一致**，否则 canonical/OG 与实际访问地址分裂，验证邮件里的链接也会指向另一个 host。回环 origin（localhost/127.0.0.1/::1）会输出 `Disallow: /` 并在构建日志中警告，不能用来验证收录。
+- **生产必须设置为公网 https origin，并与 `APP_FRONTEND_BASE_URL` 完全一致**，否则 canonical/OG 与实际访问地址分裂，验证邮件里的链接也会指向另一个 host。回环 origin（`localhost`、`*.localhost`、`127.0.0.0/8`、`0.0.0.0`、`::1`）会输出 `Disallow: /` 并在构建日志中警告，不能用来验证收录。
 - nginx 行为：`/features`、`/guide`、`/faq`、`/pricing`、`/terms`、`/articles`、`/articles/<slug>` 按「精确文件 → `.html` → 目录 → 404」查找，直接 200 且不做尾斜杠跳转；`/login`、`/account`、`/analyses`、`/analyses/:id`、`/verify-email` 回落 `app.html`（查询串保留）并带 `X-Robots-Tag: noindex, nofollow`；未知路径返回 HTTP 404 + `404.html`，不再回落首页；HTML 为 `Cache-Control: no-cache`，`/assets/` 为 `immutable`，发现层文件缓存 1 小时；gzip 覆盖 HTML、CSS、JS、JSON、XML 与 `text/plain`。
 - 构建与启动：`SITE_ORIGIN=https://example.com docker compose build web`，随后 `docker compose up -d`。非法值可这样确认会失败：`SITE_ORIGIN=https://example.com/path docker compose build web`。
 - 部署后用下面的命令验证（`BASE` 换成实际访问地址；公开页 200、未知路径 404、私有 noindex、`/health`、发现层与缓存头）：

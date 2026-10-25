@@ -242,15 +242,19 @@ describe("robots.txt", () => {
     for (const origin of [
       "http://localhost:5173",
       "http://localhost",
+      "http://app.localhost:8080",
       "http://127.0.0.1:8080",
+      "http://127.0.0.2",
+      "http://127.255.255.254:9000",
+      "http://0.0.0.0:8080",
       "http://[::1]:8080",
-      "http://::1",
     ]) {
       const lines = buildRobotsTxt(origin).split("\n");
       expect(lines, origin).toContain("Disallow: /");
       expect(lines, origin).not.toContain("Allow: /");
     }
     expect(buildRobotsTxt("https://example.com").split("\n")).toContain("Allow: /");
+    expect(buildRobotsTxt("https://localhost.example.com").split("\n")).toContain("Allow: /");
   });
 });
 

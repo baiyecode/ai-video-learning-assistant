@@ -157,6 +157,14 @@ describe("home marketing page", () => {
       expect(match, `missing H2 ${heading}`).toBe(true);
     }
     expect(textOf(document.querySelector("#home-compliance"))).toContain("个人备份");
+
+    // The value-prop link returns to the tool form, not to an arbitrary anchor.
+    const backToTool = [...document.querySelectorAll("#home-value a")].find((node) =>
+      textOf(node).includes("回到解析表单"),
+    );
+    expect(backToTool).toBeDefined();
+    expect(backToTool?.getAttribute("href")).toBe("#resolve");
+    expect(document.getElementById("resolve")).not.toBeNull();
   });
 
   it("lists the three steps and six capabilities in reading order", () => {

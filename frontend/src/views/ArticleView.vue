@@ -41,9 +41,10 @@ const related = computed(() =>
       <p class="text-sm text-slate-500">
         作者 {{ AUTHOR_NAME }} · 发布于
         <time :datetime="article.published">{{ article.published }}</time>
-        <template v-if="article.updated && article.updated !== article.published">
-          · 更新于 <time :datetime="article.updated">{{ article.updated }}</time>
-        </template>
+        · 更新于
+        <time :datetime="article.updated ?? article.published">{{
+          article.updated ?? article.published
+        }}</time>
         · 约 {{ article.readingMinutes }} 分钟阅读
       </p>
       <ul v-if="article.tags.length" class="flex flex-wrap gap-2">
@@ -122,7 +123,7 @@ const related = computed(() =>
   </article>
 
   <section v-else class="mx-auto max-w-xl space-y-4 text-center">
-    <h1 class="text-3xl font-bold tracking-tight text-slate-900">文章不存在</h1>
+    <h1 class="text-3xl font-bold tracking-tight text-slate-900">页面不存在</h1>
     <p class="text-slate-600">这篇文章可能已被移动、删除，或仍是草稿。</p>
     <RouterLink
       to="/articles"

@@ -117,6 +117,10 @@ describe("article descriptors", () => {
       "第一篇测试文章",
       "另一篇测试文章",
     ]);
+    expect(blog.publisher).toEqual({
+      "@type": "Organization",
+      "@id": "https://example.com/#organization",
+    });
     expect(graph.some((node) => node["@type"] === "BreadcrumbList")).toBe(true);
     validateDescriptors(descriptors);
   });

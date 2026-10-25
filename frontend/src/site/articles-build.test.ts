@@ -206,8 +206,15 @@ describe("article artifacts", () => {
     expect(document.body.textContent).toContain("AI 视频学习助手团队");
     expect(document.body.textContent).toContain("2026-10-25");
     expect(document.body.textContent).toContain("2026-10-30");
+    expect(document.body.textContent).toMatch(/发布于\s*2026-10-25/);
+    expect(document.body.textContent).toMatch(/更新于\s*2026-10-30/);
     expect(document.body.textContent).toMatch(/约 \d+ 分钟阅读/);
     expect(document.body.textContent).toContain("不做 ASR");
+
+    // Both dates stay visible even when frontmatter has no separate update date.
+    const older = parse(await readFile(path.join(outDir, "articles/older-post.html"), "utf8"));
+    expect(older.body.textContent).toMatch(/发布于\s*2026-10-01/);
+    expect(older.body.textContent).toMatch(/更新于\s*2026-10-01/);
 
     const toc = [...document.querySelectorAll('nav[aria-label="文章目录"] a[href^="#"]')];
     expect(toc.length).toBeGreaterThanOrEqual(2);

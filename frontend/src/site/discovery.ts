@@ -33,17 +33,21 @@ export const DISALLOWED_PATHS = [
 /**
  * Any loopback host means a test/local deployment: crawl everything is wrong,
  * so robots.txt forbids all and the build warns instead of publishing a site
- * that could be indexed under ``localhost``.
+ * that could be indexed under ``localhost``. The host is parsed once with the
+ * same URL parser used to validate the origin; ``127.0.0.0/8``, ``0.0.0.0``,
+ * IPv6 ``::1`` and ``*.localhost`` are all treated as loopback.
  */
 export function isLoopbackOrigin(origin: string): boolean {
-  const authority = origin
-    .replace(/^[a-z][a-z0-9+.-]*:\/\//i, "")
-    .split(/[/?#]/)[0]
-    .replace(/^.*@/, "");
-  const bracketed = /^\[([^\]]+)\](?::\d+)?$/.exec(authority);
-  const hostPort = /^([^:]+)(?::\d+)?$/.exec(authority);
-  const hostname = bracketed?.[1] ?? hostPort?.[1] ?? authority;
-  return ["localhost", "127.0.0.1", "::1"].includes(hostname.toLowerCase());
+  let hostname: string;
+  try {
+    hostname = new URL(origin).hostname;
+  } catch {
+    return false;
+  }
+  const host = hostname.replace(/^\[|\]$/g, "").toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost")) return true;
+  if (host === "::1" || host === "0.0.0.0") return true;
+  return /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(host);
 }
 
 function escapeXml(value: string): string {

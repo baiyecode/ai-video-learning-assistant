@@ -146,6 +146,7 @@ function cancelCompliance(): void {
     </div>
 
     <form
+      id="resolve"
       class="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:flex-row"
       @submit.prevent="submit"
     >
@@ -355,10 +356,10 @@ function cancelCompliance(): void {
         不需要在多个工具之间搬运文本。
       </p>
       <a
-        href="#main-content"
+        href="#resolve"
         class="inline-block text-sm font-medium text-slate-900 underline transition-colors hover:text-slate-600"
       >
-        回到顶部开始解析
+        回到解析表单开始解析
       </a>
     </section>
 

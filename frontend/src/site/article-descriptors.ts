@@ -61,6 +61,7 @@ function blogNode(context: JsonLdContext, collection: ArticleCollection): JsonLd
     name: `${SITE_NAME}文章`,
     description: ARTICLES_LIST_DESCRIPTION,
     inLanguage: "zh-CN",
+    publisher: { "@type": "Organization", "@id": `${context.origin}/#organization` },
     blogPost: collection.published.map((article) => {
       const url = canonicalUrl(context.origin, articlePath(article.slug));
       const dates = articleDates(article);
