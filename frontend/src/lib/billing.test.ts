@@ -17,6 +17,7 @@ import {
   PRICE_BENEFIT,
   PRICE_HEADLINE,
   PRICE_PROVIDER_NOTICE,
+  TRIAL_ENDING_STATUS,
   dailyFreeAnalysisLimitFor,
   expirationNotice,
   formatPeriodEnd,
@@ -160,19 +161,31 @@ describe("membership-driven pricing (the runtime single source)", () => {
 });
 
 describe("portal entry visibility", () => {
-  it("offers the portal entry only to an Account that holds VIP", () => {
-    // Product decision (issue #44): the backend always reports ``portal_url``, but the
-    // frontend exposes it only while VIP is active — a free Account has no subscription
-    // to manage and the POST would answer 404 subscription_not_found.
+  it("offers the portal entry to any Account that holds a managed subscription", () => {
+    // The backend mints a portal link for every Subscription record and only answers
+    // 404 subscription_not_found without one, so the entry follows "holds a
+    // subscription" (status other than ``free``), not "VIP is active" (issue #44
+    // follow-up): the Past Due dunning copy points at 订阅管理, and a past_due
+    // Account is by definition not ``vip_active`` — without the entry it has no
+    // way to fix its payment method.
     expect(portalEntryVisibleFor(membership())).toBe(true);
-    expect(portalEntryVisibleFor(membership({ status: "past_due", vip_active: false }))).toBe(false);
+    expect(
+      portalEntryVisibleFor(membership({ status: PAST_DUE_STATUS, vip_active: false })),
+    ).toBe(true);
+    expect(
+      portalEntryVisibleFor(membership({ status: CANCELED_STATUS, vip_active: false })),
+    ).toBe(true);
+    expect(portalEntryVisibleFor(membership({ status: TRIAL_ENDING_STATUS }))).toBe(true);
+  });
+
+  it("stays hidden for an un-subscribed Account and a signed-out or absent membership", () => {
     expect(
       portalEntryVisibleFor(membership({ status: FREE_STATUS, vip_active: false })),
     ).toBe(false);
     expect(portalEntryVisibleFor(null)).toBe(false);
   });
 
-  it("needs an actual entry path, not just the VIP flag", () => {
+  it("needs an actual entry path, not just a subscription record", () => {
     expect(portalEntryVisibleFor(membership({ portal_url: "" }))).toBe(false);
   });
 });

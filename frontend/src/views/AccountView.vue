@@ -32,8 +32,9 @@ const quotaLabel = computed(() => formatQuota(analysis.quota));
 const quotaReset = computed(() => formatQuotaReset(analysis.quota?.resets_at));
 
 const portalBusy = computed(() => billing.loading);
-/** Only a VIP Account gets the portal entry (issue #44): a free Account has no
- *  subscription to manage and the POST answers ``subscription_not_found``. */
+/** Any Account holding a managed subscription gets the portal entry (issue #44
+ *  follow-up): Past Due needs it to fix the payment method the alert names, and a
+ *  free Account has no subscription to manage — the POST answers ``subscription_not_found``. */
 const showPortalEntry = computed(() => portalEntryVisibleFor(billing.membership));
 
 onMounted(() => {

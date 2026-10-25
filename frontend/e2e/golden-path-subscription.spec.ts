@@ -153,8 +153,8 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
 
     // --- The free Account's own subscription block --------------------------
     // Price and free Quota on this screen come from GET /me/membership, i.e. from the
-    // running backend Settings (issue #44 / ticket #41), and the portal entry is a
-    // VIP-only affordance: a free Account has no subscription to manage.
+    // running backend Settings (issue #44 / ticket #41), and the portal entry follows
+    // "holds a managed subscription": a free Account has none to manage.
     await page.getByRole("link", { name: "个人中心" }).click();
     await expect(page).toHaveURL(/\/account/);
     await expect(page.getByText("免费版", { exact: true })).toBeVisible();

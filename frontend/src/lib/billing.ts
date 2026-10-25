@@ -16,8 +16,9 @@ export interface MembershipDto {
   vip_active: boolean;
   /**
    * Portal *entry* path minted per call by ``POST /billing/portal`` — never a
-   * provider-hosted link, and identical for every status. Only a VIP Account gets an
-   * entry point on the UI (issue #44): ``portalEntryVisible()`` is the single rule.
+   * provider-hosted link, and identical for every status. Only an Account that holds a
+   * managed subscription gets an entry point on the UI (issue #44 follow-up):
+   * ``portalEntryVisibleFor()`` is the single rule.
    */
   portal_url: string;
   /** Display monthly price in USD from the running server's ``Settings`` (ticket #41). */
@@ -162,13 +163,18 @@ export function freeDailyAnalysisLabelFor(membership: MembershipDto | null): str
 
 /**
  * Whether the UI may offer the billing portal entry. The backend reports ``portal_url``
- * for every status (the managed link is minted by the POST), but only a VIP Account has
- * a subscription to manage — for anyone else ``POST /billing/portal`` answers
- * ``404 subscription_not_found``. The product decision (issue #44) is therefore: expose
- * the entry only while VIP is active *and* the server gave a path.
+ * for every status (the managed link is minted by the POST), and ``POST /billing/portal``
+ * answers ``404 subscription_not_found`` only when the Account has no Subscription record
+ * at all — so the entry follows "holds a managed subscription": any status other than
+ * ``free`` (``active`` / ``trial_ending`` / ``past_due`` / ``canceled``). The Past Due
+ * dunning copy points at 订阅管理, and a ``past_due`` Account is by definition not
+ * ``vip_active`` (issue #44 follow-up); gating on VIP would hide the fix from exactly
+ * the person it addresses. Un-subscribed and signed-out Accounts still get no entry.
  */
 export function portalEntryVisibleFor(membership: MembershipDto | null): boolean {
-  return hasVipMembership(membership) && Boolean(membership?.portal_url);
+  return (
+    membership !== null && membership.status !== FREE_STATUS && Boolean(membership.portal_url)
+  );
 }
 
 /** Short Asia/Shanghai calendar day for membership notices, e.g. "2月14日". */
