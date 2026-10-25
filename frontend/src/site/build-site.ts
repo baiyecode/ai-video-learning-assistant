@@ -10,7 +10,6 @@ import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import {
-  isPublicDescriptor,
   MANAGED_ATTRIBUTE,
   notFoundDescriptor,
   NOINDEX_ROBOTS,
@@ -73,22 +72,40 @@ export function outputFileFor(routePath: string): string {
 }
 
 /**
+ * One shell-surgery step shared by every artifact: drop the client build's own
+ * title and description/robots meta, optionally fill the empty ``#app`` mount
+ * with server-rendered body HTML, then inject the artifact's head.
+ */
+function rewriteShell(shellHtml: string, headHtml: string, bodyHtml?: string): string {
+  const mount = /<div id="app"[^>]*>\s*<\/div>/i;
+  if (!mount.test(shellHtml)) {
+    throw new Error("HTML shell is missing an empty #app mount");
+  }
+  let shell = shellHtml
+    .replace(/<title[^>]*>[\s\S]*?<\/title>/i, "")
+    .replace(/<meta\s+name=["'](?:description|robots)["'][^>]*>\s*/gi, "");
+
+  if (bodyHtml !== undefined) {
+    shell = shell.replace(mount, (match) => {
+      const open = /<div id="app"[^>]*>/i.exec(match)?.[0] ?? '<div id="app">';
+      return `${open}${bodyHtml}</div>`;
+    });
+  }
+
+  return shell.replace(/<\/head>/i, () => `    ${headHtml}\n  </head>`);
+}
+
+/**
  * The private SPA shell: the client build's HTML with a plain title and a
  * noindex directive, and deliberately nothing inside ``#app`` — no marketing or
  * Article body is baked into the surface authenticated users load.
  */
 export function composeAppShell(shellHtml: string): string {
-  if (!/<div id="app"[^>]*>\s*<\/div>/i.test(shellHtml)) {
-    throw new Error("HTML shell is missing an empty #app mount");
-  }
   const head = [
     `<title ${MANAGED_ATTRIBUTE}>${APP_SHELL_TITLE}</title>`,
     `<meta name="robots" content="${NOINDEX_ROBOTS}" ${MANAGED_ATTRIBUTE}>`,
   ].join("\n    ");
-  const shell = shellHtml
-    .replace(/<title[^>]*>[\s\S]*?<\/title>/i, "")
-    .replace(/<meta\s+name=["'](?:description|robots)["'][^>]*>\s*/gi, "");
-  return shell.replace(/<\/head>/i, () => `    ${head}\n  </head>`);
+  return rewriteShell(shellHtml, head);
 }
 
 /** Inject the descriptor head and the rendered Vue body into the client shell. */
@@ -98,22 +115,10 @@ export function composeDocument(
   origin: string,
   bodyHtml: string,
 ): string {
-  let shell = shellHtml
-    .replace(/<title[^>]*>[\s\S]*?<\/title>/i, "")
-    .replace(/<meta\s+name=["']description["'][^>]*>\s*/i, "");
-
-  const mount = /<div id="app"[^>]*>\s*<\/div>/i;
-  if (!mount.test(shell)) {
-    throw new Error("HTML shell is missing an empty #app mount");
-  }
-  shell = shell.replace(mount, (match) => {
-    const open = /<div id="app"[^>]*>/i.exec(match)?.[0] ?? '<div id="app">';
-    return `${open}${bodyHtml}</div>`;
-  });
-
-  return shell.replace(
-    /<\/head>/i,
-    () => `    ${renderHeadHtml(descriptor, origin)}\n  </head>`,
+  return rewriteShell(
+    shellHtml,
+    renderHeadHtml(descriptor, origin),
+    bodyHtml,
   );
 }
 
@@ -189,8 +194,6 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildSiteRes
   const built: BuiltPage[] = [];
   const generated: { path: string; html: string }[] = [];
   for (const descriptor of pages) {
-    if (!isPublicDescriptor(descriptor)) continue;
-
     let rendered: RenderedRoute;
     try {
       rendered = await options.renderRoute(descriptor.path, articles);
