@@ -8,6 +8,10 @@
 
 export const SITE_NAME = "AI 视频学习助手";
 export const DEFAULT_SHARE_IMAGE = "/brand/share-card.png";
+/** Square brand icon: apple-touch-icon and the Organization logo. */
+export const BRAND_ICON = "/brand/icon-512.png";
+export const SHARE_IMAGE_WIDTH = 1200;
+export const SHARE_IMAGE_HEIGHT = 630;
 export const INDEX_ROBOTS = "index,follow,max-image-preview:large";
 export const NOINDEX_ROBOTS = "noindex,nofollow";
 export const DEFAULT_DEV_ORIGIN = "http://localhost:5173";
@@ -127,7 +131,32 @@ export function webPageNode(context: JsonLdContext): JsonLdNode {
       name: SITE_NAME,
       url: `${origin}/`,
     },
+    publisher: { "@id": `${origin}/#organization` },
     primaryImageOfPage: { "@type": "ImageObject", url: context.imageUrl },
+  };
+}
+
+/**
+ * The site-level Organization: publisher/owner of every page and article.
+ * ``sameAs`` is intentionally absent — there are no real social profiles yet.
+ */
+export function organizationNode(context: JsonLdContext): JsonLdNode {
+  const { origin } = context;
+  const logoUrl = `${origin}${BRAND_ICON}`;
+  return {
+    "@type": "Organization",
+    "@id": `${origin}/#organization`,
+    name: SITE_NAME,
+    url: `${origin}/`,
+    logo: {
+      "@type": "ImageObject",
+      "@id": `${logoUrl}#image`,
+      url: logoUrl,
+      contentUrl: logoUrl,
+      width: 512,
+      height: 512,
+      caption: SITE_NAME,
+    },
   };
 }
 
@@ -149,6 +178,18 @@ function meta(attrs: Record<string, string>): HeadTag {
   return { tag: "meta", attrs: { ...attrs, [MANAGED_ATTRIBUTE]: "" } };
 }
 
+const ARTICLE_TYPES = new Set(["Article", "BlogPosting", "NewsArticle", "TechArticle"]);
+
+/** Article descriptors may omit publisher; the site Organization fills it in. */
+function isArticleNode(node: JsonLdNode): boolean {
+  const type = node["@type"];
+  if (typeof type === "string") return ARTICLE_TYPES.has(type);
+  if (Array.isArray(type)) {
+    return type.some((item) => typeof item === "string" && ARTICLE_TYPES.has(item));
+  }
+  return false;
+}
+
 /**
  * The pure head contract: descriptor + origin -> ordered tag list.
  * Public pages get title/description/canonical/robots/OG/Twitter/JSON-LD;
@@ -166,8 +207,10 @@ export function headTags(descriptor: PageDescriptor, origin: string): HeadTag[] 
   }
 
   const url = canonicalUrl(origin, descriptor.path);
-  const image = imageUrlFor(descriptor, origin);
-  const imageAlt = descriptor.imageAlt ?? `${SITE_NAME}：粘贴视频地址，下载并读懂它`;
+  const context = jsonLdContext(descriptor, origin);
+  const image = context.imageUrl;
+  const imageAlt =
+    descriptor.imageAlt ?? `${SITE_NAME}：解析公开视频，下载文件、导出字幕并生成 AI 摘要`;
 
   tags.push(
     meta({ name: "description", content: descriptor.description }),
@@ -179,18 +222,27 @@ export function headTags(descriptor: PageDescriptor, origin: string): HeadTag[] 
     meta({ property: "og:description", content: descriptor.description }),
     meta({ property: "og:url", content: url }),
     meta({ property: "og:image", content: image }),
-    meta({ property: "og:image:width", content: "1200" }),
-    meta({ property: "og:image:height", content: "630" }),
+    meta({ property: "og:image:width", content: String(SHARE_IMAGE_WIDTH) }),
+    meta({ property: "og:image:height", content: String(SHARE_IMAGE_HEIGHT) }),
     meta({ property: "og:image:alt", content: imageAlt }),
     meta({ property: "og:locale", content: "zh_CN" }),
     meta({ name: "twitter:card", content: "summary_large_image" }),
     meta({ name: "twitter:title", content: title }),
     meta({ name: "twitter:description", content: descriptor.description }),
     meta({ name: "twitter:image", content: image }),
+    meta({ name: "twitter:image:alt", content: imageAlt }),
   );
 
-  const nodes = descriptor.jsonLd?.(jsonLdContext(descriptor, origin)) ?? [];
-  if (descriptor.breadcrumbs?.length) nodes.push(breadcrumbListNode(jsonLdContext(descriptor, origin)));
+  const nodes = descriptor.jsonLd?.(context) ?? [];
+  if (descriptor.breadcrumbs?.length) nodes.push(breadcrumbListNode(context));
+  const organization = organizationNode(context);
+  const organizationId = organization["@id"] as string;
+  if (!nodes.some((node) => node["@id"] === organizationId)) nodes.push(organization);
+  for (const node of nodes) {
+    if (isArticleNode(node) && node.publisher === undefined) {
+      node.publisher = { "@type": "Organization", "@id": organizationId };
+    }
+  }
   if (nodes.length > 0) {
     const payload = JSON.stringify({ "@context": "https://schema.org", "@graph": nodes });
     tags.push({
