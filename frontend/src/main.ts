@@ -3,12 +3,13 @@ import { createPinia } from "pinia";
 import { createApp } from "vue";
 
 import App from "@/App.vue";
-import { router } from "@/router";
+import { createAppRouter } from "@/router";
 import { useAuthStore } from "@/stores/auth";
 import "@/style.css";
 
 const app = createApp(App);
 const pinia = createPinia();
+const router = createAppRouter();
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN;
 if (sentryDsn) {
