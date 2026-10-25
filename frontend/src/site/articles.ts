@@ -168,23 +168,57 @@ function findExternalImage(body: string): string | undefined {
 }
 
 /**
- * Root-relative link targets in a Markdown body. Exported so ticket #36 can
- * extend the same check site-wide instead of growing a second parser.
+ * One root-relative link target, split into the parts the site-wide audit needs.
+ * ``href`` keeps the original form for error messages; ``path`` is normalized
+ * and ``hash`` is the decoded fragment ("" when absent).
  */
-export function extractInternalLinks(markdown: string): string[] {
-  const targets = new Set<string>();
+export interface InternalLinkRef {
+  href: string;
+  path: string;
+  hash: string;
+}
+
+/** Normalize + split a root-relative href; relative/external targets return undefined. */
+export function parseInternalHref(raw: string): InternalLinkRef | undefined {
+  const href = raw.trim();
+  if (!href.startsWith("/") || href.startsWith("//")) return undefined;
+  const hashIndex = href.indexOf("#");
+  const beforeHash = hashIndex === -1 ? href : href.slice(0, hashIndex);
+  const rawHash = hashIndex === -1 ? "" : href.slice(hashIndex + 1);
+  const pathOnly = beforeHash.split("?")[0];
+  if (!pathOnly) return undefined;
+  return { href, path: normalizeRoute(pathOnly), hash: decodeHash(rawHash) };
+}
+
+function decodeHash(hash: string): string {
+  if (!hash) return "";
+  try {
+    return decodeURIComponent(hash);
+  } catch {
+    return hash;
+  }
+}
+
+/**
+ * Root-relative link targets in a Markdown body (links and ``href`` attributes),
+ * with path and anchor preserved. Exported so the site-wide audit (#36) reuses
+ * this parser instead of growing a second one.
+ */
+export function extractInternalLinkRefs(markdown: string): InternalLinkRef[] {
+  const targets = new Map<string, InternalLinkRef>();
   const add = (raw: string): void => {
-    const href = raw.trim();
-    if (!href.startsWith("/") || href.startsWith("//")) return;
-    const pathOnly = href.split("#")[0].split("?")[0];
-    if (!pathOnly) return;
-    targets.add(normalizeRoute(pathOnly));
+    const ref = parseInternalHref(raw);
+    if (ref && !targets.has(ref.href)) targets.set(ref.href, ref);
   };
   for (const match of markdown.matchAll(/\]\(\s*<?([^)\s>]+)/g)) add(match[1]);
   for (const match of markdown.matchAll(/\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
     add(match[1] ?? match[2] ?? "");
   }
-  return [...targets];
+  return [...targets.values()];
+}
+
+export function extractInternalLinks(markdown: string): string[] {
+  return [...new Set(extractInternalLinkRefs(markdown).map((ref) => ref.path))];
 }
 
 function normalizeRoute(route: string): string {
