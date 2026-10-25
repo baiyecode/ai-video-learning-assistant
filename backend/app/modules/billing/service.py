@@ -27,7 +27,12 @@ from app.modules.billing.models import (
     SubscriptionStatus,
     new_id,
 )
-from app.modules.billing.schemas import CheckoutOut, MembershipOut, PortalOut
+from app.modules.billing.schemas import (
+    PORTAL_ENTRY_PATH,
+    CheckoutOut,
+    MembershipOut,
+    PortalOut,
+)
 from app.modules.identity.models import Account
 from app.ports import BillingGateway, Clock, WebhookEvent
 from app.timeutil import required_utc
@@ -70,7 +75,7 @@ the last status an event of authority wrote."""
 class MembershipState:
     """The one derived membership truth for one Account at one instant.
 
-    ``status`` and ``is_vip`` already honour the lazy expiry edge: an ``active`` /
+    ``status`` and ``vip_active`` already honour the lazy expiry edge: an ``active`` /
     ``trial_ending`` record past ``current_period_end`` presents as ``canceled`` /
     non-VIP (spec Story 10) without the row being rewritten. ``cancel_at_period_end``
     is the provider's *scheduled* cancellation: VIP is retained until ``period_end``
@@ -78,7 +83,7 @@ class MembershipState:
     """
 
     status: str
-    is_vip: bool
+    vip_active: bool
     period_end: datetime | None
     cancel_at_period_end: bool
 
@@ -113,12 +118,12 @@ async def membership_state(
     )
     if subscription is None:
         return MembershipState(
-            status=STATUS_FREE, is_vip=False, period_end=None, cancel_at_period_end=False
+            status=STATUS_FREE, vip_active=False, period_end=None, cancel_at_period_end=False
         )
     expired = _past_period_end(subscription, now)
     return MembershipState(
         status=SubscriptionStatus.CANCELED.value if expired else subscription.status,
-        is_vip=not expired and subscription.status in VIP_STATUSES,
+        vip_active=not expired and subscription.status in VIP_STATUSES,
         period_end=_period_end(subscription),
         cancel_at_period_end=subscription.cancel_at_period_end,
     )
@@ -168,14 +173,28 @@ async def open_portal(
     return PortalOut(url=portal.url)
 
 
-async def membership(session: AsyncSession, account_id: str, *, now: datetime) -> MembershipOut:
-    """The Account's subscription truth: the derived read, never a recomputing write."""
+async def membership(
+    session: AsyncSession, account_id: str, settings: Settings, *, now: datetime
+) -> MembershipOut:
+    """The Account's subscription truth: the derived read, never a recomputing write.
+
+    ``portal_url`` is the spec's portal *entry* placeholder (issue #17 AC): the
+    mounted POST path, identical for every status because the managed Stripe link
+    is only ever minted by that POST, never by this read.
+
+    The displayed price and the free Quota ride along from ``settings`` (ticket #41
+    follow-up): they are the values the server enforces, so the UI has a runtime source
+    for them and ``APP_SUBSCRIPTION_MONTHLY_USD`` is no longer read only by its own test.
+    """
     state = await membership_state(session, account_id, now=now)
     return MembershipOut(
         status=state.status,
         period_end=state.period_end.isoformat() if state.period_end is not None else None,
         cancel_at_period_end=state.cancel_at_period_end,
-        is_vip=state.is_vip,
+        vip_active=state.vip_active,
+        portal_url=PORTAL_ENTRY_PATH,
+        monthly_price_usd=settings.subscription_monthly_usd,
+        daily_free_analysis_limit=settings.analysis_daily_quota,
     )
 
 

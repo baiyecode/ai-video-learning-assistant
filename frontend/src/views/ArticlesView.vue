@@ -50,5 +50,21 @@ const articles = useArticleCollection().published;
         </article>
       </li>
     </ul>
+
+    <section
+      id="articles-cta"
+      class="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm"
+    >
+      <h2 class="text-lg font-semibold text-slate-900">读完就试一次</h2>
+      <p class="mt-2 text-sm text-slate-600">
+        回到工具粘贴页面地址，解析视频后即可导出字幕；需要 AI 摘要时再登录账号。
+      </p>
+      <RouterLink
+        to="/"
+        class="mt-4 inline-block rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700"
+      >
+        回到首页开始解析
+      </RouterLink>
+    </section>
   </div>
 </template>

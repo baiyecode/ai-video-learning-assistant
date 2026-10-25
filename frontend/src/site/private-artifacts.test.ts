@@ -58,7 +58,7 @@ describe("app.html (private SPA shell)", () => {
     // The mount is empty: no marketing or Article body is baked into the shell.
     expect(document.querySelector("#app")?.textContent?.trim()).toBe("");
     expect(document.querySelector("#app")?.children).toHaveLength(0);
-    expect(html).not.toContain("粘贴视频地址");
+    expect(html).not.toContain("粘贴页面地址");
     expect(html).not.toContain("B 站字幕");
     expect(document.querySelectorAll("h1")).toHaveLength(0);
   });
@@ -115,7 +115,7 @@ describe("404.html", () => {
     expect(homeLinks).toContain("返回首页");
 
     // Never the home page: no marketing body, no placeholder title, no indexable meta.
-    expect(html).not.toContain("粘贴视频地址");
+    expect(html).not.toContain("粘贴页面地址");
     expect(html).not.toContain("stale shell description");
     expect(html).not.toContain('content="index,follow');
   });

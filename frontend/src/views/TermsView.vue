@@ -113,13 +113,13 @@ onMounted(async () => {
       <div class="space-y-1">
         <h2 class="text-xl font-semibold text-slate-900">五、举报方式</h2>
         <p class="text-sm text-slate-600">
-          提交后会生成可追踪的举报编号。请尽量提供具体视频地址与说明；联系方式仅用于核实，不会公开展示。
+          提交后会生成可追踪的举报编号。请尽量提供具体页面地址与说明；联系方式仅用于核实，不会公开展示。
         </p>
       </div>
 
       <form class="space-y-4 rounded-xl border border-slate-200 bg-white p-5 shadow-sm" @submit.prevent="submitReport">
         <label class="flex flex-col gap-1 text-sm font-medium text-slate-700">
-          视频地址（可选）
+          页面地址（可选）
           <input
             v-model="form.url"
             type="text"
@@ -186,6 +186,22 @@ onMounted(async () => {
           {{ submitting ? "正在提交…" : "提交举报" }}
         </button>
       </form>
+    </section>
+
+    <section
+      id="terms-cta"
+      class="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm"
+    >
+      <h2 class="text-lg font-semibold text-slate-900">条款读完，回到工具</h2>
+      <p class="mt-2 text-sm text-slate-600">
+        回到首页粘贴页面地址，先解析；需要字幕与摘要时再登录账号。
+      </p>
+      <RouterLink
+        to="/"
+        class="mt-4 inline-block rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700"
+      >
+        回到首页开始解析
+      </RouterLink>
     </section>
   </article>
 </template>

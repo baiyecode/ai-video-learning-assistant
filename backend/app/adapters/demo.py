@@ -14,6 +14,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
+from app import messages
 from app.adapters.webhook_codec import verify_and_decode
 from app.ports import (
     CheckoutSession,
@@ -97,11 +98,12 @@ _DEMO_FORMATS = (
     ),
 )
 
-#: 抖音 ships one progressive mp4, exactly like the yt-dlp adapter's douyin branch.
+#: 抖音 ships one progressive mp4, exactly like the yt-dlp adapter's douyin branch -
+#: same shape and the same story-30 watermark label from one shared constant (ticket #43).
 _DEMO_DOUYIN_FORMATS = (
     VideoFormat(
         format_id="douyin-mp4",
-        label="高清",
+        label=messages.DOUYIN_WATERMARK_LABEL,
         ext="mp4",
         height=720,
         filesize=2048,

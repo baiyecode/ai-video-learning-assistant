@@ -17,7 +17,7 @@ const quotaLabel = computed(() => (store.quota ? formatQuota(store.quota) : ""))
 const quotaReset = computed(() => formatQuotaReset(store.quota?.resets_at));
 // The free-plan cap exhausted today is the strongest moment to offer the upgrade.
 const quotaDepleted = computed(
-  () => !!store.quota && isQuotaDepleted(store.quota, billing.isVip),
+  () => !!store.quota && isQuotaDepleted(store.quota, billing.vipActive),
 );
 
 onMounted(() => {
@@ -45,7 +45,7 @@ function statusClass(status: string): string {
         <span
           v-if="auth.isAuthenticated && billing.membership"
           class="rounded-full px-2 py-0.5 font-medium"
-          :class="billing.isVip ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+          :class="billing.vipActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
         >
           {{ membershipStatusLabel(billing.membership) }}
         </span>

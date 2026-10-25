@@ -24,6 +24,7 @@ function fixtureDescriptor(path: string): PageDescriptor {
     title: "坏链检查页面",
     description:
       "这是用于全站内链校验测试的公开页面描述，长度需要落在七十到一百六十个字符之间，以便通过搜索引擎描述符校验；页面正文只包含一个指向目标地址的链接。",
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
   };

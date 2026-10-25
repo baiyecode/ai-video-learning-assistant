@@ -95,6 +95,15 @@ cd frontend && npm run build
 它决定 canonical、OG/Twitter 卡与 sitemap 里的绝对地址。直接用 `npm run build` 时未设置则回退
 `http://localhost:5173` 并打印警告；回环 origin 会生成 `Disallow: /`，只能用于本地自测，不能用来验证收录。
 
+价格与免费 Quota 只有一处定义：`backend/app/config.py` 里的 `Settings.subscription_monthly_usd` 与
+`analysis_daily_quota`。运行期由 `GET /api/me/membership` 一并回报（`monthly_price_usd` /
+`daily_free_analysis_limit`），个人中心渲染的就是服务端真正持有的值；构建期产物（预渲染营销页、sitemap、
+`llms.txt`）读的是 compose 用**同一组** `APP_SUBSCRIPTION_MONTHLY_USD` / `APP_ANALYSIS_DAILY_QUOTA` 镜像进 `web`
+构建参数的 `VITE_SUBSCRIPTION_MONTHLY_USD` / `VITE_ANALYSIS_DAILY_QUOTA`，取数入口是 `frontend/src/lib/build-env.ts`，
+消费方是 `frontend/src/lib/billing.ts`。因此改价或改配额仍是编辑那一个 env 变量：compose 部署下前后端与发现层一起生效，
+而只改后端环境时后端也再不会「配了却没人读」。`billing.test.ts` 会读取 `backend/app/config.py`，断言前端回退默认值与
+后端 `Settings` 默认值一致，漂移即测试失败；`MembershipDto` 与后端 `MembershipOut` 的字段一致性由同一文件守住。
+
 Playwright 用例默认跳过。设置 `PLAYWRIGHT_E2E=1` 时它会用假适配器自动启动后端与前端 dev server，
 跑通以下链路（`frontend/e2e/`）：
 
@@ -174,7 +183,7 @@ docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 `APP_ENV=production` 时启动会执行 `Settings.validate_production_secrets()`（P2-10）：缺任何一项都**拒绝启动**并在日志中点名缺失变量，绝不带半套配置上线。开发/测试环境不受影响（缺 Stripe/SMTP 时相关请求返回可理解的 503；`APP_FAKE_ADAPTERS=1` 用假网关与内存收件箱，零配置）。
 
 - 必填（缺一即拒启）：`APP_SECRET_KEY`（强随机值）、`APP_STRIPE_API_KEY`、`APP_STRIPE_WEBHOOK_SECRET`、`APP_STRIPE_PRICE_ID`、`APP_SMTP_HOST`、`APP_SMTP_FROM`（`APP_SMTP_USERNAME/PASSWORD` 可留空走免认证中继）。
-- 开关与订阅：`APP_DOUYIN_ENABLED`（默认 `false`，灰度/回滚见 `docs/ops/douyin-gray-release.md`）；`APP_SUBSCRIPTION_MONTHLY_USD=4.99` 仅为前端标价，**实际扣款以支付方（Stripe）配置为准**，调价时两处同步。
+- 开关与订阅：`APP_DOUYIN_ENABLED`（默认 `false`，灰度/回滚见 `docs/ops/douyin-gray-release.md`）；`APP_SUBSCRIPTION_MONTHLY_USD=4.99` 是标价与免费配额的唯一来源，既进 `/api/me/membership` 的响应，也由 compose 镜像成前端 `VITE_` 构建参数（见「构建/预渲染」一节），**实际扣款以支付方（Stripe）配置为准**。
 - 邮件验证：`APP_EMAIL_VERIFICATION_TOKEN_TTL_HOURS=24`；`APP_FRONTEND_BASE_URL` 必须指向用户浏览器实际访问的地址（compose 默认 `http://localhost:8080`，正式域名部署时改为公网 origin，否则验证邮件里的链接打不开）。
 - 限流：`APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR=3`（发信防滥用）。
 - CORS：compose 栈是同源部署（nginx 代理 `/api`），`APP_CORS_ORIGINS` 保持 `[]`；仅当浏览器直连 API 时才配置，本地 Vite 开发放行 5173 的方式见 `.env.example` 注释。

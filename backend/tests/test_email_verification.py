@@ -11,10 +11,12 @@ that needs a *verified* Account confirms the delivered token first.
 from __future__ import annotations
 
 import re
+import smtplib
 from typing import Any
 
 import httpx
 import pytest
+from app import messages
 from app.adapters.smtp_email import SmtpEmailSender
 from app.config import Settings
 from app.container import Adapters, build_production_adapters
@@ -312,7 +314,12 @@ async def test_taken_email_gets_a_reminder_and_creates_no_second_account(
 
 
 async def test_registration_survives_a_failed_email_delivery(settings: Settings) -> None:
-    """A broken mail service must not undo the registration; resending recovers it."""
+    """Ticket #43: the outage is visible (503), yet the Account stands and recovers.
+
+    Registration claims 请查收邮箱中的验证邮件, so a mail that never left must not
+    answer 201. The committed Account is untouched by the failure - login works, and
+    once the mail service is back the resend endpoint delivers the verification link.
+    """
     adapters = make_fake_adapters(
         email_sender=FakeEmailSender(fail_with=RuntimeError("smtp is down"))
     )
@@ -327,9 +334,27 @@ async def test_registration_survives_a_failed_email_delivery(settings: Settings)
                 "/api/auth/register",
                 json={"email": "learner@example.com", "password": PASSWORD},
             )
+            assert response.status_code == 503, response.text
+            error = response.json()["error"]
+            assert error["code"] == "service_unavailable"
+            assert error["message"] == messages.EMAIL_SERVICE_UNAVAILABLE
+            assert adapters.email_sender.sent == []
 
-    assert response.status_code == 201, response.text
-    assert adapters.email_sender.sent == []
+            # The registration itself survived: the password still logs in (story 19).
+            logged_in = await client.post(
+                "/api/auth/login",
+                json={"email": "learner@example.com", "password": PASSWORD},
+            )
+            assert logged_in.status_code == 200, logged_in.text
+
+            # Recovery: with the mail service back, the resend delivers the link.
+            adapters.email_sender.fail_with = None
+            resent = await client.post(
+                "/api/auth/verification/request",
+                headers=bearer(logged_in),
+            )
+            assert resent.status_code == 202, resent.text
+            assert len(adapters.email_sender.sent) == 1
 
 
 async def test_smtp_adapter_refuses_to_send_without_configuration(settings: Settings) -> None:
@@ -341,6 +366,49 @@ async def test_smtp_adapter_refuses_to_send_without_configuration(settings: Sett
     assert raised.value.status == 503
     assert raised.value.code == "service_unavailable"
     assert "邮件服务未配置" in raised.value.message
+
+
+async def test_a_mail_outage_reads_as_one_sentence_from_both_layers(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """README 文案 rule: 同一条件同一句话 (issue #44).
+
+    The SMTP adapter and identity's delivery guard report the *same* condition - an
+    outbound mail that never left - so they must render the same user-visible sentence
+    out of ``app.messages``. Two wordings would teach users that different screens mean
+    different things.
+    """
+    configured = settings.model_copy(
+        update={"smtp_host": "smtp.example.com", "smtp_from": "noreply@example.com"}
+    )
+
+    def _refuse_connection(*args: object, **kwargs: object) -> None:
+        raise smtplib.SMTPException("relay refused the connection")
+
+    monkeypatch.setattr(smtplib, "SMTP", _refuse_connection)
+    with pytest.raises(AppError) as raised:
+        await SmtpEmailSender(configured).send(
+            OutboundEmail(to="someone@example.com", subject="s", body="b")
+        )
+    adapter_copy = raised.value.message
+
+    outage_adapters = make_fake_adapters(
+        email_sender=FakeEmailSender(fail_with=RuntimeError("smtp is down"))
+    )
+    outage_app = create_app(settings=settings, adapters=outage_adapters)
+    async with LifespanManager(outage_app):
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=outage_app, raise_app_exceptions=False),
+            base_url="http://testserver",
+        ) as client:
+            response = await client.post(
+                "/api/auth/register",
+                json={"email": "outage-copy@example.com", "password": PASSWORD},
+            )
+    api_copy = response.json()["error"]["message"]
+
+    assert response.status_code == 503, response.text
+    assert adapter_copy == api_copy == messages.EMAIL_SERVICE_UNAVAILABLE
 
 
 async def test_fake_adapters_mode_ships_an_observable_inbox(settings: Settings) -> None:
@@ -421,6 +489,45 @@ async def test_resend_is_rate_limited_and_reports_a_retry_time(
     assert error["details"]["scope"] == "auth.verification.request"
     assert error["details"]["retry_after"] > 0
     assert int(rejected.headers["retry-after"]) == error["details"]["retry_after"]
+
+
+async def test_resend_reports_a_failed_email_delivery(
+    client: AsyncClient, adapters: Adapters
+) -> None:
+    """Story 21 (ticket #43): an outage must not lie with the 已发送 ack.
+
+    The resend answer is a delivery claim, so it may only appear once the mail has
+    actually left. With the fake inbox raising, the caller gets the unified error
+    envelope - 503 ``service_unavailable`` with the retry sentence - and no extra
+    mail is fabricated in the inbox.
+    """
+    headers = bearer(await login_after_register(client))
+    adapters.email_sender.fail_with = RuntimeError("smtp is down")  # type: ignore[attr-defined]
+
+    resent = await client.post("/api/auth/verification/request", headers=headers)
+
+    assert resent.status_code == 503, resent.text
+    error = resent.json()["error"]
+    assert error["code"] == "service_unavailable"
+    assert error["message"] == messages.EMAIL_SERVICE_UNAVAILABLE
+    assert "已发送" not in error["message"]
+    # Only the registration mail was delivered; the failed resend sent nothing.
+    assert len(sent_emails(adapters)) == 1
+
+
+async def test_resend_recovers_after_a_failed_delivery(client: AsyncClient, adapters: Adapters) -> None:
+    """The 503 is retryable: clearing the outage lets the resend actually deliver."""
+    headers = bearer(await login_after_register(client))
+    adapters.email_sender.fail_with = RuntimeError("smtp is down")  # type: ignore[attr-defined]
+    failed = await client.post("/api/auth/verification/request", headers=headers)
+    assert failed.status_code == 503, failed.text
+
+    adapters.email_sender.fail_with = None  # type: ignore[attr-defined]
+    resent = await client.post("/api/auth/verification/request", headers=headers)
+
+    assert resent.status_code == 202, resent.text
+    assert resent.json()["message"] == "验证邮件已发送，请查收邮箱"
+    assert len(sent_emails(adapters)) == 2
 
 
 # --------------------------------------------------------------------------- #

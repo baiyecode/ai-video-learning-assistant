@@ -5,8 +5,11 @@ import { ApiError } from "@/lib/api";
 import { formatQuota, formatQuotaReset } from "@/lib/analysis";
 import {
   expirationNotice,
+  freeDailyAnalysisLabelFor,
   membershipAlert,
   membershipStatusLabel,
+  portalEntryVisibleFor,
+  priceHeadlineFor,
   renewalNotice,
 } from "@/lib/billing";
 import { authErrorMessage } from "@/lib/authMessages";
@@ -21,10 +24,18 @@ const analysis = useAnalysisStore();
 const alert = computed(() => membershipAlert(billing.membership));
 const expiration = computed(() => expirationNotice(billing.membership));
 const renewal = computed(() => renewalNotice(billing.membership));
+// Price and free Quota come from the /me/membership payload, i.e. from the running
+// backend Settings — the build-time mirror is only the prerender/loading fallback.
+const priceHeadline = computed(() => priceHeadlineFor(billing.membership));
+const freeQuotaLabel = computed(() => freeDailyAnalysisLabelFor(billing.membership));
 const quotaLabel = computed(() => formatQuota(analysis.quota));
 const quotaReset = computed(() => formatQuotaReset(analysis.quota?.resets_at));
 
 const portalBusy = computed(() => billing.loading);
+/** Any Account holding a managed subscription gets the portal entry (issue #44
+ *  follow-up): Past Due needs it to fix the payment method the alert names, and a
+ *  free Account has no subscription to manage — the POST answers ``subscription_not_found``. */
+const showPortalEntry = computed(() => portalEntryVisibleFor(billing.membership));
 
 onMounted(() => {
   void billing.loadMembership();
@@ -60,7 +71,7 @@ async function openPortal(): Promise<void> {
         <h2 class="text-sm font-semibold text-slate-900">订阅状态</h2>
         <span
           class="rounded-full px-2 py-0.5 text-xs font-medium"
-          :class="billing.isVip ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+          :class="billing.vipActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
         >
           {{ membershipStatusLabel(billing.membership) }}
         </span>
@@ -88,12 +99,13 @@ async function openPortal(): Promise<void> {
           {{ expiration }}
         </p>
         <p v-if="billing.membership?.status === 'free'" class="text-slate-500">
-          当前为免费版，每日 Quota 用尽后需等待重置。升级 VIP 后 Analysis 不限次。
+          当前为免费版，{{ freeQuotaLabel }}；用尽后需等待重置，升级 VIP（{{ priceHeadline }}）后 Analysis 不限次。
         </p>
       </div>
 
       <div class="flex flex-wrap items-center gap-3 pt-1">
         <button
+          v-if="showPortalEntry"
           type="button"
           class="rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 transition-colors hover:border-slate-400 hover:bg-slate-50 disabled:cursor-not-allowed disabled:text-slate-400"
           :disabled="portalBusy"

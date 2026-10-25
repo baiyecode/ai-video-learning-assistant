@@ -74,7 +74,7 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
     // --- Upgrade: hosted checkout + injected payment success ----------------
     await payForSubscription(page.request, email);
     const membership = await readMembership(page.request, email);
-    expect(membership).toMatchObject({ status: "active", is_vip: true });
+    expect(membership).toMatchObject({ status: "active", vip_active: true });
 
     // --- Same address, now served ------------------------------------------
     await page.getByRole("button", { name: "AI 分析" }).click();
@@ -109,6 +109,10 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
 
     await resolveOnHome(page, "https://www.douyin.com/video/7400123456789012345", "演示短视频：三分钟搞懂主动回忆");
     await expect(page.getByText("抖音")).toBeVisible();
+    // Story 30 (ticket #43): the single tier is labelled 带水印 like production,
+    // and the forbidden 清晰度 claim never reaches the screen.
+    await expect(page.getByText("带水印")).toBeVisible();
+    await expect(page.getByText("高清")).toHaveCount(0);
 
     const subtitleDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "TXT", exact: true }).click();
@@ -146,6 +150,18 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
     await expect(page.getByRole("heading", { name: "邮箱验证成功" })).toBeVisible();
     await page.getByRole("link", { name: "回到首页" }).click();
     await expect(page.getByText("邮箱尚未验证：视频解析与下载不受影响，但无法发起 Analysis。")).toBeHidden();
+
+    // --- The free Account's own subscription block --------------------------
+    // Price and free Quota on this screen come from GET /me/membership, i.e. from the
+    // running backend Settings (issue #44 / ticket #41), and the portal entry follows
+    // "holds a managed subscription": a free Account has none to manage.
+    await page.getByRole("link", { name: "个人中心" }).click();
+    await expect(page).toHaveURL(/\/account/);
+    await expect(page.getByText("免费版", { exact: true })).toBeVisible();
+    await expect(page.getByText("当前为免费版，每日 3 次 Analysis")).toBeVisible();
+    await expect(page.getByText("$4.99/月")).toBeVisible();
+    await expect(page.getByRole("button", { name: "订阅管理" })).toBeHidden();
+    await backToHome(page);
 
     // --- Burn the free allowance --------------------------------------------
     // Each create is awaited by its redirect to the Analysis screen: HomeView pushes
@@ -193,6 +209,9 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
     await expect(page).toHaveURL(/\/account/);
     await expect(page.getByText("VIP 订阅中")).toBeVisible();
     await expect(page.getByText("Analysis 不限次").first()).toBeVisible();
+    // With VIP active the portal entry appears (issue #44): this is exactly the state
+    // where the managed Stripe link is worth minting.
+    await expect(page.getByRole("button", { name: "订阅管理" })).toBeVisible();
 
     // And Analysis really is uncapped.
     await backToHome(page);

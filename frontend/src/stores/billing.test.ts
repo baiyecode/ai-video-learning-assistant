@@ -16,15 +16,18 @@ const FREE: MembershipDto = {
   status: "free",
   period_end: null,
   cancel_at_period_end: false,
-  is_vip: false,
+  vip_active: false,
+  portal_url: "/api/billing/portal",
+  monthly_price_usd: 4.99,
+  daily_free_analysis_limit: 3,
 };
 
 function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
   return {
+    ...FREE,
     status: "active",
     period_end: "2026-02-14T08:00:00+00:00",
-    cancel_at_period_end: false,
-    is_vip: true,
+    vip_active: true,
     ...overrides,
   };
 }
@@ -43,7 +46,7 @@ describe("billing store", () => {
 
     expect(mocks.get).toHaveBeenCalledWith("/me/membership");
     expect(store.membership).toEqual(FREE);
-    expect(store.isVip).toBe(false);
+    expect(store.vipActive).toBe(false);
     expect(store.loading).toBe(false);
     expect(store.error).toBeNull();
   });
@@ -52,20 +55,20 @@ describe("billing store", () => {
     mocks.get.mockResolvedValue(membership());
     const store = useBillingStore();
     await store.loadMembership();
-    expect(store.isVip).toBe(true);
+    expect(store.vipActive).toBe(true);
 
-    mocks.get.mockResolvedValue(membership({ status: "past_due", is_vip: false }));
+    mocks.get.mockResolvedValue(membership({ status: "past_due", vip_active: false }));
     await store.loadMembership();
-    expect(store.isVip).toBe(false);
+    expect(store.vipActive).toBe(false);
   });
 
-  it("never guesses VIP from a checkout redirect: with no membership loaded isVip is false", async () => {
+  it("never guesses VIP from a checkout redirect: with no membership loaded vipActive is false", async () => {
     const store = useBillingStore();
-    expect(store.isVip).toBe(false);
+    expect(store.vipActive).toBe(false);
 
     mocks.get.mockRejectedValue(new ApiError("auth_required", "请先登录", 401));
     await store.loadMembership();
-    expect(store.isVip).toBe(false);
+    expect(store.vipActive).toBe(false);
   });
 
   it("surfaces the API message when membership cannot be loaded", async () => {
@@ -113,13 +116,13 @@ describe("billing store", () => {
     mocks.get.mockResolvedValue(FREE);
     const store = useBillingStore();
     await store.loadMembership();
-    expect(store.isVip).toBe(false);
+    expect(store.vipActive).toBe(false);
 
     // The browser is back from Stripe: the store flips to VIP only because the
     // fresh /me/membership read says so — never because of a redirect parameter.
     mocks.get.mockResolvedValue(membership());
     await store.loadMembership();
-    expect(store.isVip).toBe(true);
+    expect(store.vipActive).toBe(true);
     expect(store.membership?.status).toBe("active");
   });
 });

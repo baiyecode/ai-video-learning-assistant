@@ -13,7 +13,7 @@ import { APP_SHELL_PATH, PRIVATE_APP_ROUTES } from "@/site/routes";
 import {
   SITE_NAME,
   canonicalUrl,
-  publicDescriptors,
+  indexableDescriptors,
   type PageDescriptor,
 } from "@/site/seo";
 
@@ -57,8 +57,10 @@ function escapeXml(value: string): string {
 }
 
 /**
- * Every public page exactly once, in registry order (home first, marketing
- * pages, then the Article list and each published Article newest first).
+ * Every indexable page exactly once, in registry order (home first, marketing
+ * pages, then the Article list and each published Article newest first). A
+ * public page that opts out of indexing is deliberately not advertised here —
+ * the explicit indexable predicate, not a robots-string coincidence.
  */
 export function buildSitemapXml(
   origin: string,
@@ -68,7 +70,7 @@ export function buildSitemapXml(
     '<?xml version="1.0" encoding="UTF-8"?>',
     '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">',
   ];
-  for (const descriptor of publicDescriptors(descriptors)) {
+  for (const descriptor of indexableDescriptors(descriptors)) {
     lines.push("  <url>");
     lines.push(`    <loc>${escapeXml(canonicalUrl(origin, descriptor.path))}</loc>`);
     // Article descriptors already resolve ``updated`` to ``published``.
@@ -93,7 +95,7 @@ export function buildRobotsTxt(origin: string): string {
   return `${lines.join("\n")}\n`;
 }
 
-/** What llms.txt says about each public marketing page, in reading order. */
+/** What llms.txt says about each indexable marketing page, in reading order. */
 const LLMS_KEY_PAGES: readonly { path: string; label: string; summary: string }[] = [
   {
     path: "/",
@@ -133,7 +135,7 @@ const LLMS_KEY_PAGES: readonly { path: string; label: string; summary: string }[
 ];
 
 const LLMS_SUMMARY =
-  "免费在线工具：粘贴 B 站或 YouTube 视频地址，下载文件、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；不做 ASR，没有字幕的视频无法生成 Analysis。";
+  "免费在线工具：粘贴 B 站或 YouTube 页面地址，下载文件、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；不做 ASR，没有字幕的视频无法生成 Analysis。";
 
 /**
  * llmstxt.org shape: H1, blockquote summary, link sections, then the price and
@@ -144,7 +146,9 @@ export function buildLlmsTxt(
   descriptors: readonly PageDescriptor[],
   articles: ArticleCollection,
 ): string {
-  const publicPaths = new Set(publicDescriptors(descriptors).map((descriptor) => descriptor.path));
+  const publicPaths = new Set(
+    indexableDescriptors(descriptors).map((descriptor) => descriptor.path),
+  );
   const lines = ["# " + SITE_NAME, "", `> ${LLMS_SUMMARY}`, "", "## 关键页面", ""];
   for (const page of LLMS_KEY_PAGES) {
     if (!publicPaths.has(page.path)) continue;

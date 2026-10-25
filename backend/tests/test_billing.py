@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 import pytest
+from app.config import Settings
 from app.modules.billing.models import Subscription
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
@@ -25,14 +26,21 @@ from tests.fakes import FAKE_CHECKOUT_URL
 
 PASSWORD = "correct-horse"
 
+# Spec literal (P2 API 契约 + #17 AC): the portal entry placeholder exposed by
+# GET /me/membership is the POST endpoint that mints the managed link, not a
+# provider-hosted URL. Asserted as a literal, not imported from the service.
+PORTAL_ENTRY_URL = "/api/billing/portal"
+
 
 def bearer(response: Any) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-async def register(client: AsyncClient, *, email: str = "learner@example.com") -> Any:
+async def register(
+    client: AsyncClient, *, email: str = "learner@example.com", expect: int = 201
+) -> Any:
     """Register then log in: billing reads the Session, not the verification state."""
-    await auth_register(client, email=email, password=PASSWORD)
+    await auth_register(client, email=email, password=PASSWORD, expect=expect)
     return await auth_login(client, email=email, password=PASSWORD)
 
 
@@ -102,8 +110,79 @@ async def test_membership_is_free_before_any_subscription(client: AsyncClient) -
         "status": "free",
         "period_end": None,
         "cancel_at_period_end": False,
-        "is_vip": False,
+        "vip_active": False,
+        "portal_url": PORTAL_ENTRY_URL,
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
+
+
+async def test_membership_carries_the_portal_entry_placeholder(client: AsyncClient) -> None:
+    """P2 spec: ``GET /me/membership`` returns ``{ status, period_end, portal_url }``.
+
+    ``portal_url`` is the portal *entry* placeholder (#17 AC): the POST endpoint that
+    mints the managed Stripe link per call. The GET never mints one, so the value is
+    stable across statuses and is not a provider-hosted URL.
+    """
+    auth = bearer(await register(client, email="placeholder@example.com"))
+
+    body = (await client.get("/api/me/membership", headers=auth)).json()
+
+    assert body["status"] == "free"
+    assert body["portal_url"] == PORTAL_ENTRY_URL
+    response = await client.post("/api/billing/portal", headers=auth)
+    assert response.status_code == 404, response.text
+
+
+async def test_membership_reports_the_pricing_knob_it_enforces(
+    client: AsyncClient, settings: Settings
+) -> None:
+    """Ticket #41 / issue #44: ``APP_SUBSCRIPTION_MONTHLY_USD`` has a runtime consumer.
+
+    The setting used to be read only by its own test, so "one repricing knob" held for a
+    docker-compose deploy but not for a running server. The membership read now carries
+    the display price and the free Quota the backend actually enforces, which is what
+    the Account screen renders.
+    """
+    auth = bearer(await register(client, email="pricing@example.com"))
+
+    body = (await client.get("/api/me/membership", headers=auth)).json()
+
+    assert body["monthly_price_usd"] == settings.subscription_monthly_usd
+    assert body["daily_free_analysis_limit"] == settings.analysis_daily_quota
+
+
+async def test_a_repriced_deployment_reports_the_new_price_and_quota(
+    tmp_path: Path,
+) -> None:
+    """One deploy-time edit moves the reported price and free Quota together.
+
+    The expected pair comes from the overrides themselves, never from a frontend
+    literal: a deployment repriced to 8.50 USD with a 5-analysis allowance must say so
+    over the API, or the marketing/env mirror and the running server have diverged.
+    """
+    from app.main import create_app
+
+    tuned = Settings(
+        _env_file=None,
+        env="test",
+        secret_key="test-only-secret",
+        database_url=f"sqlite+aiosqlite:///{(tmp_path / 'repriced.db').as_posix()}",
+        data_dir=tmp_path / "data",
+        log_level="WARNING",
+        subscription_monthly_usd=8.5,
+        analysis_daily_quota=5,
+    )
+    app = create_app(settings=tuned)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+
+    async with LifespanManager(app):
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+            auth = bearer(await register(http_client, email="repriced@example.com", expect=503))
+            body = (await http_client.get("/api/me/membership", headers=auth)).json()
+
+    assert body["monthly_price_usd"] == 8.5
+    assert body["daily_free_analysis_limit"] == 5
 
 
 async def test_membership_reports_a_recorded_subscription(client: AsyncClient, app: FastAPI) -> None:
@@ -117,7 +196,10 @@ async def test_membership_reports_a_recorded_subscription(client: AsyncClient, a
         "status": "active",
         "period_end": "2026-02-14T08:00:00+00:00",
         "cancel_at_period_end": False,
-        "is_vip": True,
+        "vip_active": True,
+        "portal_url": PORTAL_ENTRY_URL,
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
 
@@ -238,7 +320,10 @@ async def test_checkout_endpoint_answers_503_on_production_wiring_without_keys(
 
     async with LifespanManager(production_app):
         async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
-            authed = await register(http_client, email="upgrade@example.com")
+            # Ticket #43: with SMTP unconfigured the registration mail fails visibly
+            # (503 from the adapter) instead of lying about delivery - the Account is
+            # committed before sending, so login still succeeds.
+            authed = await register(http_client, email="upgrade@example.com", expect=503)
             response = await http_client.post("/api/billing/checkout", headers=bearer(authed))
 
     assert response.status_code == 503, response.text

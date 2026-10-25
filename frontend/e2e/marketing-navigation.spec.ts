@@ -55,30 +55,40 @@ test.describe("static navigation", () => {
 
     const nav = page.getByRole("navigation", { name: "主导航" });
 
+    // P3 Testing Decisions: besides H1s, TOC and console cleanliness, assert the
+    // document title updates on every navigation — the runtime head contract.
     await page.goto("/features");
+    await expect(page).toHaveTitle("功能：视频解析、字幕导出与 AI 分析 · AI 视频学习助手");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("功能");
 
     await nav.getByRole("link", { name: "使用指南", exact: true }).click();
     await expect(page).toHaveURL(/\/guide$/);
+    await expect(page).toHaveTitle("使用指南：解析、下载与 AI 分析 · AI 视频学习助手");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("使用指南");
     await expect(page.getByRole("heading", { level: 2, name: "三步完成一次解析" })).toBeVisible();
 
     await nav.getByRole("link", { name: "FAQ", exact: true }).click();
     await expect(page).toHaveURL(/\/faq$/);
+    await expect(page).toHaveTitle("常见问题：平台、Quota 与价格 · AI 视频学习助手");
     await expect(page.getByRole("heading", { level: 1 })).toContainText("常见问题");
     await expect(page.getByRole("heading", { level: 2, name: "支持哪些 Platform？" })).toBeVisible();
 
     await nav.getByRole("link", { name: "文章", exact: true }).click();
     await expect(page).toHaveURL(/\/articles$/);
+    await expect(page).toHaveTitle("文章 · AI 视频学习助手");
     await expect(page.getByRole("heading", { level: 1 })).toHaveText("文章");
 
     await page.getByRole("link", { name: /B 站视频字幕怎么下载/ }).first().click();
     await expect(page).toHaveURL(/\/articles\/bilibili-subtitle-download$/);
+    await expect(page).toHaveTitle(
+      "B 站视频字幕怎么下载？SRT、VTT 与 TXT 导出步骤 · AI 视频学习助手",
+    );
     await expect(page.getByRole("heading", { level: 1 })).toContainText("B 站视频字幕怎么下载");
 
     await nav.getByRole("link", { name: "首页", exact: true }).click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴视频地址");
+    await expect(page).toHaveTitle("视频下载、字幕导出与 AI 摘要 · AI 视频学习助手");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText("粘贴页面地址");
 
     expect(consoleErrors).toEqual([]);
   });

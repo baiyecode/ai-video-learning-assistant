@@ -13,12 +13,15 @@ import asyncio
 import smtplib
 from email.message import EmailMessage
 
+from app import messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.ports import OutboundEmail
 
+# 「邮件服务未配置」 is this adapter's own condition (a deployment that never wired
+# SMTP), so it stays here; the transient outage sentence is shared with identity's
+# delivery guard through ``app.messages`` (README 文案 rule, issue #44).
 _MESSAGE_EMAIL_UNCONFIGURED = "邮件服务未配置，暂时无法发送邮件"
-_MESSAGE_EMAIL_UNAVAILABLE = "邮件服务暂时不可用，请稍后重试"
 
 
 class SmtpEmailSender:
@@ -31,7 +34,7 @@ class SmtpEmailSender:
         try:
             await asyncio.to_thread(self._send_blocking, message)
         except (OSError, smtplib.SMTPException) as exc:
-            raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_EMAIL_UNAVAILABLE) from exc
+            raise AppError(503, ErrorCode.SERVICE_UNAVAILABLE, messages.EMAIL_SERVICE_UNAVAILABLE) from exc
 
     def _send_blocking(self, message: OutboundEmail) -> None:
         settings = self._settings

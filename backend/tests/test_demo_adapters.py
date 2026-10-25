@@ -91,7 +91,11 @@ async def test_demo_video_source_reads_the_identity_off_the_page_address() -> No
 
 
 async def test_demo_video_source_serves_a_douyin_shape() -> None:
-    """抖音 addresses resolve as their own Platform, with one progressive mp4 (ticket #23)."""
+    """抖音 addresses resolve as their own Platform, with one progressive mp4 (ticket #23).
+
+    The single tier carries the production labeling of story 30 - 带水印, never a
+    清晰度 claim like 高清 (ticket #43); the literal mirrors ``test_catalog_douyin``.
+    """
     source = DemoVideoSource()
 
     long_link = await source.resolve(_DOUYIN_URL)
@@ -99,6 +103,7 @@ async def test_demo_video_source_serves_a_douyin_shape() -> None:
     assert long_link.platform_video_id == "7400123456789012345"
     assert long_link.title == "演示短视频：三分钟搞懂主动回忆"
     assert [format.ext for format in long_link.formats] == ["mp4"]
+    assert [format.label for format in long_link.formats] == ["带水印"]
     assert long_link.webpage_url == _DOUYIN_URL
 
     short_link = await source.resolve("https://v.douyin.com/abcDEF/")
@@ -182,6 +187,8 @@ async def test_resolve_accepts_douyin_only_while_the_switch_is_open(tmp_path: Pa
         assert body["video"]["platform"] == "douyin"
         assert body["video"]["title"] == "演示短视频：三分钟搞懂主动回忆"
         assert body["can_analyze"] is True
+        # What the browser golden path renders: the story-30 watermark labeling (ticket #43).
+        assert [format["label"] for format in body["formats"]] == ["带水印"]
 
 
 # ------------------------------------------------- the whole upgrade golden path
@@ -221,7 +228,7 @@ async def test_golden_path_quota_exhausted_then_upgrade_then_unlimited(tmp_path:
 
         membership = (await client.get("/api/me/membership", headers=auth)).json()
         assert membership["status"] == "active"
-        assert membership["is_vip"] is True
+        assert membership["vip_active"] is True
         assert membership["period_end"] is not None
 
         assert await _resolve_and_analyse(client, auth, "goldenPath3") == "completed"
