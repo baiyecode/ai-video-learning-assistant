@@ -14,6 +14,7 @@ import httpx
 from app.container import Adapters
 from httpx import AsyncClient
 
+from tests.auth_flows import verified_account
 from tests.fakes import sample_video
 
 PASSWORD = "correct-horse"
@@ -35,10 +36,10 @@ def _url(platform_video_id: str) -> str:
     return f"https://www.youtube.com/watch?v={platform_video_id}"
 
 
-async def _register(client: AsyncClient, email: str = "learner@example.com") -> dict[str, str]:
-    response = await client.post("/api/auth/register", json={"email": email, "password": PASSWORD})
-    assert response.status_code == 201, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+async def _register(
+    adapters: Adapters, client: AsyncClient, email: str = "learner@example.com"
+) -> dict[str, str]:
+    return await verified_account(client, adapters, email=email, password=PASSWORD)
 
 
 async def _resolve(
@@ -126,7 +127,7 @@ async def test_list_shows_only_own_analyses_newest_first_with_video_and_snippet(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT_FOR_LIST)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     first_video = await _resolve(client, adapters, "listvid0001", title="第一个视频")
     first_id = (await _create(client, headers, first_video)).json()["id"]
     await _wait_terminal(client, headers, first_id)
@@ -164,8 +165,8 @@ async def test_list_requires_authentication(client: AsyncClient) -> None:
 async def test_list_never_leaks_another_accounts_analysis(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    owner = await _register(client, "owner@example.com")
-    other = await _register(client, "other@example.com")
+    owner = await _register(adapters, client, "owner@example.com")
+    other = await _register(adapters, client, "other@example.com")
     video_id = await _resolve(client, adapters)
     analysis_id = (await _create(client, owner, video_id)).json()["id"]
     await _wait_terminal(client, owner, analysis_id)
@@ -183,7 +184,7 @@ async def test_list_detail_and_stream_visits_do_not_consume_quota(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SCRIPT_FOR_LIST)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
     analysis_id = (await _create(client, headers, video_id)).json()["id"]
     await _wait_terminal(client, headers, analysis_id)
@@ -202,7 +203,7 @@ async def test_force_creates_new_row_consumes_exactly_one_and_keeps_previous_res
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(OLD_SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
     first_id = (await _create(client, headers, video_id)).json()["id"]
     first = await _wait_terminal(client, headers, first_id)
@@ -235,7 +236,7 @@ async def test_force_with_exhausted_quota_is_rejected_and_keeps_previous_result(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(OLD_SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     analysis_ids = await _spend_all_quota(client, adapters, headers)
     assert (await _me(client, headers))["remaining"] == 0
 
@@ -260,7 +261,7 @@ async def test_force_while_analysis_is_in_progress_reuses_it_without_spending_qu
 ) -> None:
     adapters.summarizer.chunks = list(OLD_SCRIPT)  # type: ignore[attr-defined]
     adapters.summarizer.delay_seconds = 0.05  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
     first = await _create(client, headers, video_id)
     assert first.status_code == 201
@@ -277,7 +278,7 @@ async def test_failed_analysis_reports_error_code_in_history(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.error = RuntimeError("upstream exploded")  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters)
     analysis_id = (await _create(client, headers, video_id)).json()["id"]
     await _wait_terminal(client, headers, analysis_id)

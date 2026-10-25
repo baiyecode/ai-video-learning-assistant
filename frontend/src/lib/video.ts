@@ -42,6 +42,7 @@ export interface ResolveResult {
 const PLATFORM_LABELS: Record<string, string> = {
   youtube: "YouTube",
   bilibili: "B 站",
+  douyin: "抖音",
 };
 
 const SIZE_UNITS = ["B", "KB", "MB", "GB", "TB"] as const;

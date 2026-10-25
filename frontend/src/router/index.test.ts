@@ -1,0 +1,86 @@
+// @vitest-environment jsdom
+/**
+ * Client navigation uses the same descriptors as the build: no route-specific
+ * title/robots code in the router, and no accumulated managed tags.
+ */
+import { createMemoryHistory } from "vue-router";
+import { afterEach, describe, expect, it, vi } from "vitest";
+
+import { createAppRouter } from "@/router";
+import { ANALYSIS_DETAIL_ROUTE, PRIVATE_APP_ROUTES } from "@/site/routes";
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  document.head.innerHTML = "";
+});
+
+describe("router head updates", () => {
+  it("declares every shared private app route in the real route table", () => {
+    const router = createAppRouter(createMemoryHistory(), { updateHead: false });
+    const paths = new Set(router.getRoutes().map((route) => route.path));
+
+    for (const route of PRIVATE_APP_ROUTES) {
+      expect(paths.has(route), route).toBe(true);
+    }
+    expect(paths.has(ANALYSIS_DETAIL_ROUTE)).toBe(true);
+  });
+
+  it("updates title, description and canonical from the shared descriptor", async () => {
+    vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
+    const router = createAppRouter(createMemoryHistory());
+
+    await router.push("/features");
+    await router.isReady();
+
+    expect(document.title).toBe("功能：视频解析、字幕导出与 AI 分析 · AI 视频学习助手");
+    expect(document.querySelector('meta[name="description"]')?.getAttribute("content")?.length).toBeGreaterThanOrEqual(70);
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://example.com/features",
+    );
+
+    await router.push("/");
+    expect(document.title).toBe("视频下载、字幕导出与 AI 摘要 · AI 视频学习助手");
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://example.com/",
+    );
+  });
+
+  it("does not duplicate managed tags after repeated navigation", async () => {
+    vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
+    const router = createAppRouter(createMemoryHistory());
+
+    await router.push("/features");
+    await router.push("/");
+    await router.push("/features");
+    await router.isReady();
+
+    expect(document.querySelectorAll("title")).toHaveLength(1);
+    expect(document.querySelectorAll('link[rel="canonical"]')).toHaveLength(1);
+    expect(document.querySelectorAll('meta[name="robots"]')).toHaveLength(1);
+    expect(document.querySelectorAll('script[type="application/ld+json"]')).toHaveLength(1);
+  });
+
+  it("updates the head for the Article list and a real Article slug", async () => {
+    vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
+    const router = createAppRouter(createMemoryHistory());
+
+    await router.push("/articles");
+    await router.isReady();
+    expect(document.title).toBe("文章 · AI 视频学习助手");
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://example.com/articles",
+    );
+
+    await router.push("/articles/bilibili-subtitle-download");
+    expect(document.title).toBe(
+      "B 站视频字幕怎么下载？SRT、VTT 与 TXT 导出步骤 · AI 视频学习助手",
+    );
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://example.com/articles/bilibili-subtitle-download",
+    );
+    expect(
+      document.querySelector('meta[property="article:published_time"]')?.getAttribute("content"),
+    ).toBe("2026-10-25");
+    expect(document.querySelectorAll('script[type="application/ld+json"]')).toHaveLength(1);
+  });
+});

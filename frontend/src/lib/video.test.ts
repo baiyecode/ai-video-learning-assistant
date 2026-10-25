@@ -1,11 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  formatDuration,
-  formatFileSize,
-  platformLabel,
-  subtitleSourceLabel,
-} from "@/lib/video";
+import { formatDuration, formatFileSize, platformLabel, subtitleSourceLabel } from "@/lib/video";
 
 describe("formatDuration", () => {
   it("renders minutes and seconds under an hour", () => {
@@ -50,10 +45,11 @@ describe("platformLabel", () => {
   it("maps known platforms to their Chinese-facing labels", () => {
     expect(platformLabel("youtube")).toBe("YouTube");
     expect(platformLabel("bilibili")).toBe("B 站");
+    expect(platformLabel("douyin")).toBe("抖音");
   });
 
   it("falls back to the raw platform string", () => {
-    expect(platformLabel("douyin")).toBe("douyin");
+    expect(platformLabel("vimeo")).toBe("vimeo");
   });
 });
 

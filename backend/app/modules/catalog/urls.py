@@ -3,11 +3,18 @@
 A URL is only an input: the Video's identity is ``(Platform, Platform video id)``.
 This module strips everything that must not influence identity — tracking params,
 timestamps, fragments, quality/part params, mobile hosts, short-link wrappers —
-and rejects inputs that are not a single Bilibili/YouTube video.
+and rejects inputs that are not a single supported-video page.
 
-Short links (``b23.tv``) cannot be mapped to a Platform video id offline, so they are
-forwarded to the ``VideoSource`` adapter, which follows the redirect. Identity still
-comes from the adapter's ``ResolvedVideo``, so two wrappers of one Video deduplicate.
+The Platform registry below (``PLATFORM_HOSTS``) is the single source of truth for
+which hosts belong to which Platform. Gated Platforms (Douyin, ticket #23) are only
+accepted when callers pass an ``enabled_platforms`` set that contains them; otherwise
+their URLs are rejected with the dedicated ``platform_not_enabled`` code so the UI can
+say 「抖音暂未开放」 instead of 「链接不受支持」.
+
+Short links (``b23.tv``, ``v.douyin.com``) cannot be mapped to a Platform video id
+offline, so they are forwarded to the ``VideoSource`` adapter, which follows the
+redirect. Identity still comes from the adapter's ``ResolvedVideo``, so two wrappers
+of one Video deduplicate.
 """
 
 from __future__ import annotations
@@ -25,6 +32,15 @@ _YOUTUBE_ID = re.compile(r"[A-Za-z0-9_-]{11}")
 _BILIBILI_BVID = re.compile(r"BV[0-9A-Za-z]{10}")
 _BILIBILI_AVID = re.compile(r"av\d+", re.IGNORECASE)
 _SHORT_LINK_CODE = re.compile(r"[A-Za-z0-9_-]+")
+_DOUYIN_VIDEO_ID = re.compile(r"\d{5,23}")
+
+# Feature-switch rejection (ticket #23): the platform is recognised but not opened
+# yet. Single-module copy per the README convention: it only ever surfaces here.
+_MESSAGE_PLATFORM_NOT_ENABLED = "抖音暂未开放"
+
+YOUTUBE_PLATFORM = "youtube"
+BILIBILI_PLATFORM = "bilibili"
+DOUYIN_PLATFORM = "douyin"
 
 _YOUTUBE_HOSTS = {
     "youtube.com",
@@ -32,26 +48,48 @@ _YOUTUBE_HOSTS = {
     "m.youtube.com",
     "youtube-nocookie.com",
     "www.youtube-nocookie.com",
+    "youtu.be",
 }
 _BILIBILI_VIDEO_HOSTS = {"bilibili.com", "m.bilibili.com"}
 _BILIBILI_SHORT_HOSTS = {"b23.tv"}
+_DOUYIN_VIDEO_HOSTS = {"douyin.com", "www.douyin.com", "m.douyin.com"}
+_DOUYIN_SHORT_HOSTS = {"v.douyin.com"}
+
+#: Registry: Platform id -> hosts it owns. The single source of truth for the
+#: supported list: :data:`_HOST_PLATFORM` is derived from it and the normalise
+#: dispatch below resolves every host through that map.
+PLATFORM_HOSTS: dict[str, frozenset[str]] = {
+    YOUTUBE_PLATFORM: frozenset(_YOUTUBE_HOSTS),
+    BILIBILI_PLATFORM: frozenset(_BILIBILI_VIDEO_HOSTS | _BILIBILI_SHORT_HOSTS),
+    DOUYIN_PLATFORM: frozenset(_DOUYIN_VIDEO_HOSTS | _DOUYIN_SHORT_HOSTS),
+}
+
+#: Host -> Platform lookup consumed by the dispatch, generated from ``PLATFORM_HOSTS``.
+_HOST_PLATFORM: dict[str, str] = {
+    host: platform for platform, hosts in PLATFORM_HOSTS.items() for host in hosts
+}
+
+#: Platforms accepted without any feature switch.
+DEFAULT_ENABLED_PLATFORMS = frozenset({YOUTUBE_PLATFORM, BILIBILI_PLATFORM})
 
 
-def normalize_video_url(raw: str) -> str:
+def normalize_video_url(raw: str, *, enabled_platforms: frozenset[str] = DEFAULT_ENABLED_PLATFORMS) -> str:
     """Return the canonical single-video URL or raise :class:`AppError`.
 
     Canonical forms:
     - ``https://www.youtube.com/watch?v=<id>``
     - ``https://www.bilibili.com/video/<BV...|av...>``
     - ``https://b23.tv/<code>`` (short link, resolved by the adapter)
+    - ``https://www.douyin.com/video/<id>`` (only while ``douyin`` is enabled)
+    - ``https://v.douyin.com/<code>`` (short link, resolved by the adapter)
 
     Bilibili multi-part parameters (``p=``) are part of the same Platform video and are
     dropped: P1 treats one BV/av id as one Video.
 
-    This is a pure, synchronous structural check: only http(s) URLs on the
-    Bilibili/YouTube hosts are accepted, with no credentials and a standard port, and
-    IP literals / private name suffixes are rejected outright. DNS is checked
-    separately by :func:`ensure_public_url` so the async request path never blocks.
+    This is a pure, synchronous structural check: only http(s) URLs on registered hosts
+    are accepted, with no credentials and a standard port, and IP literals / private
+    name suffixes are rejected outright. DNS is checked separately by
+    :func:`ensure_public_url` so the async request path never blocks.
     """
     text = (raw or "").strip()
     if not text:
@@ -78,11 +116,23 @@ def normalize_video_url(raw: str) -> str:
         raise _unsupported()
     _reject_private_host(host)
 
-    if host in _YOUTUBE_HOSTS or host == "youtu.be":
+    # Dispatch resolves the host through the registry-derived platform map: an
+    # unregistered host is unsupported, full stop.
+    platform = _HOST_PLATFORM.get(host)
+    if platform == YOUTUBE_PLATFORM:
         return _normalise_youtube(host, parsed.path, parsed.query)
-    if host in _BILIBILI_SHORT_HOSTS:
-        return _normalise_bilibili_short(parsed.path)
-    if host in _BILIBILI_VIDEO_HOSTS or host.endswith(".bilibili.com"):
+    if platform == BILIBILI_PLATFORM:
+        if host in _BILIBILI_SHORT_HOSTS:
+            return _normalise_bilibili_short(parsed.path)
+        return _normalise_bilibili(host, parsed.path, parsed.query)
+    if platform == DOUYIN_PLATFORM:
+        if DOUYIN_PLATFORM not in enabled_platforms:
+            raise _platform_not_enabled()
+        return _normalise_douyin(host, parsed.path)
+    if host.endswith(".bilibili.com"):
+        # Registered family sub-domains the registry does not list as hosts
+        # (live., space., …) still belong to the Bilibili branch so their
+        # dedicated rejection copy beats the generic unsupported one.
         return _normalise_bilibili(host, parsed.path, parsed.query)
     raise _unsupported()
 
@@ -191,6 +241,22 @@ def _normalise_bilibili_short(path: str) -> str:
     return f"https://b23.tv/{code}"
 
 
+def _normalise_douyin(host: str, path: str) -> str:
+    if host in _DOUYIN_SHORT_HOSTS:
+        code = path.strip("/")
+        if not code or "/" in code or not _SHORT_LINK_CODE.fullmatch(code):
+            raise _unsupported()
+        return f"https://v.douyin.com/{code}"
+
+    clean_path = path.rstrip("/") or "/"
+    if not clean_path.startswith("/video/"):
+        raise _unsupported()
+    video_id = clean_path[len("/video/") :].split("/")[0]
+    if not _DOUYIN_VIDEO_ID.fullmatch(video_id):
+        raise _unsupported()
+    return f"https://www.douyin.com/video/{video_id}"
+
+
 def _normalise_bilibili(host: str, path: str, query: str) -> str:
     clean_path = path.rstrip("/") or "/"
 
@@ -225,6 +291,16 @@ def _youtube_watch_url(video_id: str) -> str:
 
 def _unsupported() -> AppError:
     return AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_URL)
+
+
+def _platform_not_enabled() -> AppError:
+    # Only the gated platform (Douyin, ticket #23) can reach this error.
+    return AppError(
+        422,
+        ErrorCode.PLATFORM_NOT_ENABLED,
+        _MESSAGE_PLATFORM_NOT_ENABLED,
+        {"platform": DOUYIN_PLATFORM},
+    )
 
 
 def _playlist() -> AppError:

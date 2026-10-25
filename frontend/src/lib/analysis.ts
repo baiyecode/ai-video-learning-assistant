@@ -35,6 +35,10 @@ export interface AnalysisDto {
   updated_at: string;
   completed_at: string | null;
   video: AnalysisVideoDto | null;
+  /** Subscription status behind the quota gate: "free"/"active"/"trial_ending"/... */
+  membership?: string;
+  /** Post-creation quota snapshot; VIP carries the unlimited sentinel. */
+  quota?: QuotaDto | null;
 }
 
 /** `GET /api/me` quota block. `resets_at` is ISO8601 with a `+08:00` offset. */
@@ -43,6 +47,22 @@ export interface QuotaDto {
   used: number;
   remaining: number;
   resets_at: string;
+  /** Subscription status; a negative `daily_limit` is the VIP unlimited sentinel. */
+  membership?: string;
+}
+
+/** The VIP unlimited sentinel is read in exactly one place. */
+export function isUnlimitedQuota(quota: QuotaDto): boolean {
+  return quota.daily_limit < 0;
+}
+
+/**
+ * True when the free daily cap is spent right now: a finite quota with nothing
+ * left and no VIP lifting it. VIP is read from `/me/membership` — the single
+ * subscription source — never guessed from the sentinel.
+ */
+export function isQuotaDepleted(quota: QuotaDto, isVip: boolean): boolean {
+  return !isUnlimitedQuota(quota) && quota.remaining <= 0 && !isVip;
 }
 
 export const MINDMAP_MARKER = "## 思维导图";
@@ -160,6 +180,8 @@ export function analysisStatusLabel(status: AnalysisStatus): string {
 
 export function formatQuota(quota: QuotaDto | null | undefined): string {
   if (!quota) return "Quota 加载中";
+  // VIP Membership: the backend sends the -1 unlimited sentinel instead of a cap.
+  if (isUnlimitedQuota(quota)) return "Analysis 不限次";
   const limit = Math.max(0, quota.daily_limit);
   const remaining = Math.max(0, Math.min(quota.remaining, limit));
   return `Quota 剩余 ${remaining} / ${limit}`;
@@ -216,6 +238,17 @@ export function reanalysisAvailability(
       remaining: null,
       cost: REANALYSIS_COST,
       message: "将消耗 1 Quota",
+      resetsAt: null,
+    };
+  }
+
+  // VIP Membership carries the -1 unlimited sentinel: nothing to block and nothing to spend.
+  if (isUnlimitedQuota(quota)) {
+    return {
+      allowed: true,
+      remaining: null,
+      cost: 0,
+      message: "VIP Membership：Analysis 不限次，本次不消耗 Quota",
       resetsAt: null,
     };
   }

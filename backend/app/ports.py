@@ -113,3 +113,106 @@ class BudgetLedger(Protocol):
     async def can_spend(self, estimated_usd: float) -> bool: ...
 
     async def record(self, usd: float) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class OutboundEmail:
+    """A single plain-text email to deliver. The body carries any links the product needs."""
+
+    to: str
+    subject: str
+    body: str
+
+
+@runtime_checkable
+class EmailSender(Protocol):
+    """Deliver one email. Fake adapters keep an observable in-memory inbox."""
+
+    async def send(self, message: OutboundEmail) -> None: ...
+
+
+@runtime_checkable
+class ObservableInbox(Protocol):
+    """The in-memory capability a fake mailer adds: read back what was "delivered".
+
+    Business modules check for this port instead of importing a concrete adapter
+    (the demo inbox route is the only consumer); real senders never implement it.
+    """
+
+    def messages_for(self, to: str | None = None) -> list[OutboundEmail]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class CheckoutSession:
+    """A hosted payment page created by the billing gateway; the user is sent to ``url``."""
+
+    id: str
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class CustomerPortal:
+    """The provider-hosted customer portal page (card updates, invoices) for one owner."""
+
+    url: str
+
+
+@dataclass(frozen=True, slots=True)
+class WebhookEvent:
+    """A signature-verified domain event decoded by a BillingGateway adapter.
+
+    Routes consume only this carrier (type + payload fields + event id + created).
+    Provider-specific fields are optional: events the current state machine does not
+    act on (cancellations, invoices) arrive with just the identity fields filled.
+    """
+
+    event_id: str
+    type: str
+    created: datetime
+    account_id: str | None = None
+    provider_customer_id: str | None = None
+    provider_subscription_id: str | None = None
+    current_period_end: datetime | None = None
+    price_id: str | None = None
+    subscription_status: str | None = None
+    """Raw provider subscription status (``active``/``trialing``/``canceled``/``past_due``)
+    carried by subscription objects; the state machine maps it, unknown values never guess."""
+    cancel_at_period_end: bool | None = None
+    """The provider's *scheduled* cancellation flag carried by subscription objects:
+    VIP is retained until ``current_period_end``. ``None`` (invoice events) never writes."""
+
+
+@runtime_checkable
+class BillingGateway(Protocol):
+    """Subscription billing provider (Stripe in production). Business modules never
+    import the SDK; adapters that raise ``AppError`` surface as the HTTP envelope."""
+
+    async def create_checkout(
+        self,
+        *,
+        account_id: str,
+        email: str | None,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        """Create a subscription Checkout Session for one monthly price."""
+        ...
+
+    def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
+        """Verify the raw webhook body against the provider signature header and
+        decode it into one domain event. Raises ``AppError`` (400) when the signature
+        is invalid or the body is unreadable; the payload is trusted only past this gate."""
+        ...
+
+    async def create_portal(
+        self,
+        *,
+        provider_customer_id: str,
+        return_url: str,
+    ) -> CustomerPortal:
+        """Mint a customer portal session for the subscription owner (P2-04 self-service).
+
+        ``provider_customer_id`` may be blank when the webhooks never carried one; adapters
+        answer an understandable ``AppError`` instead of an SDK-level failure."""
+        ...

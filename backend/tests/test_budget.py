@@ -22,6 +22,7 @@ from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
 
+from tests.auth_flows import verified_account
 from tests.fakes import (
     FakeBudgetLedger,
     FakeSummarizer,
@@ -44,12 +45,8 @@ def _url(key: str) -> str:
     return f"https://www.youtube.com/watch?v={key}"
 
 
-async def _register(client: AsyncClient) -> dict[str, str]:
-    response = await client.post(
-        "/api/auth/register", json={"email": "budget@example.com", "password": PASSWORD}
-    )
-    assert response.status_code == 201, response.text
-    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+async def _register(adapters: Adapters, client: AsyncClient) -> dict[str, str]:
+    return await verified_account(client, adapters, email="budget@example.com", password=PASSWORD)
 
 
 async def _resolve(client: AsyncClient, adapters: Adapters, key: str) -> str:
@@ -92,7 +89,7 @@ async def test_new_analysis_is_blocked_when_the_daily_budget_is_exhausted(
 ) -> None:
     adapters.budget_ledger.spent_usd = 1.0  # type: ignore[attr-defined]
     adapters.budget_ledger.budget_usd = 1.0  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "budgetvid01")
 
     rejected = await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
@@ -112,7 +109,7 @@ async def test_existing_results_remain_viewable_when_the_budget_is_exhausted(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SUMMARY_SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "budgetvid02")
     created = await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
     assert created.status_code == 201, created.text
@@ -145,7 +142,7 @@ async def test_each_summarizer_call_is_recorded_once(
     client: AsyncClient, adapters: Adapters
 ) -> None:
     adapters.summarizer.chunks = list(SUMMARY_SCRIPT)  # type: ignore[attr-defined]
-    headers = await _register(client)
+    headers = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "budgetvid04")
 
     created = await client.post("/api/analyses", json={"video_id": video_id}, headers=headers)
@@ -175,7 +172,7 @@ async def test_map_reduce_records_n_plus_one_calls(
     app, transport = _client_for(tuned, adapters)
     async with LifespanManager(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            headers = await _register(client)
+            headers = await _register(adapters, client)
             key = "budgetchun1"
             url = _url(key)
             adapters.video_source.videos[url] = sample_video(platform_video_id=key)  # type: ignore[attr-defined]
@@ -253,7 +250,7 @@ async def test_creation_gates_on_every_planned_summarizer_call(settings: Setting
     app, transport = _client_for(tuned, adapters)
     async with LifespanManager(app):
         async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
-            headers = await _register(client)
+            headers = await _register(adapters, client)
             key = "budgetchun2"
             url = _url(key)
             adapters.video_source.videos[url] = sample_video(platform_video_id=key)  # type: ignore[attr-defined]

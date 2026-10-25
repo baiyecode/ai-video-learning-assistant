@@ -22,6 +22,9 @@ from fastapi import FastAPI
 from httpx import AsyncClient
 from sqlalchemy import select
 
+from tests.auth_flows import confirm_email
+from tests.auth_flows import login as _login_flow
+from tests.auth_flows import register as _register_flow
 from tests.fakes import FakeSummarizer, make_fake_adapters, sample_video
 
 PASSWORD = "correct-horse"
@@ -39,11 +42,10 @@ async def _running(app: FastAPI) -> AsyncIterator[AsyncClient]:
             yield client
 
 
-async def _register(client: AsyncClient) -> tuple[dict[str, str], str]:
-    response = await client.post(
-        "/api/auth/register", json={"email": "restart@example.com", "password": PASSWORD}
-    )
-    assert response.status_code == 201, response.text
+async def _register(adapters: Adapters, client: AsyncClient) -> tuple[dict[str, str], str]:
+    await _register_flow(client, email="restart@example.com", password=PASSWORD)
+    await confirm_email(client, adapters)
+    response = await _login_flow(client, email="restart@example.com", password=PASSWORD)
     body = response.json()
     return {"Authorization": f"Bearer {body['access_token']}"}, body["account"]["id"]
 
@@ -85,7 +87,7 @@ async def test_restart_marks_interrupted_analysis_failed_and_releases_quota(
     adapters = make_fake_adapters(summarizer=slow)
     app = create_app(settings=settings, adapters=adapters)
     async with _running(app) as client:
-        headers, _account_id = await _register(client)
+        headers, _account_id = await _register(adapters, client)
         video_id = await _resolve(client, adapters, "restart0001")
         created = await client.post(
             "/api/analyses", json={"video_id": video_id}, headers=headers
@@ -124,7 +126,7 @@ async def test_restart_marks_interrupted_analysis_failed_and_releases_quota(
 async def test_generation_reads_the_snapshot_not_the_mutable_subtitle(
     client: AsyncClient, adapters: Adapters, app: FastAPI
 ) -> None:
-    headers, account_id = await _register(client)
+    headers, account_id = await _register(adapters, client)
     video_id = await _resolve(client, adapters, "snapshot001")
 
     async with app.state.sessionmaker() as session:
@@ -166,7 +168,7 @@ async def test_no_active_rows_remain_after_recovery(
     adapters = make_fake_adapters(summarizer=FakeSummarizer(delay_seconds=30.0))
     app = create_app(settings=settings, adapters=adapters)
     async with _running(app) as client:
-        headers, _account_id = await _register(client)
+        headers, _account_id = await _register(adapters, client)
         video_id = await _resolve(client, adapters, "restart0002")
         created = await client.post(
             "/api/analyses", json={"video_id": video_id}, headers=headers

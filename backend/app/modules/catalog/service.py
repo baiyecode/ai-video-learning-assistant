@@ -17,6 +17,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
+from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.ports import Clock, ResolvedVideo, VideoSource, VideoUnavailableError
 from app.timeutil import as_utc
@@ -33,14 +34,25 @@ from .schemas import (
     format_snapshot,
     subtitle_snapshot,
 )
-from .urls import ensure_public_url, normalize_video_url
+from .urls import (
+    DEFAULT_ENABLED_PLATFORMS,
+    DOUYIN_PLATFORM,
+    ensure_public_url,
+    normalize_video_url,
+)
 
-logger = logging.getLogger("app.catalog")
+logger = logging.getLogger("app.modules.catalog")
 
 FORMATS_TTL = timedelta(minutes=10)
-SUPPORTED_PLATFORMS = frozenset({"youtube", "bilibili"})
 
 _MESSAGE_VIDEO_UNAVAILABLE = "视频不可用，可能已被删除、设为私密或受地区限制"
+
+
+def enabled_platforms(settings: Settings) -> frozenset[str]:
+    """The Platform registry as opened by this deployment's feature switches."""
+    if settings.douyin_enabled:
+        return DEFAULT_ENABLED_PLATFORMS | {DOUYIN_PLATFORM}
+    return DEFAULT_ENABLED_PLATFORMS
 
 
 async def resolve_video(
@@ -48,8 +60,10 @@ async def resolve_video(
     source: VideoSource,
     clock: Clock,
     raw_url: str,
+    settings: Settings,
 ) -> ResolveResponse:
-    normalized_url = normalize_video_url(raw_url)
+    platforms = enabled_platforms(settings)
+    normalized_url = normalize_video_url(raw_url, enabled_platforms=platforms)
     await ensure_public_url(normalized_url)
     resolved = await _resolve_with_source(source, normalized_url)
 
@@ -60,7 +74,7 @@ async def resolve_video(
 
     platform = resolved.platform.strip().lower()
     platform_video_id = resolved.platform_video_id.strip()
-    if platform not in SUPPORTED_PLATFORMS:
+    if platform not in platforms:
         raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.UNSUPPORTED_PLATFORM)
     if not platform_video_id:
         raise AppError(502, ErrorCode.RESOLVE_FAILED, messages.RESOLVE_FAILED)

@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <title>AI 视频学习助手 · 1200x630 share card source</title>
+    <style>
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        width: 1200px;
+        height: 630px;
+        overflow: hidden;
+      }
+      body {
+        font-family: "Microsoft YaHei", "PingFang SC", "Noto Sans SC", "Source Han Sans SC",
+          sans-serif;
+        background: #020617;
+      }
+      .stage {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 30px;
+        width: 1200px;
+        height: 630px;
+        background:
+          radial-gradient(720px 420px at 82% 6%, rgba(16, 185, 129, 0.22), transparent 70%),
+          radial-gradient(620px 420px at 10% 96%, rgba(16, 185, 129, 0.12), transparent 70%),
+          #020617;
+      }
+      .mark {
+        width: 104px;
+        height: 104px;
+        filter: drop-shadow(0 18px 40px rgba(16, 185, 129, 0.35));
+      }
+      h1 {
+        margin: 0;
+        color: #f8fafc;
+        font-size: 78px;
+        font-weight: 700;
+        line-height: 1.15;
+        letter-spacing: 4px;
+      }
+      .rule {
+        width: 96px;
+        height: 4px;
+        border-radius: 999px;
+        background: linear-gradient(90deg, #34d399, #059669);
+      }
+      p {
+        margin: 0;
+        color: #cbd5e1;
+        font-size: 30px;
+        line-height: 1.4;
+        letter-spacing: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="stage">
+      <svg class="mark" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="AI 视频学习助手标志">
+        <defs>
+          <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#1e293b" />
+            <stop offset="1" stop-color="#0f172a" />
+          </linearGradient>
+          <linearGradient id="play" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0" stop-color="#34d399" />
+            <stop offset="1" stop-color="#059669" />
+          </linearGradient>
+        </defs>
+        <rect width="512" height="512" rx="112" fill="url(#bg)" />
+        <path d="M188 136 392 256 188 376Z" fill="url(#play)" />
+      </svg>
+      <h1>AI 视频学习助手</h1>
+      <div class="rule"></div>
+      <p>解析公开视频，下载文件、导出字幕并生成 AI 摘要</p>
+    </div>
+  </body>
+</html>

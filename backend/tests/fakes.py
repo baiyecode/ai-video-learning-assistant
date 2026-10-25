@@ -3,14 +3,112 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import re
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from pathlib import Path
 
+from app.adapters.webhook_codec import sign_header, verify_and_decode
 from app.container import Adapters
-from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
+from app.ports import (
+    CheckoutSession,
+    CustomerPortal,
+    OutboundEmail,
+    ResolvedVideo,
+    SubtitlePayload,
+    SubtitleTrack,
+    VideoFormat,
+    WebhookEvent,
+)
 from app.timeutil import shanghai_day
+
+FAKE_CHECKOUT_URL = "https://checkout.stripe.test/c/fake-checkout"
+FAKE_PORTAL_URL = "https://portal.stripe.test/b/fake-portal"
+FAKE_WEBHOOK_SECRET = "whsec_fake"
+#: Fixed signature timestamp for emitted webhook headers; the fake codec has no
+#: replay window, so deterministic bytes keep test payloads stable.
+FAKE_WEBHOOK_TIMESTAMP = 1_768_471_200
+
+
+def sign_webhook(body: bytes, *, secret: str = FAKE_WEBHOOK_SECRET) -> str:
+    """A valid ``Stripe-Signature`` header for a fake-gateway webhook body."""
+    return sign_header(secret, FAKE_WEBHOOK_TIMESTAMP, body)
+
+
+def webhook_event_body(
+    event_id: str,
+    event_type: str,
+    created: datetime,
+    object_payload: dict[str, object] | None = None,
+) -> bytes:
+    """A Stripe-style webhook envelope the fake gateway can verify and decode."""
+    return json.dumps(
+        {
+            "id": event_id,
+            "type": event_type,
+            "created": int(created.timestamp()),
+            "data": {"object": object_payload or {}},
+        },
+        sort_keys=True,
+    ).encode()
+
+
+def checkout_completed_body(
+    event_id: str,
+    account_id: str,
+    *,
+    created: datetime,
+    period_end: datetime | None = None,
+    subscription_id: str = "sub_fake_1",
+    customer_id: str = "cus_fake_1",
+    price_id: str = "price_fake_monthly",
+) -> bytes:
+    """The wire shape behind ``checkout.session.completed``: a Checkout Session object."""
+    session_object: dict[str, object] = {
+        "client_reference_id": account_id,
+        "subscription": subscription_id,
+        "customer": customer_id,
+        "metadata": {"account_id": account_id, "price_id": price_id},
+    }
+    if period_end is not None:
+        session_object["current_period_end"] = int(period_end.timestamp())
+    return webhook_event_body(event_id, "checkout.session.completed", created, session_object)
+
+
+def lifecycle_event_body(
+    event_id: str,
+    event_type: str,
+    created: datetime,
+    *,
+    account_id: str | None = None,
+    subscription_id: str = "sub_fake_1",
+    customer_id: str = "cus_fake_1",
+    period_end: datetime | None = None,
+    subscription_status: str | None = None,
+    cancel_at_period_end: bool | None = None,
+) -> bytes:
+    """The wire shape of an invoice/subscription lifecycle event (Stripe-style object).
+
+    ``account_id`` is optional on purpose: real invoice and subscription events name
+    only Stripe ids, and the state machine must still find the local subscription.
+    """
+    obj: dict[str, object] = {"subscription": subscription_id, "customer": customer_id}
+    if account_id is not None:
+        obj["metadata"] = {"account_id": account_id}
+    if period_end is not None:
+        obj["current_period_end"] = int(period_end.timestamp())
+    if subscription_status is not None:
+        obj["status"] = subscription_status
+    if cancel_at_period_end is not None:
+        obj["cancel_at_period_end"] = cancel_at_period_end
+    return webhook_event_body(event_id, event_type, created, obj)
+
+#: The one Douyin Video the fake short-link wrapper unwraps to.
+DOUYIN_DEFAULT_VIDEO_ID = "7123456789012345678"
+_DOUYIN_SHARE_URL = re.compile(r"^https://www\.douyin\.com/video/(\d{5,23})$")
+_DOUYIN_SHORT_URL = re.compile(r"^https://v\.douyin\.com/[A-Za-z0-9_-]+$")
 
 
 def sample_subtitle_track(language: str = "zh-Hans", *, automatic: bool = False) -> SubtitleTrack:
@@ -44,6 +142,36 @@ def sample_video(
     )
 
 
+def sample_douyin_video(
+    *,
+    platform_video_id: str = DOUYIN_DEFAULT_VIDEO_ID,
+    title: str = "抖音示例视频",
+    duration_seconds: int = 15,
+    with_subtitle: bool = False,
+) -> ResolvedVideo:
+    """Douyin shape: cover + duration, one server-side watermarked format, no captions."""
+    return ResolvedVideo(
+        platform="douyin",
+        platform_video_id=platform_video_id,
+        title=title,
+        duration_seconds=duration_seconds,
+        webpage_url=f"https://www.douyin.com/video/{platform_video_id}",
+        uploader="抖音作者",
+        thumbnail_url="https://p3-douyin.example/cover.jpg",
+        formats=(
+            VideoFormat(
+                format_id="watermark_mp4",
+                label="带水印",
+                ext="mp4",
+                width=720,
+                height=1280,
+                filesize=8_000_000,
+            ),
+        ),
+        subtitles=(sample_subtitle_track(),) if with_subtitle else (),
+    )
+
+
 @dataclass
 class FrozenClock:
     """A Clock frozen at an instant; advance it explicitly in tests."""
@@ -63,7 +191,12 @@ class FrozenClock:
 
 @dataclass
 class FakeVideoSource:
-    """Resolves URLs from an in-memory catalogue and serves canned subtitles."""
+    """Resolves URLs from an in-memory catalogue and serves canned subtitles.
+
+    Unregistered Douyin URLs are recognised by shape: a ``www.douyin.com/video/<id>``
+    page resolves to that id, and a ``v.douyin.com/<code>`` short link unwraps to the
+    default Douyin Video — mirroring the production adapter following the redirect.
+    """
 
     videos: dict[str, ResolvedVideo] = field(default_factory=dict)
     subtitles: dict[tuple[str, str], SubtitlePayload] = field(default_factory=dict)
@@ -77,6 +210,11 @@ class FakeVideoSource:
             raise self.resolve_error
         if url in self.videos:
             return self.videos[url]
+        share = _DOUYIN_SHARE_URL.fullmatch(url)
+        if share is not None:
+            return sample_douyin_video(platform_video_id=share.group(1))
+        if _DOUYIN_SHORT_URL.fullmatch(url):
+            return sample_douyin_video()
         return sample_video()
 
     async def fetch_subtitle(self, video: ResolvedVideo, track: SubtitleTrack) -> SubtitlePayload:
@@ -182,6 +320,91 @@ class FakeBudgetLedger:
         self.recorded.append(usd)
 
 
+@dataclass
+class FakeEmailSender:
+    """In-memory inbox for the EmailSender port; never touches a real mail service.
+
+    - ``sent``: every delivered message, so tests can read verification links back out.
+    - ``fail_with``: raise this instead of delivering (scripted delivery failure).
+    """
+
+    sent: list[OutboundEmail] = field(default_factory=list)
+    fail_with: Exception | None = None
+
+    async def send(self, message: OutboundEmail) -> None:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.sent.append(message)
+
+    def messages_for(self, to: str | None = None) -> list[OutboundEmail]:
+        """ObservableInbox view, newest-first, optionally narrowed to one address."""
+        messages = [message for message in self.sent if to is None or message.to == to]
+        return list(reversed(messages))
+
+
+@dataclass
+class FakeBillingGateway:
+    """In-memory Stripe stand-in; programmable failures, zero network.
+
+    - ``fail_with``: raised by every checkout call (e.g. an ``AppError`` for an unavailable gateway).
+    - ``created_checkouts``: every checkout call, for wiring assertions.
+    - ``webhook_secret`` / ``webhook_fail_with``: webhook verification follows the real
+      Stripe signature scheme via the shared codec; ``webhook_fail_with`` makes the
+      gateway raise before decoding (provider-outage tests).
+    - ``portal_url`` / ``created_portals`` / ``portal_fail_with``: the customer-portal
+      mint (P2-04 self-service entry), programmable like checkout.
+    """
+
+    fail_with: Exception | None = None
+    checkout_url: str = FAKE_CHECKOUT_URL
+    created_checkouts: list[dict[str, object]] = field(default_factory=list)
+    webhook_secret: str = FAKE_WEBHOOK_SECRET
+    webhook_fail_with: Exception | None = None
+    portal_url: str = FAKE_PORTAL_URL
+    created_portals: list[dict[str, object]] = field(default_factory=list)
+    portal_fail_with: Exception | None = None
+
+    async def create_checkout(
+        self,
+        *,
+        account_id: str,
+        email: str | None,
+        price_id: str,
+        success_url: str,
+        cancel_url: str,
+    ) -> CheckoutSession:
+        if self.fail_with is not None:
+            raise self.fail_with
+        self.created_checkouts.append(
+            {
+                "account_id": account_id,
+                "email": email,
+                "price_id": price_id,
+                "success_url": success_url,
+                "cancel_url": cancel_url,
+            }
+        )
+        return CheckoutSession(id=f"cs_fake_{len(self.created_checkouts)}", url=self.checkout_url)
+
+    async def create_portal(
+        self,
+        *,
+        provider_customer_id: str,
+        return_url: str,
+    ) -> CustomerPortal:
+        if self.portal_fail_with is not None:
+            raise self.portal_fail_with
+        self.created_portals.append(
+            {"provider_customer_id": provider_customer_id, "return_url": return_url}
+        )
+        return CustomerPortal(url=self.portal_url)
+
+    def verify_webhook(self, *, payload: bytes, signature: str) -> WebhookEvent:
+        if self.webhook_fail_with is not None:
+            raise self.webhook_fail_with
+        return verify_and_decode(payload=payload, signature_header=signature, secret=self.webhook_secret)
+
+
 def make_fake_adapters(
     *,
     video_source: FakeVideoSource | None = None,
@@ -189,6 +412,8 @@ def make_fake_adapters(
     summarizer: FakeSummarizer | None = None,
     clock: FrozenClock | None = None,
     budget_ledger: FakeBudgetLedger | None = None,
+    billing_gateway: FakeBillingGateway | None = None,
+    email_sender: FakeEmailSender | None = None,
 ) -> Adapters:
     """Build the full Adapters container with fakes. Pass overrides by keyword."""
     return Adapters(
@@ -197,4 +422,6 @@ def make_fake_adapters(
         summarizer=summarizer or FakeSummarizer(),
         clock=clock or FrozenClock(),
         budget_ledger=budget_ledger or FakeBudgetLedger(),
+        billing_gateway=billing_gateway or FakeBillingGateway(),
+        email_sender=email_sender or FakeEmailSender(),
     )

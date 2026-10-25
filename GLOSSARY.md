@@ -43,3 +43,11 @@ _Avoid_: 用户（在需要区分访客时）, 会员
 **Session**:
 由 refresh token 代表的、可被主动吊销的登录状态。
 _Avoid_: token, 登录凭证
+
+**Article**:
+构建期从 `frontend/content/articles/*.md` 发布的一篇公开内容页，URL 由文件名 slug 决定，frontmatter 是标题、描述与日期的唯一来源。
+_Avoid_: 博客文章（指代发布单元时）, post, 内容页
+
+**Marketing Page**:
+无需登录即可访问、可被搜索引擎索引的静态预渲染页面。
+_Avoid_: 落地页, landing page, 官网首页（泛指时）

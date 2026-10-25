@@ -16,7 +16,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-logger = logging.getLogger("app.ops.health")
+logger = logging.getLogger("app.modules.ops.health")
 
 _PROBE_TABLE = "_ops_health_probe"
 # A short WAL writer lock must not turn a healthy probe into a 503. ``busy_timeout``

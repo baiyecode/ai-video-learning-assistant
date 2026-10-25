@@ -33,7 +33,8 @@ from app.deps import (
     get_session,
     get_settings,
 )
-from app.errors import ErrorCode
+from app.errors import AppError, ErrorCode
+from app.modules.billing.service import membership_state
 from app.modules.identity.models import Account
 from app.ratelimit import RateLimiter
 
@@ -43,6 +44,11 @@ from .models import Analysis, AnalysisStatus
 from .schemas import AnalysisHistoryItemOut, AnalysisOut, CreateAnalysisRequest
 
 router = APIRouter(prefix="/analyses", tags=["analysis"])
+
+# Email verification gate (ticket #22): Analysis is gated on a verified email; login,
+# resolve, Subtitle viewing and Download are not. The gate only ever fires from this
+# route, so the copy lives here (README: 模块独有文案留模块内; the code stays in errors.py).
+MESSAGE_EMAIL_NOT_VERIFIED = "请先验证邮箱后再发起 Analysis"
 
 
 def get_analysis_manager(request: Request) -> AnalysisManager:
@@ -61,11 +67,26 @@ async def create_analysis(
     account: Account = Depends(get_current_account),
     rate_limiter: RateLimiter = Depends(get_rate_limiter),
 ) -> AnalysisOut:
+    # Pre-creation gate order (ticket #22, spec): 已登录 (dependency) → 邮箱已验证 →
+    # Quota/VIP → 限流. The verification gate is this router's share; the rest runs
+    # inside ``service.create_analysis`` in the same order, and every refusal
+    # reserves no Quota (the reservation only commits alongside a created row).
+    if account.email_verified_at is None:
+        raise AppError(
+            403,
+            ErrorCode.EMAIL_NOT_VERIFIED,
+            MESSAGE_EMAIL_NOT_VERIFIED,
+            {"video_id": payload.video_id},
+        )
+    # Read the id before any service-side commit/rollback: a rollback expires the
+    # bound ORM object and touching ``account.id`` afterwards would lazy-load outside
+    # the greenlet (MissingGreenlet).
+    account_id = account.id
     result = await service.create_analysis(
         session,
         adapters.clock,
         settings,
-        account_id=account.id,
+        account_id=account_id,
         video_id=payload.video_id,
         force=payload.force,
         rate_limiter=rate_limiter,
@@ -76,7 +97,11 @@ async def create_analysis(
     else:
         # Reused in-progress or already completed Analysis: nothing new was reserved.
         response.status_code = 200
-    return service.to_out(result.analysis, result.video)
+    out = service.to_out(result.analysis, result.video, result.membership)
+    # Snapshot taken after the (non-)reservation so the SPA sees the unlimited
+    # sentinel and membership right where the request was made.
+    out.quota = await service.daily_quota(session, account_id, adapters.clock, settings)
+    return out
 
 
 @router.get("", response_model=list[AnalysisHistoryItemOut])
@@ -93,9 +118,11 @@ async def get_analysis(
     analysis_id: str,
     session: AsyncSession = Depends(get_session),
     account: Account = Depends(get_current_account),
+    adapters: Adapters = Depends(get_adapters),
 ) -> AnalysisOut:
     analysis, video = await service.get_analysis(session, account.id, analysis_id)
-    return service.to_out(analysis, video)
+    state = await membership_state(session, account.id, now=adapters.clock.now())
+    return service.to_out(analysis, video, state.status)
 
 
 @router.get("/{analysis_id}/stream")

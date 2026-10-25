@@ -28,7 +28,7 @@ from app.ports import ResolvedVideo, SubtitleTrack, VideoSource
 from .models import Subtitle, Video
 from .schemas import SubtitleCueOut, SubtitleDetailResponse
 
-logger = logging.getLogger("app.catalog.subtitles")
+logger = logging.getLogger("app.modules.catalog.subtitles")
 
 SOURCE_MANUAL = "manual"
 SOURCE_AUTO = "auto"

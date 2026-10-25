@@ -28,3 +28,8 @@ DOWNLOAD_FAILED = "下载失败，请稍后重试"
 DOWNLOAD_TIMEOUT = "下载超时，请稍后重试"
 DOWNLOAD_INTERRUPTED = "服务重启导致任务中断，请重试"
 FILE_EXPIRED = "文件已过期，请重新发起下载"
+
+# Single-module copy stays in the module that owns it (README convention):
+# - 「抖音暂未开放」 (platform_not_enabled) lives in ``modules/catalog/urls.py``.
+# - 「请先验证邮箱…」 (email_not_verified) lives in ``modules/analysis/router.py``.
+# Only the error *codes* remain centralised in ``errors.py``.

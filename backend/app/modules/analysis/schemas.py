@@ -40,6 +40,11 @@ class AnalysisOut(BaseModel):
     updated_at: str
     completed_at: str | None = None
     video: AnalysisVideoOut | None = None
+    # Subscription status ("free"/"active"/...) as the quota gate saw it.
+    membership: str
+    # Quota snapshot taken right after the reservation: unlimited semantics
+    # (``daily_limit == -1``) live here, next to ``membership``.
+    quota: QuotaOut | None = None
 
 
 class AnalysisHistoryVideoOut(BaseModel):
@@ -71,3 +76,6 @@ class QuotaOut(BaseModel):
     used: int
     remaining: int
     resets_at: str
+    # The Account's subscription status ("free", "active", "trial_ending", ...).
+    # ``daily_limit``/``remaining`` carry the unlimited sentinel (-1) for VIP.
+    membership: str

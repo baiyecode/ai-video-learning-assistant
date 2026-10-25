@@ -10,6 +10,9 @@ COPY . .
 # Vite inlines this at build time; an empty value disables frontend error reporting.
 ARG VITE_SENTRY_DSN=""
 ENV VITE_SENTRY_DSN=$VITE_SENTRY_DSN
+# Public origin baked into canonical/OG at build time; override for production.
+ARG VITE_SITE_ORIGIN="http://localhost:8080"
+ENV VITE_SITE_ORIGIN=$VITE_SITE_ORIGIN
 RUN npm run build
 
 # Serve it and proxy the API
