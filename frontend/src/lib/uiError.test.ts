@@ -16,10 +16,11 @@ describe("uiErrorMessage", () => {
     expect(uiErrorMessage(error)).not.toContain("Quota");
   });
 
-  it("routes a Past Due membership to the payment-method fix, not to a generic 403", () => {
+  it("no longer special-cases Past Due: it is a membership status, not an error code", () => {
+    // No backend endpoint emits a `past_due` ApiError; the state arrives on the
+    // membership response (see billing.ts). A stray code must fall through untouched.
     const error = asUiError(new ApiError("past_due", "forbidden", 403));
-    expect(uiErrorMessage(error)).toContain("扣款未成功");
-    expect(uiErrorMessage(error)).toContain("更新支付方式");
+    expect(uiErrorMessage(error)).toBe("forbidden");
   });
 
   it("names the disabled platform instead of a generic unsupported URL", () => {

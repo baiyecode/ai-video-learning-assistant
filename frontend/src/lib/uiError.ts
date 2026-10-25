@@ -28,15 +28,19 @@ export const EMAIL_NOT_VERIFIED_MESSAGE = "请先验证邮箱后再发起 Analys
 /**
  * Conversion-aware copy for the codes the upgrade funnel must not blur together.
  * A 429 Quota exhaustion sells the upgrade; a 403 email gate sells verification;
- * a Past Due membership sells the customer portal; a disabled platform says so.
- * ``budget_exhausted`` is the site-wide daily model budget: VIP lifts the per-user
- * Quota but not the shared cap, so its copy must never sell the upgrade.
+ * a disabled platform says so. ``budget_exhausted`` is the site-wide daily model
+ * budget: VIP lifts the per-user Quota but not the shared cap, so its copy must
+ * never sell the upgrade.
+ *
+ * Past Due is deliberately absent: no backend endpoint returns a ``past_due`` error
+ * code (see ``backend/app/errors.py``). That state arrives on the ``GET
+ * /api/me/membership`` response and is rendered by ``billing.ts::membershipAlert``,
+ * never as a failed-request ``ApiError``, so there is nothing for this map to catch.
  */
 const UI_ERROR_MESSAGES: Record<string, string> = {
   quota_exhausted: "今日 Quota 已用完，升级 VIP 后 Analysis 不限次。",
   budget_exhausted: "今日服务容量已用完，请稍后再试。",
   email_not_verified: EMAIL_NOT_VERIFIED_MESSAGE,
-  past_due: "订阅扣款未成功，VIP 已暂停，请前往个人中心更新支付方式。",
   too_many_requests: "尝试过于频繁，请稍后再试。",
   platform_not_enabled: "抖音暂未开放",
 };

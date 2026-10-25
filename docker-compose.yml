@@ -25,6 +25,11 @@ services:
       APP_DEEPSEEK_BASE_URL: ${APP_DEEPSEEK_BASE_URL:-https://api.deepseek.com}
       APP_DEEPSEEK_MODEL: ${APP_DEEPSEEK_MODEL:-deepseek-chat}
       APP_DAILY_BUDGET_USD: ${APP_DAILY_BUDGET_USD:-10}
+      # Free Analysis Quota per Account per Asia/Shanghai day. This is the single
+      # repricing/re-quota knob: the same ${APP_ANALYSIS_DAILY_QUOTA} value is passed to
+      # the web build below as VITE_ANALYSIS_DAILY_QUOTA, so the enforced limit and the
+      # marketing/discovery copy (pricing page, sitemap, llms.txt) can never drift apart.
+      APP_ANALYSIS_DAILY_QUOTA: ${APP_ANALYSIS_DAILY_QUOTA:-3}
       # Feature switch (ticket #23): Douyin parsing, off by default (P2-10 rollout doc
       # in docs/ops/douyin-gray-release.md explains how to open and roll back).
       APP_DOUYIN_ENABLED: ${APP_DOUYIN_ENABLED:-false}
@@ -34,6 +39,8 @@ services:
       APP_STRIPE_WEBHOOK_SECRET: ${APP_STRIPE_WEBHOOK_SECRET:-}
       APP_STRIPE_PRICE_ID: ${APP_STRIPE_PRICE_ID:-}
       # Display-only price for the pricing UI; the payment provider's checkout wins.
+      # The same ${APP_SUBSCRIPTION_MONTHLY_USD} value is passed to the web build below
+      # as VITE_SUBSCRIPTION_MONTHLY_USD, keeping backend and frontend on one source.
       APP_SUBSCRIPTION_MONTHLY_USD: ${APP_SUBSCRIPTION_MONTHLY_USD:-4.99}
       # Email verification (P2-05 / P2-10): APP_SMTP_HOST and APP_SMTP_FROM are
       # required in production; username/password stay optional for unauthenticated relays.
@@ -98,6 +105,10 @@ services:
         # Public origin baked into canonical/OG/sitemap; must equal the public
         # https origin and match APP_FRONTEND_BASE_URL in production.
         VITE_SITE_ORIGIN: ${SITE_ORIGIN:-http://localhost:8080}
+        # Single-source mirrors: same env vars the api service enforces, injected into
+        # the frontend build so repricing/re-quota is one edit across backend + marketing.
+        VITE_ANALYSIS_DAILY_QUOTA: ${APP_ANALYSIS_DAILY_QUOTA:-3}
+        VITE_SUBSCRIPTION_MONTHLY_USD: ${APP_SUBSCRIPTION_MONTHLY_USD:-4.99}
     environment:
       TZ: Asia/Shanghai
     ports:

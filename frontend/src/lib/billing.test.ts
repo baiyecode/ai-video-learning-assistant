@@ -1,9 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   ACTIVE_STATUS,
   CANCELED_STATUS,
   DAILY_FREE_ANALYSIS_LIMIT,
+  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
+  DEFAULT_MONTHLY_PRICE_USD,
   FREE_DAILY_ANALYSIS_LABEL,
   FREE_STATUS,
   PAST_DUE_STATUS,
@@ -18,6 +24,9 @@ import {
   renewalNotice,
   type MembershipDto,
 } from "@/lib/billing";
+
+const FRONTEND_ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
+const REPO_ROOT = path.resolve(FRONTEND_ROOT, "..");
 
 function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
   return {
@@ -76,6 +85,46 @@ describe("pricing copy", () => {
   it("derives the free-quota sentence from the single limit constant", () => {
     expect(DAILY_FREE_ANALYSIS_LIMIT).toBe(3);
     expect(FREE_DAILY_ANALYSIS_LABEL).toBe("每日 3 次 Analysis");
+  });
+
+  it("derives price and free Quota from the injected VITE_ build-time values", async () => {
+    // A repricing/re-quota deploy rebuilds the static marketing with new VITE_ args;
+    // every consumer (pricing page, sitemap, llms.txt, descriptors) follows automatically.
+    vi.resetModules();
+    vi.stubEnv("VITE_SUBSCRIPTION_MONTHLY_USD", "8.50");
+    vi.stubEnv("VITE_ANALYSIS_DAILY_QUOTA", "5");
+    const fresh = await import("@/lib/billing");
+    expect(fresh.MONTHLY_PRICE_USD).toBe(8.5);
+    expect(fresh.PRICE_HEADLINE).toBe("$8.50/月");
+    expect(fresh.DAILY_FREE_ANALYSIS_LIMIT).toBe(5);
+    expect(fresh.FREE_DAILY_ANALYSIS_LABEL).toBe("每日 5 次 Analysis");
+  });
+
+  it("falls back to the committed defaults when the VITE_ values are absent or junk", async () => {
+    vi.resetModules();
+    vi.stubEnv("VITE_SUBSCRIPTION_MONTHLY_USD", "");
+    vi.stubEnv("VITE_ANALYSIS_DAILY_QUOTA", "not-a-number");
+    const fresh = await import("@/lib/billing");
+    expect(fresh.MONTHLY_PRICE_USD).toBe(DEFAULT_MONTHLY_PRICE_USD);
+    expect(fresh.DAILY_FREE_ANALYSIS_LIMIT).toBe(DEFAULT_DAILY_FREE_ANALYSIS_LIMIT);
+  });
+
+  it("keeps the fallbacks equal to the backend Settings the API actually enforces", () => {
+    // The single repricing knob lives in the deploy env; these committed defaults are
+    // only the local/dev fallback. This test reads the independent backend source so a
+    // drifted default fails loudly instead of letting the discovery layer silently lie.
+    const config = readFileSync(path.join(REPO_ROOT, "backend", "app", "config.py"), "utf8");
+    const quota = config.match(/analysis_daily_quota:\s*int\s*=\s*(\d+)/);
+    const price = config.match(/subscription_monthly_usd:\s*float\s*=\s*([\d.]+)/);
+    expect(quota, "analysis_daily_quota default missing from backend config").not.toBeNull();
+    expect(price, "subscription_monthly_usd default missing from backend config").not.toBeNull();
+    expect(Number(quota![1])).toBe(DEFAULT_DAILY_FREE_ANALYSIS_LIMIT);
+    expect(Number(price![1])).toBe(DEFAULT_MONTHLY_PRICE_USD);
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
   });
 });
 

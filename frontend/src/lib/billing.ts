@@ -21,20 +21,50 @@ export const TRIAL_ENDING_STATUS = "trial_ending";
 export const CANCELED_STATUS = "canceled";
 
 /**
- * The single monthly plan (spec: "$4.99/月、Analysis 不限次").
- * Mirrors backend ``Settings.subscription_monthly_usd``; the hosted checkout page of
- * the payment provider is the final word on the charged amount (已注明「以支付方为准」).
+ * Committed fallbacks for the display price and free Quota, used only when the
+ * deploy-time ``VITE_`` injection is absent (plain ``npm run build``, unit tests).
+ * The single repricing/re-quota knob is the deploy env: docker-compose funnels
+ * ``APP_ANALYSIS_DAILY_QUOTA`` / ``APP_SUBSCRIPTION_MONTHLY_USD`` into BOTH the backend
+ * (which enforces the Quota and mirrors the price) and the frontend ``VITE_`` build
+ * args, so pricing page, sitemap, llms.txt and every descriptor move together. These
+ * fallbacks must equal the backend ``Settings`` defaults; ``billing.test.ts`` reads
+ * ``backend/app/config.py`` and fails loudly if they drift, so the discovery layer can
+ * never silently lie.
  */
-export const MONTHLY_PRICE_USD = 4.99;
+export const DEFAULT_MONTHLY_PRICE_USD = 4.99;
+export const DEFAULT_DAILY_FREE_ANALYSIS_LIMIT = 3;
+
+/** Parse an injected build-time number, falling back on absence or junk input. */
+function envNumber(raw: string | undefined, fallback: number): number {
+  if (raw === undefined || raw === "") return fallback;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+/**
+ * The single monthly plan (spec: "$4.99/月、Analysis 不限次").
+ * Derived from ``VITE_SUBSCRIPTION_MONTHLY_USD`` (mirrors backend
+ * ``Settings.subscription_monthly_usd``); Vite replaces this exact ``import.meta.env``
+ * access at build time. The hosted checkout page of the payment provider remains the
+ * final word on the charged amount (已注明「以支付方为准」).
+ */
+export const MONTHLY_PRICE_USD = envNumber(
+  import.meta.env.VITE_SUBSCRIPTION_MONTHLY_USD,
+  DEFAULT_MONTHLY_PRICE_USD,
+);
 export const PRICE_HEADLINE = `$${MONTHLY_PRICE_USD.toFixed(2)}/月`;
 export const PRICE_BENEFIT = "Analysis 不限次";
 export const PRICE_PROVIDER_NOTICE = "以上为当前标价，实际扣款以支付方（Stripe）结账页展示的条款为准。";
 
 /**
- * Mirrors backend ``Settings.analysis_daily_quota``: the free Analysis Quota.
- * The single source for the "每日 N 次" copy so a quota change is one edit.
+ * The free Analysis Quota, derived from ``VITE_ANALYSIS_DAILY_QUOTA`` (mirrors backend
+ * ``Settings.analysis_daily_quota``, the value the API actually enforces). The single
+ * source for the "每日 N 次" copy, so repricing the Quota is one deploy-env edit and a
+ * quota change can no longer leave the marketing/discovery copy behind.
  */
-export const DAILY_FREE_ANALYSIS_LIMIT = 3;
+export const DAILY_FREE_ANALYSIS_LIMIT = Math.round(
+  envNumber(import.meta.env.VITE_ANALYSIS_DAILY_QUOTA, DEFAULT_DAILY_FREE_ANALYSIS_LIMIT),
+);
 export const FREE_DAILY_ANALYSIS_LABEL = `每日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis`;
 
 const STATUS_LABELS: Record<string, string> = {

@@ -103,9 +103,12 @@ class Settings(BaseSettings):
     stripe_webhook_secret: str = ""
     stripe_price_id: str = ""
     # Display-only monthly price shown by the pricing UI; billing maths lives in Stripe.
-    # If this drifts from the real ``stripe_price_id`` configuration the payment
-    # provider's checkout page wins: 实际扣款以支付方配置为准 (frontend copy and
-    # ``frontend/src/lib/billing.ts`` say the same). Keep the two in sync when repricing.
+    # This is the single repricing source: docker-compose passes the SAME
+    # ``APP_SUBSCRIPTION_MONTHLY_USD`` value to the frontend build as
+    # ``VITE_SUBSCRIPTION_MONTHLY_USD``, so the pricing page, sitemap and llms.txt derive
+    # their headline from here instead of a separate hardcoded literal. If it drifts from
+    # the real ``stripe_price_id`` the payment provider's checkout page still wins:
+    # 实际扣款以支付方配置为准 (frontend copy says the same).
     subscription_monthly_usd: float = 4.99
 
     # Feature switches (ticket #23). Douyin parsing ships behind this switch so it can
