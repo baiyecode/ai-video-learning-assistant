@@ -12,7 +12,7 @@ import {
   PRICE_PROVIDER_NOTICE,
   expirationNotice,
   formatPeriodEnd,
-  isVipMembership,
+  hasVipMembership,
   membershipAlert,
   membershipStatusLabel,
   renewalNotice,
@@ -24,21 +24,21 @@ function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
     status: "active",
     period_end: "2026-02-14T09:00:00+00:00",
     cancel_at_period_end: false,
-    is_vip: true,
+    vip_active: true,
     ...overrides,
   };
 }
 
 describe("membership helpers", () => {
   it("mirrors only the backend-derived VIP flag", () => {
-    expect(isVipMembership(membership())).toBe(true);
-    expect(isVipMembership(membership({ status: "past_due", is_vip: false }))).toBe(false);
-    expect(isVipMembership(membership({ status: FREE_STATUS, is_vip: false }))).toBe(false);
-    expect(isVipMembership(null)).toBe(false);
+    expect(hasVipMembership(membership())).toBe(true);
+    expect(hasVipMembership(membership({ status: "past_due", vip_active: false }))).toBe(false);
+    expect(hasVipMembership(membership({ status: FREE_STATUS, vip_active: false }))).toBe(false);
+    expect(hasVipMembership(null)).toBe(false);
   });
 
   it("warns Past Due accounts to fix their payment method", () => {
-    const alert = membershipAlert(membership({ status: "past_due", is_vip: false }));
+    const alert = membershipAlert(membership({ status: "past_due", vip_active: false }));
     expect(alert).toContain("扣款未成功");
   });
 
@@ -57,7 +57,7 @@ describe("membership helpers", () => {
 
   it("stays quiet for healthy and free memberships", () => {
     expect(membershipAlert(membership())).toBeNull();
-    expect(membershipAlert(membership({ status: FREE_STATUS, period_end: null, is_vip: false }))).toBeNull();
+    expect(membershipAlert(membership({ status: FREE_STATUS, period_end: null, vip_active: false }))).toBeNull();
     expect(membershipAlert(null)).toBeNull();
   });
 });
@@ -118,7 +118,7 @@ describe("membership status presentation", () => {
       expirationNotice(
         membership({
           status: PAST_DUE_STATUS,
-          is_vip: false,
+          vip_active: false,
           cancel_at_period_end: true,
           period_end: futureIso(),
         })
@@ -126,7 +126,7 @@ describe("membership status presentation", () => {
     ).toBeNull();
     // A real deletion is already non-VIP: no 「保留至」 promise anymore (Story 8/9 split).
     expect(
-      expirationNotice(membership({ status: CANCELED_STATUS, is_vip: false, period_end: futureIso() }))
+      expirationNotice(membership({ status: CANCELED_STATUS, vip_active: false, period_end: futureIso() }))
     ).toBeNull();
   });
 
