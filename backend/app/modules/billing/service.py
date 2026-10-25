@@ -70,7 +70,7 @@ the last status an event of authority wrote."""
 class MembershipState:
     """The one derived membership truth for one Account at one instant.
 
-    ``status`` and ``is_vip`` already honour the lazy expiry edge: an ``active`` /
+    ``status`` and ``vip_active`` already honour the lazy expiry edge: an ``active`` /
     ``trial_ending`` record past ``current_period_end`` presents as ``canceled`` /
     non-VIP (spec Story 10) without the row being rewritten. ``cancel_at_period_end``
     is the provider's *scheduled* cancellation: VIP is retained until ``period_end``
@@ -78,7 +78,7 @@ class MembershipState:
     """
 
     status: str
-    is_vip: bool
+    vip_active: bool
     period_end: datetime | None
     cancel_at_period_end: bool
 
@@ -113,12 +113,12 @@ async def membership_state(
     )
     if subscription is None:
         return MembershipState(
-            status=STATUS_FREE, is_vip=False, period_end=None, cancel_at_period_end=False
+            status=STATUS_FREE, vip_active=False, period_end=None, cancel_at_period_end=False
         )
     expired = _past_period_end(subscription, now)
     return MembershipState(
         status=SubscriptionStatus.CANCELED.value if expired else subscription.status,
-        is_vip=not expired and subscription.status in VIP_STATUSES,
+        vip_active=not expired and subscription.status in VIP_STATUSES,
         period_end=_period_end(subscription),
         cancel_at_period_end=subscription.cancel_at_period_end,
     )
@@ -175,7 +175,7 @@ async def membership(session: AsyncSession, account_id: str, *, now: datetime) -
         status=state.status,
         period_end=state.period_end.isoformat() if state.period_end is not None else None,
         cancel_at_period_end=state.cancel_at_period_end,
-        is_vip=state.is_vip,
+        vip_active=state.vip_active,
     )
 
 

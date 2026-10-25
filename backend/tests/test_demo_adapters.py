@@ -228,7 +228,7 @@ async def test_golden_path_quota_exhausted_then_upgrade_then_unlimited(tmp_path:
 
         membership = (await client.get("/api/me/membership", headers=auth)).json()
         assert membership["status"] == "active"
-        assert membership["is_vip"] is True
+        assert membership["vip_active"] is True
         assert membership["period_end"] is not None
 
         assert await _resolve_and_analyse(client, auth, "goldenPath3") == "completed"

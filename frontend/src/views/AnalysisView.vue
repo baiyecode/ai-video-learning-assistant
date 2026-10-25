@@ -49,7 +49,7 @@ const membershipBadge = computed(() =>
   auth.isAuthenticated && billing.membership ? membershipStatusLabel(billing.membership) : "",
 );
 const quotaDepleted = computed(
-  () => !!store.quota && isQuotaDepleted(store.quota, billing.isVip),
+  () => !!store.quota && isQuotaDepleted(store.quota, billing.vipActive),
 );
 const reanalysisBlockedReason = computed(() => {
   if (reanalysis.value.allowed) return "";
@@ -133,7 +133,7 @@ async function confirmReanalyze(): Promise<void> {
         <span
           v-if="membershipBadge"
           class="rounded-full px-2 py-0.5 font-medium"
-          :class="billing.isVip ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+          :class="billing.vipActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
         >
           {{ membershipBadge }}
         </span>

@@ -133,7 +133,7 @@ const LLMS_KEY_PAGES: readonly { path: string; label: string; summary: string }[
 ];
 
 const LLMS_SUMMARY =
-  "免费在线工具：粘贴 B 站或 YouTube 视频地址，下载文件、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；不做 ASR，没有字幕的视频无法生成 Analysis。";
+  "免费在线工具：粘贴 B 站或 YouTube 页面地址，下载文件、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；不做 ASR，没有字幕的视频无法生成 Analysis。";
 
 /**
  * llmstxt.org shape: H1, blockquote summary, link sections, then the price and

@@ -74,7 +74,7 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
     // --- Upgrade: hosted checkout + injected payment success ----------------
     await payForSubscription(page.request, email);
     const membership = await readMembership(page.request, email);
-    expect(membership).toMatchObject({ status: "active", is_vip: true });
+    expect(membership).toMatchObject({ status: "active", vip_active: true });
 
     // --- Same address, now served ------------------------------------------
     await page.getByRole("button", { name: "AI 分析" }).click();

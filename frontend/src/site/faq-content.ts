@@ -46,9 +46,9 @@ export const faqItems: readonly FaqItem[] = [
       "抖音是灰度能力，默认关闭，由部署开关 APP_DOUYIN_ENABLED 控制。开启后抖音只提供单一清晰度的带水印产物；没有 Subtitle 时同样不能发起 Analysis。",
   },
   {
-    question: "会为没有字幕的视频生成转写文本吗？",
+    question: "没有字幕的视频可以自己生成字幕吗？",
     answer:
-      "不会。本工具不做 ASR，也不会生成转写文本；Subtitle 与 Analysis 都依赖 Platform 已经提供的字幕。",
+      "不会。本工具不做 ASR，也不会自行生成字幕；Subtitle 与 Analysis 都依赖 Platform 已经提供的字幕。",
   },
   {
     question: "单个视频有什么大小与时长限制？",

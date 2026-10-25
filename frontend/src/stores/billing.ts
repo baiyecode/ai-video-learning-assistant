@@ -24,7 +24,7 @@ export const useBillingStore = defineStore("billing", {
     error: null,
   }),
   getters: {
-    isVip: (state): boolean => state.membership?.is_vip === true,
+    vipActive: (state): boolean => state.membership?.vip_active === true,
   },
   actions: {
     async loadMembership(): Promise<void> {
