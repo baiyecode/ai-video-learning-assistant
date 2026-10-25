@@ -1,12 +1,12 @@
 ---
 title: 长视频的 AI 摘要与思维导图：分块归并、Quota 与限制
-description: 长视频的 AI 摘要与思维导图怎么做：Analysis 读取 Subtitle 分块归并，没有字幕则无法生成。本文说明免费 Account 每日 3 次、VIP $4.99/月不限次、失败不消耗 Quota 与结果仅本人可见。
+description: 长视频的 AI 摘要与思维导图怎么做：Analysis 读取 Subtitle 分块归并，没有字幕则无法生成。本文说明免费 Account 每日 {{DAILY_FREE_QUOTA}} 次、VIP {{MONTHLY_PRICE_USD}} 不限次、失败不消耗 Quota 与结果仅本人可见。
 published: 2026-10-23
 updated: 2026-10-23
 tags: [AI 摘要, 思维导图, Analysis]
 ---
 
-长视频的 Analysis 会以 视频 自带的 Subtitle 为唯一文本依据：先按时间轴分块生成段落摘要，再把各块归并成一份全局摘要与思维导图。没有 Subtitle 的 视频 不能发起 Analysis，因为本工具不做 ASR。免费 Account 每个 Asia/Shanghai 自然日 3 次 Analysis，VIP Membership 为 $4.99/月、Analysis 不限次，失败不消耗 Quota。
+长视频的 Analysis 会以 视频 自带的 Subtitle 为唯一文本依据：先按时间轴分块生成段落摘要，再把各块归并成一份全局摘要与思维导图。没有 Subtitle 的 视频 不能发起 Analysis，因为本工具不做 ASR。免费 Account 每个 Asia/Shanghai 自然日 {{DAILY_FREE_QUOTA}} 次 Analysis，VIP Membership 为 {{MONTHLY_PRICE_USD}}、Analysis 不限次，失败不消耗 Quota。
 
 ## 长视频的摘要与思维导图怎么生成
 
@@ -53,8 +53,8 @@ Analysis 的计量单位是「一次新的 Analysis」，按次消耗 Quota，�
 | 查看已有或正在进行的 Analysis | 不消耗 |
 | 解析 视频、导出 Subtitle、Download | 不消耗 |
 
-- 免费 Account：每个 Asia/Shanghai 自然日 3 次 Analysis，跨日重置。
-- VIP Membership：$4.99/月，Analysis 不限次；在个人中心打开 Stripe 客户门户即可取消，取消后当前计费周期结束前仍享有权益。
+- 免费 Account：每个 Asia/Shanghai 自然日 {{DAILY_FREE_QUOTA}} 次 Analysis，跨日重置。
+- VIP Membership：{{MONTHLY_PRICE_USD}}，Analysis 不限次；在个人中心打开 Stripe 客户门户即可取消，取消后当前计费周期结束前仍享有权益。
 - 邮箱验证：未验证邮箱时发起 Analysis 会被拒绝（错误代码 `email_not_verified`）；验证邮箱不影响解析、Download 与导出 Subtitle。
 
 价格与扣款以结账页为准，规则说明见 [价格页](/pricing)。
@@ -84,7 +84,7 @@ Analysis 记录绑定在你的 Account 上，只有登录后的本人可以查�
 
 ### VIP 取消后立刻失效吗？
 
-不会。取消后当前计费周期结束前仍然有效，之后回到免费 Account 的每日 3 次。
+不会。取消后当前计费周期结束前仍然有效，之后回到免费 Account 的每日 {{DAILY_FREE_QUOTA}} 次。
 
 ### Analysis 结果能公开分享吗？
 

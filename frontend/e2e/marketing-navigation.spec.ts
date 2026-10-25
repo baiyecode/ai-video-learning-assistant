@@ -105,6 +105,11 @@ test.describe("article reading", () => {
       "B 站视频字幕怎么下载",
     );
 
+    // Ticket #47: the client bundle interpolates the price/quota placeholders from
+    // the same build-time mirror, so the SPA shows what the prerendered artifact shows.
+    await expect(page.getByRole("article")).toContainText("$4.99/月");
+    await expect(page.getByRole("article")).toContainText("自然日 3 次");
+
     const toc = page.getByRole("navigation", { name: "文章目录" });
     await expect(toc).toBeVisible();
 

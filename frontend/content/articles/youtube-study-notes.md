@@ -49,7 +49,7 @@ YouTube 的 Subtitle 由两种方式产生，做学习笔记时字面质量差�
 - 需要 Account 并完成邮箱验证，未验证时发起 Analysis 会被拒绝。
 - Analysis 只读取这条 视频 的 Subtitle，不做 ASR；没有字幕就没有可分析的内容。
 - 结果包含摘要与思维导图，按 视频 保存在你的账号里，仅本人可见。
-- 免费 Account 每个 Asia/Shanghai 自然日 3 次 Analysis；VIP Membership 为 $4.99/月，Analysis 不限次。
+- 免费 Account 每个 Asia/Shanghai 自然日 {{DAILY_FREE_QUOTA}} 次 Analysis；VIP Membership 为 {{MONTHLY_PRICE_USD}}，Analysis 不限次。
 - 一次新的 Analysis 成功才消耗 Quota，失败会退回；查看已有结果不消耗。
 
 摘要适合当复习提纲，思维导图适合检查自己有没有漏掉分支，逐句精读仍然要靠 Subtitle 原文。价格与取消规则见 [价格页](/pricing)，更完整的分析思路见[长视频摘要与思维导图](/articles/ai-video-summary-mindmap)。
