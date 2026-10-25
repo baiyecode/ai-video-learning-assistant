@@ -16,6 +16,8 @@ import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { buildSite } from "@/site/build-site";
+import { articleDescriptors } from "@/site/article-descriptors";
+import { defaultArticleCollection } from "@/site/article-sources";
 import { renderRoute } from "@/site/entry-server";
 import {
   DEFAULT_SHARE_IMAGE,
@@ -109,7 +111,10 @@ describe("brand assets", () => {
 
 describe("social share contract", () => {
   it("gives every public page an absolute 1200x630 share image with alt text", async () => {
-    const publicPages = publicDescriptors(pageDescriptors);
+    const publicPages = [
+      ...publicDescriptors(pageDescriptors),
+      ...articleDescriptors(defaultArticleCollection()),
+    ];
     expect(publicPages.length).toBeGreaterThan(0);
     expect(builtFiles).toHaveLength(publicPages.length);
 

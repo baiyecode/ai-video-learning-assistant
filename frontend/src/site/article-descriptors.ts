@@ -12,7 +12,6 @@ import {
   SITE_NAME,
   canonicalUrl,
   descriptorForRoute,
-  organizationNode,
   type JsonLdContext,
   type JsonLdNode,
   type PageDescriptor,
@@ -43,7 +42,6 @@ function blogPostingNode(context: JsonLdContext, article: Article): JsonLdNode {
     dateModified: dates.updated,
     inLanguage: "zh-CN",
     author: { "@type": "Organization", name: AUTHOR_NAME, url: `${context.origin}/` },
-    publisher: organizationNode(context),
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
     image: [context.imageUrl],
     keywords: article.tags.join(", "),
@@ -63,7 +61,6 @@ function blogNode(context: JsonLdContext, collection: ArticleCollection): JsonLd
     name: `${SITE_NAME}文章`,
     description: ARTICLES_LIST_DESCRIPTION,
     inLanguage: "zh-CN",
-    publisher: organizationNode(context),
     blogPost: collection.published.map((article) => {
       const url = canonicalUrl(context.origin, articlePath(article.slug));
       const dates = articleDates(article);

@@ -212,17 +212,6 @@ export function breadcrumbListNode(context: JsonLdContext): JsonLdNode {
   };
 }
 
-/** Shared publisher/author entity for article and marketing JSON-LD. */
-export function organizationNode(context: JsonLdContext): JsonLdNode {
-  return {
-    "@type": "Organization",
-    "@id": `${context.origin}/#organization`,
-    name: SITE_NAME,
-    url: `${context.origin}/`,
-    logo: { "@type": "ImageObject", url: context.imageUrl },
-  };
-}
-
 function meta(attrs: Record<string, string>): HeadTag {
   return { tag: "meta", attrs: { ...attrs, [MANAGED_ATTRIBUTE]: "" } };
 }
