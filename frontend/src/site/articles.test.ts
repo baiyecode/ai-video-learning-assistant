@@ -2,7 +2,7 @@
  * The content seam: frontmatter parsing and every validation rule run on plain
  * strings, so a broken article fails with its file name instead of a blank page.
  */
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   AUTHOR_NAME,
@@ -10,6 +10,7 @@ import {
   buildArticleCollection,
   parseArticle,
   relatedArticles,
+  type Article,
   type ArticleSource,
 } from "@/site/articles";
 
@@ -47,6 +48,39 @@ function expectFailure(fileName: string, source: string, reason: RegExp): void {
   }
   throw new Error(`expected ${fileName} to be rejected`);
 }
+
+/** The two build-time placeholders an Article source may use (issue #45). */
+const PRICE_PLACEHOLDER = "{{MONTHLY_PRICE_USD}}";
+const QUOTA_PLACEHOLDER = "{{DAILY_FREE_QUOTA}}";
+
+/**
+ * Body plus a description whose interpolated form is 90 characters
+ * (``会员 $4.99/月，每日 3 次 Analysis，`` = 27 characters, plus the filler).
+ */
+const PLACEHOLDER_DESCRIPTION = `会员 ${PRICE_PLACEHOLDER}，每日 ${QUOTA_PLACEHOLDER} 次 Analysis，${"详".repeat(63)}`;
+const PLACEHOLDER_BODY = `${BODY}\n\n免费会员每月 ${PRICE_PLACEHOLDER}，免费账号自然日 ${QUOTA_PLACEHOLDER} 次 Analysis。`;
+
+/**
+ * Parse with the given ``VITE_`` build args, the same way a repricing deploy does:
+ * the module graph is re-evaluated so the mirrors pick the injected values up.
+ */
+async function parseWithBuildArgs(
+  env: Record<string, string>,
+  fileName: string,
+  source: string,
+): Promise<Article> {
+  vi.resetModules();
+  for (const [key, value] of Object.entries(env)) {
+    vi.stubEnv(key as "VITE_ANALYSIS_DAILY_QUOTA", value);
+  }
+  const fresh = await import("@/site/articles");
+  return fresh.parseArticle(fileName, source);
+}
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+  vi.resetModules();
+});
 
 describe("parseArticle", () => {
   it("parses required and optional frontmatter plus the body", () => {
@@ -139,6 +173,116 @@ describe("parseArticle", () => {
   it("rejects a missing or unterminated frontmatter block", () => {
     expectFailure("no-frontmatter.md", BODY, /frontmatter/);
     expectFailure("open-frontmatter.md", `---\ntitle: 标题\n`, /frontmatter/);
+  });
+});
+
+describe("article price placeholder interpolation", () => {
+  it("renders the price and free-quota placeholders in the body and description", () => {
+    const article = parseArticle(
+      "placeholder-defaults.md",
+      validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
+    );
+
+    expect(article.body).toContain("免费会员每月 $4.99/月");
+    expect(article.body).toContain("免费账号自然日 3 次 Analysis");
+    expect(article.description).toContain("会员 $4.99/月，每日 3 次 Analysis");
+    expect(article.body).not.toContain("{{");
+    expect(article.description).not.toContain("{{");
+  });
+
+  it("renders the injected build-time price and quota instead of the defaults", async () => {
+    const article = await parseWithBuildArgs(
+      { VITE_SUBSCRIPTION_MONTHLY_USD: "8.5", VITE_ANALYSIS_DAILY_QUOTA: "7" },
+      "repriced.md",
+      validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
+    );
+
+    expect(article.body).toContain("免费会员每月 $8.50/月");
+    expect(article.body).toContain("免费账号自然日 7 次 Analysis");
+    expect(article.description).toContain("会员 $8.50/月，每日 7 次 Analysis");
+  });
+
+  it("judges the description length on the interpolated text, not on the source", () => {
+    // Raw form is 72 characters (would pass a 70-160 pre-check) but interpolates
+    // down to 39, so the parser must reject it.
+    expectFailure(
+      "short-after-interpolation.md",
+      validSource({
+        description: `会员 ${PRICE_PLACEHOLDER}，每日 ${QUOTA_PLACEHOLDER} 次 Analysis，${"详".repeat(12)}`,
+      }),
+      /description is 39 characters/,
+    );
+
+    // Raw form is 165 characters (a pre-check would reject it) but interpolates
+    // down to 132, so the parser must accept it.
+    const article = parseArticle(
+      "long-before-interpolation.md",
+      validSource(
+        {
+          description: `会员 ${PRICE_PLACEHOLDER}，每日 ${QUOTA_PLACEHOLDER} 次 Analysis，${"详".repeat(105)}`,
+        },
+        PLACEHOLDER_BODY,
+      ),
+    );
+    expect(article.description.length).toBe(132);
+  });
+
+  it("reports an unknown placeholder before any other validation", () => {
+    expectFailure(
+      "unknown-placeholder.md",
+      validSource({}, `${BODY}\n\n会员每月 {{MONTHLY_PRICE}} 即可解锁。`),
+      /unknown placeholder "\{\{MONTHLY_PRICE\}\}"/,
+    );
+  });
+
+  it("rejects an unclosed or leftover placeholder left after resolution", () => {
+    expectFailure(
+      "unclosed-placeholder.md",
+      validSource({}, `${BODY}\n\n会员每月 {{MONTHLY_PRICE_USD 即可解锁。`),
+      /unclosed placeholder "\{\{MONTHLY_PRICE_USD"/,
+    );
+    expectFailure(
+      "stray-brace.md",
+      validSource({}, `${BODY}\n\n会员每月 4.99/月}} 即可解锁。`),
+      /unclosed placeholder "\}\}"/,
+    );
+    expectFailure(
+      "doubled-brace.md",
+      validSource(
+        { description: `会员 ${PRICE_PLACEHOLDER}，每日 ${QUOTA_PLACEHOLDER} 次 Analysis，${"详".repeat(63)}` },
+        `{{{${PRICE_PLACEHOLDER}}}}\n\n${BODY}`,
+      ),
+      /unclosed placeholder/,
+    );
+  });
+
+  it("renders the committed defaults for a junk price or a fractional quota", async () => {
+    // Mirror fallback semantics (``readBuildEnvNumber``): a fractional Quota and an
+    // unparseable price are refused, so an Article never renders ``$NaN/月``.
+    const article = await parseWithBuildArgs(
+      { VITE_SUBSCRIPTION_MONTHLY_USD: "not-a-number", VITE_ANALYSIS_DAILY_QUOTA: "2.5" },
+      "junk-build-args.md",
+      validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
+    );
+
+    expect(article.body).toContain("免费会员每月 $4.99/月");
+    expect(article.body).toContain("免费账号自然日 3 次 Analysis");
+    expect(article.body).not.toContain("NaN");
+    expect(article.description).toContain("会员 $4.99/月，每日 3 次 Analysis");
+  });
+
+  it("interpolates through the collection so every consumer reads the same text", () => {
+    const collection = buildArticleCollection([
+      {
+        fileName: "placeholder-defaults.md",
+        source: validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
+      },
+    ]);
+
+    const article = collection.published[0];
+    expect(article.description).toContain("$4.99/月");
+    expect(article.body).toContain("自然日 3 次 Analysis");
+    expect(collection.drafts).toHaveLength(0);
   });
 });
 

@@ -5,7 +5,14 @@
  *
  * A new Markdown file in ``frontend/content/articles`` is the only thing needed
  * to publish an Article; this module is where bad content fails the build.
+ *
+ * Money and Quota claims are written as build-time placeholders
+ * (``{{MONTHLY_PRICE_USD}}`` / ``{{DAILY_FREE_QUOTA}}``) and resolved here, in the
+ * one place both the body and the frontmatter description pass through, so a
+ * repricing deploy moves the Articles with the rest of the site. The description
+ * length rule is checked after interpolation, on the text a crawler actually reads.
  */
+import { DAILY_FREE_ANALYSIS_LIMIT, PRICE_HEADLINE } from "@/lib/billing";
 import {
   DESCRIPTION_MAX_LENGTH,
   DESCRIPTION_MIN_LENGTH,
@@ -59,6 +66,60 @@ export class ArticleContentError extends Error {
     super(`Article ${fileName}: ${reason}`);
     this.name = "ArticleContentError";
   }
+}
+
+/**
+ * The two build-time placeholders an Article source may use for a money or Quota
+ * claim, with their values taken from the single ``VITE_`` mirror chain (issue #45):
+ * ``PRICE_HEADLINE`` is already the ``$X.XX/月`` form and the Quota mirror refuses a
+ * fractional or junk deploy arg, so an Article can never render ``$NaN/月``.
+ * Reading them here keeps the interpolation pure — no env access, no DOM, one
+ * implementation shared by the client bundle, the prerender and the tests.
+ */
+const PLACEHOLDER_VALUES: Record<string, string> = {
+  MONTHLY_PRICE_USD: PRICE_HEADLINE,
+  DAILY_FREE_QUOTA: String(DAILY_FREE_ANALYSIS_LIMIT),
+};
+
+/** A well-formed ``{{NAME}}`` token: no nesting, no stray braces inside. */
+const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
+
+/**
+ * Anything that still looks like a broken placeholder once the known tokens are
+ * resolved: an unclosed ``{{`` (reported up to the first space or brace, so a build
+ * log stays readable) or a stray ``}}``.
+ */
+const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*|\}\}/;
+
+/**
+ * Resolve every ``{{PLACEHOLDER}}`` in one Article field to its build-time value.
+ * Known placeholders are replaced first, so anything that still looks like a
+ * placeholder afterwards (unknown name, unclosed ``{{`` or stray ``}}``) fails the
+ * build naming the file instead of leaking ``{{...}}`` into a published page.
+ */
+function interpolatePlaceholders(fileName: string, text: string): string {
+  const resolved = text.replace(PLACEHOLDER_PATTERN, (token, name: string) => {
+    const value = Object.prototype.hasOwnProperty.call(PLACEHOLDER_VALUES, name)
+      ? PLACEHOLDER_VALUES[name]
+      : undefined;
+    if (value === undefined) {
+      throw new ArticleContentError(
+        fileName,
+        `unknown placeholder "${token}": the only allowed placeholders are {{MONTHLY_PRICE_USD}} and {{DAILY_FREE_QUOTA}}`,
+      );
+    }
+    return value;
+  });
+
+  const residual = RESIDUAL_PLACEHOLDER_PATTERN.exec(resolved)?.[0];
+  if (residual) {
+    throw new ArticleContentError(
+      fileName,
+      `unclosed placeholder "${residual}": expected the form {{MONTHLY_PRICE_USD}} or {{DAILY_FREE_QUOTA}}`,
+    );
+  }
+
+  return resolved;
 }
 
 const REQUIRED_FIELDS = ["title", "description", "published"] as const;
@@ -259,7 +320,10 @@ export function parseArticle(fileName: string, source: string): Article {
   }
 
   const title = unquote(fields.get("title") ?? "");
-  const description = unquote(fields.get("description") ?? "");
+  const description = interpolatePlaceholders(
+    fileName,
+    unquote(fields.get("description") ?? ""),
+  );
   const published = unquote(fields.get("published") ?? "");
 
   const updatedRaw = fields.get("updated");
@@ -294,7 +358,7 @@ export function parseArticle(fileName: string, source: string): Article {
     );
   }
 
-  const trimmedBody = body.trim();
+  const trimmedBody = interpolatePlaceholders(fileName, body.trim());
   const bodyCharacters = countBodyCharacters(trimmedBody);
   if (bodyCharacters < BODY_MIN_CHARACTERS) {
     throw new ArticleContentError(
