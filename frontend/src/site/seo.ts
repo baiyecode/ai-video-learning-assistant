@@ -8,6 +8,12 @@
  * on one source.
  */
 import { MONTHLY_PRICE_USD, PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
+import {
+  DESCRIPTION_MAX_LENGTH,
+  DESCRIPTION_MIN_LENGTH,
+  MAX_DOCUMENT_TITLE_LENGTH,
+  reviewArticleDates,
+} from "@/site/content-limits";
 import { faqItems } from "@/site/faq-content";
 import { guideSteps } from "@/site/guide-content";
 
@@ -477,11 +483,9 @@ export function validateDescriptors(descriptors: readonly PageDescriptor[]): voi
       if (descriptor.ogType !== "article") {
         throw new SeoDescriptorError(route, "article dates require og:type article");
       }
-      if (!/^\d{4}-\d{2}-\d{2}$/.test(published) || !/^\d{4}-\d{2}-\d{2}$/.test(updated)) {
-        throw new SeoDescriptorError(route, "article dates must use YYYY-MM-DD");
-      }
-      if (updated < published) {
-        throw new SeoDescriptorError(route, "article modified time must not precede published time");
+      const dateIssue = reviewArticleDates(published, updated);
+      if (dateIssue) {
+        throw new SeoDescriptorError(route, `article ${dateIssue.field} ${dateIssue.reason}`);
       }
     }
 
@@ -499,17 +503,20 @@ export function validateDescriptors(descriptors: readonly PageDescriptor[]): voi
     paths.add(descriptor.path);
 
     const fullTitle = documentTitle(descriptor);
-    if (fullTitle.length > 60) {
-      throw new SeoDescriptorError(route, `title is ${fullTitle.length} characters (max 60)`);
+    if (fullTitle.length > MAX_DOCUMENT_TITLE_LENGTH) {
+      throw new SeoDescriptorError(
+        route,
+        `title is ${fullTitle.length} characters (max ${MAX_DOCUMENT_TITLE_LENGTH})`,
+      );
     }
     if (titles.has(fullTitle)) throw new SeoDescriptorError(route, `duplicate title "${fullTitle}"`);
     titles.add(fullTitle);
 
     const length = descriptor.description.length;
-    if (length < 70 || length > 160) {
+    if (length < DESCRIPTION_MIN_LENGTH || length > DESCRIPTION_MAX_LENGTH) {
       throw new SeoDescriptorError(
         route,
-        `description is ${length} characters (expected 70-160)`,
+        `description is ${length} characters (expected ${DESCRIPTION_MIN_LENGTH}-${DESCRIPTION_MAX_LENGTH})`,
       );
     }
     if (descriptions.has(descriptor.description)) {

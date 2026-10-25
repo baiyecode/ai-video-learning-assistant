@@ -6,15 +6,18 @@
  * A new Markdown file in ``frontend/content/articles`` is the only thing needed
  * to publish an Article; this module is where bad content fails the build.
  */
+import {
+  DESCRIPTION_MAX_LENGTH,
+  DESCRIPTION_MIN_LENGTH,
+  MAX_DOCUMENT_TITLE_LENGTH,
+  reviewArticleDates,
+} from "@/site/content-limits";
 import { SITE_NAME } from "@/site/seo";
 
 export const AUTHOR_NAME = "AI 视频学习助手团队";
 export const SLUG_PATTERN = /^[a-z0-9]+(-[a-z0-9]+)*$/;
-export const DESCRIPTION_MIN_LENGTH = 70;
-export const DESCRIPTION_MAX_LENGTH = 160;
 export const BODY_MIN_CHARACTERS = 500;
 export const READING_CHARACTERS_PER_MINUTE = 400;
-export const MAX_DOCUMENT_TITLE_LENGTH = 60;
 
 /** File name with extension, used verbatim in build failures. */
 export interface ArticleSource {
@@ -118,17 +121,6 @@ function splitFrontmatter(fileName: string, source: string): Frontmatter {
   }
 
   return { fields, body: lines.slice(end + 1).join("\n") };
-}
-
-function parseDate(fileName: string, field: string, value: string): string {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) {
-    throw new ArticleContentError(fileName, `${field} must use YYYY-MM-DD, got "${value}"`);
-  }
-  const parsed = new Date(`${value}T00:00:00Z`);
-  if (Number.isNaN(parsed.getTime()) || parsed.toISOString().slice(0, 10) !== value) {
-    throw new ArticleContentError(fileName, `${field} is not a real calendar date: "${value}"`);
-  }
-  return value;
 }
 
 function parseTags(fileName: string, value: string): string[] {
@@ -266,12 +258,18 @@ export function parseArticle(fileName: string, source: string): Article {
 
   const title = unquote(fields.get("title") ?? "");
   const description = unquote(fields.get("description") ?? "");
-  const published = parseDate(fileName, "published", unquote(fields.get("published") ?? ""));
+  const published = unquote(fields.get("published") ?? "");
 
   const updatedRaw = fields.get("updated");
-  const updated = updatedRaw ? parseDate(fileName, "updated", unquote(updatedRaw)) : undefined;
-  if (updated && updated < published) {
-    throw new ArticleContentError(fileName, `updated (${updated}) must not be earlier than published (${published})`);
+  const updated = updatedRaw ? unquote(updatedRaw) : undefined;
+
+  const dateIssue = reviewArticleDates(published, updated);
+  if (dateIssue) {
+    const value = dateIssue.field === "published" ? published : updated;
+    throw new ArticleContentError(
+      fileName,
+      `${dateIssue.field} ${dateIssue.reason}: "${value}"`,
+    );
   }
 
   const tagsRaw = fields.get("tags");
