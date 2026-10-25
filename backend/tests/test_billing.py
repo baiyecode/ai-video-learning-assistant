@@ -35,9 +35,11 @@ def bearer(response: Any) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-async def register(client: AsyncClient, *, email: str = "learner@example.com") -> Any:
+async def register(
+    client: AsyncClient, *, email: str = "learner@example.com", expect: int = 201
+) -> Any:
     """Register then log in: billing reads the Session, not the verification state."""
-    await auth_register(client, email=email, password=PASSWORD)
+    await auth_register(client, email=email, password=PASSWORD, expect=expect)
     return await auth_login(client, email=email, password=PASSWORD)
 
 
@@ -262,7 +264,10 @@ async def test_checkout_endpoint_answers_503_on_production_wiring_without_keys(
 
     async with LifespanManager(production_app):
         async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
-            authed = await register(http_client, email="upgrade@example.com")
+            # Ticket #43: with SMTP unconfigured the registration mail fails visibly
+            # (503 from the adapter) instead of lying about delivery - the Account is
+            # committed before sending, so login still succeeds.
+            authed = await register(http_client, email="upgrade@example.com", expect=503)
             response = await http_client.post("/api/billing/checkout", headers=bearer(authed))
 
     assert response.status_code == 503, response.text

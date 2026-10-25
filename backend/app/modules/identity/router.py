@@ -59,6 +59,8 @@ _MESSAGE_SESSION_INVALID = "登录状态已失效，请重新登录"
 _MESSAGE_REGISTER_ACK = "如果这是你本人的操作，请查收邮箱中的验证邮件"
 _MESSAGE_VERIFICATION_SENT = "验证邮件已发送，请查收邮箱"
 _MESSAGE_ALREADY_VERIFIED = "邮箱已验证，无需再次发送"
+#: Ticket #43: a send that never left the process must not read as a delivery claim.
+_MESSAGE_EMAIL_SEND_FAILED = "邮件发送失败，请稍后重试"
 
 
 class Credentials(BaseModel):
@@ -180,19 +182,28 @@ async def _find_session(db: AsyncSession, raw_token: str) -> Session | None:
 
 
 async def _deliver(adapters: Adapters, message) -> None:
-    """Send an email without ever letting a mail outage fail the request.
+    """Send an email and let any delivery failure reach the caller (ticket #43).
 
-    Verification and reminder mails are recoverable (the resend endpoint re-sends), so
-    a delivery error is logged and swallowed rather than surfacing to the client.
+    The response copy promises the mail was sent, so it may only appear after a real
+    delivery: an outage re-raises as ``503 service_unavailable`` with the retry
+    sentence. The mail itself stays recoverable - the Account/rotation is committed
+    before delivery, and ``POST /auth/verification/request`` re-sends. An adapter
+    that already raises ``AppError`` (e.g. the SMTP one) keeps its own status, code
+    and message.
     """
     try:
         await adapters.email_sender.send(message)
-    except Exception:
+    except AppError:
+        raise
+    except Exception as exc:
         logger.warning(
             "email_delivery_failed",
             extra={"event": "email_delivery_failed", "recipient": message.to},
             exc_info=True,
         )
+        raise AppError(
+            503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_EMAIL_SEND_FAILED, details={}
+        ) from exc
 
 
 async def _neutral_register_ack(

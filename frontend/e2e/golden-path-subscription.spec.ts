@@ -109,6 +109,10 @@ test.describe("golden path: quota exhausted → upgrade → unlimited Analysis",
 
     await resolveOnHome(page, "https://www.douyin.com/video/7400123456789012345", "演示短视频：三分钟搞懂主动回忆");
     await expect(page.getByText("抖音")).toBeVisible();
+    // Story 30 (ticket #43): the single tier is labelled 带水印 like production,
+    // and the forbidden 清晰度 claim never reaches the screen.
+    await expect(page.getByText("带水印")).toBeVisible();
+    await expect(page.getByText("高清")).toHaveCount(0);
 
     const subtitleDownload = page.waitForEvent("download");
     await page.getByRole("button", { name: "TXT", exact: true }).click();

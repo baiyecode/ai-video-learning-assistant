@@ -35,7 +35,8 @@ _MESSAGE_TIMEOUT = "解析超时，请稍后重试"
 _MESSAGE_SUBTITLE_FAILED = "字幕获取失败，请稍后重试"
 
 _DOUYIN_PLATFORM = "douyin"
-_DOUYIN_WATERMARK_LABEL = "带水印"
+#: One source with the demo adapter (ticket #43); see ``app.messages``.
+_DOUYIN_WATERMARK_LABEL = messages.DOUYIN_WATERMARK_LABEL
 
 _HTML_TAG = re.compile(r"<[^>]+>")
 _TIMESTAMP_LINE = re.compile(r"^\s*(\S+)\s*-->\s*(\S+)")
