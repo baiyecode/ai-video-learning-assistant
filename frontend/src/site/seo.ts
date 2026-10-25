@@ -88,21 +88,70 @@ export function isPublicDescriptor(descriptor: PageDescriptor): boolean {
 
 /**
  * Build-time origin. Vite inlines ``VITE_SITE_ORIGIN``; plain Node reads the
- * property defensively (``import.meta.env`` is undefined there). Format
- * hardening is ticket #37 — this only trims trailing slashes.
+ * property defensively (``import.meta.env`` is undefined there).
  */
 function viteSiteOrigin(): string | undefined {
   const meta = import.meta as ImportMeta & { env?: Record<string, string | undefined> };
   return meta.env?.VITE_SITE_ORIGIN;
 }
 
+/** Raised at build time when ``VITE_SITE_ORIGIN`` is not a bare http(s) origin. */
+export class SiteOriginError extends Error {
+  readonly value: string;
+
+  constructor(value: string, reason: string) {
+    super(
+      `Invalid VITE_SITE_ORIGIN "${value}": ${reason}. ` +
+        "Use a bare absolute origin such as https://example.com (no credentials, path, query, hash or trailing slash).",
+    );
+    this.name = "SiteOriginError";
+    this.value = value;
+  }
+}
+
+function assertBareOrigin(raw: string): string {
+  let url: URL;
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new SiteOriginError(raw, "it is not an absolute URL with a host");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new SiteOriginError(raw, `only http(s) is allowed, got "${url.protocol}"`);
+  }
+  if (!url.hostname) {
+    throw new SiteOriginError(raw, "the host is empty");
+  }
+  if (url.username || url.password) {
+    throw new SiteOriginError(raw, "credentials are not allowed");
+  }
+  if (url.pathname !== "/") {
+    throw new SiteOriginError(raw, `a path is not allowed (got "${url.pathname}")`);
+  }
+  if (url.search) {
+    throw new SiteOriginError(raw, `a query is not allowed (got "${url.search}")`);
+  }
+  if (url.hash) {
+    throw new SiteOriginError(raw, `a hash is not allowed (got "${url.hash}")`);
+  }
+  if (raw.endsWith("/")) {
+    throw new SiteOriginError(raw, "a trailing slash is not allowed");
+  }
+  return url.origin;
+}
+
+/**
+ * The origin baked into canonical/OG/sitemap at build time. Unset means local
+ * Vite development, which falls back loudly instead of shipping a broken
+ * relative canonical.
+ */
 export function resolveSiteOrigin(value: string | undefined = viteSiteOrigin()): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) {
     console.warn(`[seo] VITE_SITE_ORIGIN is not set; falling back to ${DEFAULT_DEV_ORIGIN}.`);
     return DEFAULT_DEV_ORIGIN;
   }
-  return trimmed.replace(/\/+$/, "") || DEFAULT_DEV_ORIGIN;
+  return assertBareOrigin(trimmed);
 }
 
 export function canonicalUrl(origin: string, path: string): string {
@@ -606,6 +655,9 @@ export const pageDescriptors: readonly PageDescriptor[] = [
 const NOT_FOUND_DESCRIPTOR = pageDescriptors.find(
   (descriptor) => descriptor.name === "not-found",
 ) as PageDescriptor;
+
+/** The unmatched-route descriptor; ``404.html`` is built from it. */
+export const notFoundDescriptor: PageDescriptor = NOT_FOUND_DESCRIPTOR;
 
 export function descriptorForRoute(name: string | symbol | null | undefined): PageDescriptor {
   if (typeof name === "string") {

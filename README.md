@@ -111,6 +111,56 @@ docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 - CORS：compose 栈是同源部署（nginx 代理 `/api`），`APP_CORS_ORIGINS` 保持 `[]`；仅当浏览器直连 API 时才配置，本地 Vite 开发放行 5173 的方式见 `.env.example` 注释。
 - 从 P1 部署升级：先 `docker compose up -d api`，再执行一次 `docker compose exec api python -m scripts.migrate_p2`（无 Alembic，`create_all` 不给既有表加列；新库无需执行）。
 
+### 生产部署清单（P3 新增项：静态站点与站点地址）
+
+前端在构建期把公开营销页与文章预渲染成静态 HTML，并生成 `sitemap.xml`、`robots.txt`、`llms.txt`；私有路由使用无索引外壳 `app.html`，未知路径返回真正的 404 页面 `404.html`。
+
+- **`SITE_ORIGIN`**：写入 canonical、OG 与 sitemap 的公网 origin，经 compose 传入前端构建参数 `VITE_SITE_ORIGIN`（compose 默认 `http://localhost:8080`）。它必须是**裸 origin**：绝对 http(s) 地址，不带用户名密码、路径、查询串、hash 或尾斜杠；格式非法时 `npm run build` / `docker compose build web` 直接失败并打印变量名与非法值。本地 Vite 开发未设置时回退到 `http://localhost:5173` 并警告。
+- **生产必须设置为公网 https origin，并与 `APP_FRONTEND_BASE_URL` 完全一致**，否则 canonical/OG 与实际访问地址分裂，验证邮件里的链接也会指向另一个 host。回环 origin（localhost/127.0.0.1/::1）会输出 `Disallow: /` 并在构建日志中警告，不能用来验证收录。
+- nginx 行为：`/features`、`/guide`、`/faq`、`/pricing`、`/terms`、`/articles`、`/articles/<slug>` 按「精确文件 → `.html` → 目录 → 404」查找，直接 200 且不做尾斜杠跳转；`/login`、`/account`、`/analyses`、`/analyses/:id`、`/verify-email` 回落 `app.html`（查询串保留）并带 `X-Robots-Tag: noindex, nofollow`；未知路径返回 HTTP 404 + `404.html`，不再回落首页；HTML 为 `Cache-Control: no-cache`，`/assets/` 为 `immutable`，发现层文件缓存 1 小时；gzip 覆盖 HTML、CSS、JS、JSON、XML 与 `text/plain`。
+- 构建与启动：`SITE_ORIGIN=https://example.com docker compose build web`，随后 `docker compose up -d`。非法值可这样确认会失败：`SITE_ORIGIN=https://example.com/path docker compose build web`。
+- 部署后用下面的命令验证（`BASE` 换成实际访问地址；公开页 200、未知路径 404、私有 noindex、`/health`、发现层与缓存头）：
+
+```bash
+BASE=http://localhost:8080
+
+# 公开静态页：均应为 200，且不出现 301/308 尾斜杠跳转
+for p in / /features /guide /faq /pricing /terms /articles /articles/bilibili-subtitle-download; do
+  curl -sS -o /dev/null -w "%{http_code} $p\n" "$BASE$p"
+done
+# canonical 与实际地址一致
+curl -sS "$BASE/features" | grep -o '<link rel="canonical"[^>]*>'
+
+# 未知路径：HTTP 404 + 404.html 正文 + noindex 头
+curl -sS -i "$BASE/definitely-not-a-page" | grep -E '^HTTP/|^X-Robots-Tag'
+curl -sS "$BASE/definitely-not-a-page" | grep -o '页面不存在'
+
+# 私有路由：app.html 外壳 + noindex meta，且 X-Robots-Tag 为 noindex, nofollow
+curl -sS -i "$BASE/login?next=/account" | grep -E '^HTTP/|^X-Robots-Tag|^Cache-Control'
+curl -sS "$BASE/login?next=/account" | grep -o '<meta name="robots"[^>]*>'
+for p in /account /analyses /analyses/00000000-0000-0000-0000-000000000000 /verify-email; do
+  curl -sS -o /dev/null -w "%{http_code} %{redirect_url} $p\n" "$BASE$p"
+done
+
+# 健康检查（经 nginx 代理到 api）
+curl -sS -i "$BASE/health" | head -n 5
+
+# 发现层
+curl -sS "$BASE/robots.txt" | head -n 12
+curl -sS "$BASE/sitemap.xml" | head -n 5
+curl -sS "$BASE/llms.txt" | head -n 5
+
+# 缓存：HTML no-cache，带哈希资源 1 年 immutable
+curl -sS -I "$BASE/" | grep -i cache-control
+ASSET=$(curl -sS "$BASE/" | grep -o '/assets/[^"]*\.js' | head -n 1)
+curl -sS -I "$BASE$ASSET" | grep -i -E 'cache-control|expires'
+
+# gzip：HTML、CSS/JS、XML 与纯文本（llms.txt/robots.txt）
+curl -sS -H 'Accept-Encoding: gzip' -I "$BASE/llms.txt" | grep -i content-encoding
+curl -sS -H 'Accept-Encoding: gzip' -I "$BASE/sitemap.xml" | grep -i content-encoding
+```
+
+
 全部变量的名称与默认值以根目录 `.env.example` 为准，`docker-compose.yml` 的 `api.environment` 与其逐项同步。
 
 ## 运维
@@ -172,5 +222,5 @@ docker compose start api backup
 
 ## 尚未实现
 
-- ADR-0005 的营销页构建期预渲染与 sitemap 属于 P3；当前只在路由层为私有页面下发 `noindex`（见 `src/router/index.ts`）。
+- ADR-0005 的营销页构建期预渲染、sitemap/robots/`llms.txt` 与无索引 `app.html`、`404.html` 已在 P3 落地；私有页的 `noindex` 现在是静态外壳 meta、响应头与客户端路由三重声明。
 - 没有 CI 流水线：`backend` 的 pytest/ruff 与 `frontend` 的 vitest/build/Playwright 需按上面的命令手动执行。

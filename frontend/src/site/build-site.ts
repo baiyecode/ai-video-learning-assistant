@@ -11,9 +11,13 @@ import path from "node:path";
 
 import {
   isPublicDescriptor,
+  MANAGED_ATTRIBUTE,
+  notFoundDescriptor,
+  NOINDEX_ROBOTS,
   pageDescriptors,
   publicDescriptors,
   renderHeadHtml,
+  SITE_NAME,
   validateDescriptors,
   type PageDescriptor,
 } from "@/site/seo";
@@ -51,11 +55,40 @@ export interface BuiltPage {
 
 export interface BuildSiteResult {
   pages: BuiltPage[];
+  /** Private SPA shell for authenticated routes; never indexed or advertised. */
+  appShell: BuiltPage;
+  /** Real 404 document served with HTTP 404 by nginx. */
+  notFound: BuiltPage;
 }
+
+/** Private route shell: hashed client assets, an empty mount and a noindex head. */
+export const APP_SHELL_FILE = "app.html";
+/** Unmatched paths are served this file with status 404, never the home page. */
+export const NOT_FOUND_FILE = "404.html";
+export const APP_SHELL_TITLE = SITE_NAME;
 
 /** ``/`` -> index.html, ``/features`` -> features.html (nginx looks up .html). */
 export function outputFileFor(routePath: string): string {
   return routePath === "/" ? "index.html" : `${routePath.replace(/^\//, "")}.html`;
+}
+
+/**
+ * The private SPA shell: the client build's HTML with a plain title and a
+ * noindex directive, and deliberately nothing inside ``#app`` — no marketing or
+ * Article body is baked into the surface authenticated users load.
+ */
+export function composeAppShell(shellHtml: string): string {
+  if (!/<div id="app"[^>]*>\s*<\/div>/i.test(shellHtml)) {
+    throw new Error("HTML shell is missing an empty #app mount");
+  }
+  const head = [
+    `<title ${MANAGED_ATTRIBUTE}>${APP_SHELL_TITLE}</title>`,
+    `<meta name="robots" content="${NOINDEX_ROBOTS}" ${MANAGED_ATTRIBUTE}>`,
+  ].join("\n    ");
+  const shell = shellHtml
+    .replace(/<title[^>]*>[\s\S]*?<\/title>/i, "")
+    .replace(/<meta\s+name=["'](?:description|robots)["'][^>]*>\s*/gi, "");
+  return shell.replace(/<\/head>/i, () => `    ${head}\n  </head>`);
 }
 
 /** Inject the descriptor head and the rendered Vue body into the client shell. */
@@ -101,6 +134,30 @@ function assertArtifact(descriptor: PageDescriptor, html: string): void {
   }
   if (!/<link[^>]+rel="canonical"/i.test(html)) {
     throw new Error(`Artifact validation failed for route ${route}: missing canonical link`);
+  }
+}
+
+/** Fail the build when a private artifact is missing its noindex contract. */
+function assertPrivateArtifact(label: string, html: string, expectH1: boolean): void {
+  const titles = countMatches(html, /<title[\s>]/gi);
+  if (titles !== 1) {
+    throw new Error(`Artifact validation failed for ${label}: expected 1 <title>, found ${titles}`);
+  }
+  const h1s = countMatches(html, /<h1[\s>]/gi);
+  const expectedH1 = expectH1 ? 1 : 0;
+  if (h1s !== expectedH1) {
+    throw new Error(
+      `Artifact validation failed for ${label}: expected ${expectedH1} <h1>, found ${h1s}`,
+    );
+  }
+  if (
+    !new RegExp(`<meta\\s+name="robots"\\s+content="${NOINDEX_ROBOTS}"`, "i").test(html) &&
+    !new RegExp(`<meta\\s+content="${NOINDEX_ROBOTS}"\\s+name="robots"`, "i").test(html)
+  ) {
+    throw new Error(`Artifact validation failed for ${label}: missing robots=${NOINDEX_ROBOTS}`);
+  }
+  if (/<link[^>]+rel="canonical"/i.test(html)) {
+    throw new Error(`Artifact validation failed for ${label}: private artifacts must not be canonical`);
   }
 }
 
@@ -153,6 +210,31 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildSiteRes
     generated.push({ path: descriptor.path, html });
   }
 
+  // Private surfaces are built from the same shell so they carry the hashed
+  // client assets, but they are never listed in sitemap.xml or llms.txt.
+  const appShellHtml = composeAppShell(options.shellHtml);
+  assertPrivateArtifact(APP_SHELL_FILE, appShellHtml, false);
+  await writeFile(path.join(options.outputDir, APP_SHELL_FILE), appShellHtml, "utf8");
+  const appShell: BuiltPage = { path: "/app.html", file: APP_SHELL_FILE };
+
+  let notFoundRendered: RenderedRoute;
+  try {
+    // Any unmatched path resolves to the router's catch-all (NotFoundView).
+    notFoundRendered = await options.renderRoute("/404");
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    throw new Error(`Prerender failed for ${NOT_FOUND_FILE}: ${reason}`);
+  }
+  const notFoundHtml = composeDocument(
+    options.shellHtml,
+    notFoundDescriptor,
+    options.origin,
+    notFoundRendered.html,
+  );
+  assertPrivateArtifact(NOT_FOUND_FILE, notFoundHtml, true);
+  await writeFile(path.join(options.outputDir, NOT_FOUND_FILE), notFoundHtml, "utf8");
+  const notFound: BuiltPage = { path: "/404", file: NOT_FOUND_FILE };
+
   // Anchors are only complete once every page exists, so the site-wide audit
   // runs here: a broken CTA, navigation entry or Article cross-link fails the
   // build instead of shipping a dead internal link.
@@ -172,5 +254,5 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildSiteRes
     options.origin,
   );
 
-  return { pages: built };
+  return { pages: built, appShell, notFound };
 }
