@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { DEFAULT_DEV_ORIGIN, resolveSiteOrigin } from "@/site/seo";
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.restoreAllMocks();
 });
 
@@ -56,6 +57,21 @@ describe("resolveSiteOrigin", () => {
     expect(warn).toHaveBeenCalled();
     expect(warn.mock.calls.flat().join(" ")).toMatch(/VITE_SITE_ORIGIN/);
     expect(warn.mock.calls.flat().join(" ")).toContain(DEFAULT_DEV_ORIGIN);
+  });
+
+  // Regression: the runtime must read the build-time VITE_SITE_ORIGIN value
+  // instead of ignoring it (the pre-fix alias of import.meta always returned
+  // undefined in the client bundle, so canonical/OG were rewritten to
+  // http://localhost:5173 after the SPA mounted). The authoritative check that
+  // Vite statically replaces the value is the build grep documented in the
+  // README: `VITE_SITE_ORIGIN=https://example.com npm run build` plus grep of
+  // dist/assets/index-*.js; this test only guards the resolution logic.
+  it("reads the build-time VITE_SITE_ORIGIN when called without an argument", () => {
+    vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
+
+    expect(resolveSiteOrigin()).toBe("https://example.com");
+
+    vi.unstubAllEnvs();
   });
 
   it("does not warn for a valid origin", () => {

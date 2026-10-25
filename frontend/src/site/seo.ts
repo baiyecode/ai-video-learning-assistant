@@ -87,12 +87,18 @@ export function isPublicDescriptor(descriptor: PageDescriptor): boolean {
 }
 
 /**
- * Build-time origin. Vite inlines ``VITE_SITE_ORIGIN``; plain Node reads the
- * property defensively (``import.meta.env`` is undefined there).
+ * Build-time origin. Vite replaces this exact ``import.meta.env.VITE_SITE_ORIGIN``
+ * property access with the configured string at build time; aliasing
+ * ``import.meta`` would defeat that static replacement and leave the runtime
+ * falling back to the dev origin. Plain Node has no ``import.meta.env``, so the
+ * access throws and is caught.
  */
 function viteSiteOrigin(): string | undefined {
-  const meta = import.meta as ImportMeta & { env?: Record<string, string | undefined> };
-  return meta.env?.VITE_SITE_ORIGIN;
+  try {
+    return import.meta.env.VITE_SITE_ORIGIN;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Raised at build time when ``VITE_SITE_ORIGIN`` is not a bare http(s) origin. */
