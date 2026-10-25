@@ -191,6 +191,22 @@ describe("home marketing page", () => {
     expect(document.querySelector('#home-pricing a[href="/pricing"]')).not.toBeNull();
   });
 
+  it("renders the same six capability titles on home and /features", () => {
+    const homeTitles = [...page("index.html").querySelectorAll("#home-capabilities h3")].map(textOf);
+    const featureTitles = [...page("features.html").querySelectorAll("section > h2")]
+      .map(textOf)
+      .filter((title) => title !== "从一次解析开始");
+
+    expect(featureTitles).toEqual(homeTitles);
+  });
+
+  it("uses the shared guide steps for both the home steps and /guide", () => {
+    const homeSteps = [...page("index.html").querySelectorAll("#home-steps li h3")].map(textOf);
+    const guideSteps = [...page("guide.html").querySelectorAll("#guide-steps li h3")].map(textOf);
+
+    expect(homeSteps).toEqual(guideSteps);
+  });
+
   it("summarises five FAQ entries drawn from the full FAQ", () => {
     const home = page("index.html");
     const full = page("faq.html");

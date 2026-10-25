@@ -106,9 +106,9 @@ describe("buildSite", () => {
     expect(headings).toEqual([
       "功能：从解析到 AI 分析",
       "解析",
-      "Download：保存文件",
+      "Download",
       "Subtitle 导出",
-      "Analysis：AI 摘要",
+      "Analysis",
       "思维导图",
       "历史与 VIP",
       "从一次解析开始",

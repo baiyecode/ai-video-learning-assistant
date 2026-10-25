@@ -15,7 +15,9 @@ import {
   subtitleSourceLabel,
 } from "@/lib/video";
 import { useArticleCollection } from "@/site/article-sources";
+import { capabilities } from "@/site/capabilities-content";
 import { homeFaqItems } from "@/site/faq-content";
+import { guideSteps } from "@/site/guide-content";
 import { useAnalysisStore } from "@/stores/analysis";
 import { useAuthStore } from "@/stores/auth";
 import { useVideoStore } from "@/stores/video";
@@ -32,47 +34,7 @@ const analysisError = ref<UiError | null>(null);
 const latestArticles = useArticleCollection().published.slice(0, 3);
 const marketingFaqs = homeFaqItems;
 
-const steps = [
-  {
-    title: "解析",
-    text: "粘贴 B 站或 YouTube 的页面地址，确认视频是否可下载、是否带有 Subtitle。",
-  },
-  {
-    title: "下载或导出 Subtitle",
-    text: "选择清晰度保存文件，或把已有字幕导出为 SRT、VTT、TXT。",
-  },
-  {
-    title: "登录生成 Analysis",
-    text: "登录并验证邮箱后，基于 Subtitle 生成简体中文摘要与思维导图。",
-  },
-];
-
-const capabilities = [
-  {
-    title: "解析",
-    text: "先确认一个页面地址能否下载、导出字幕或生成 Analysis，而不是反复试错。",
-  },
-  {
-    title: "Download",
-    text: "选择清晰度与格式，由服务端转存并交付；链接 15 分钟内有效，文件最多保留 1 小时。",
-  },
-  {
-    title: "Subtitle 导出",
-    text: "把已有字幕导出为 SRT、VTT 或 TXT，并标出人工字幕与平台自动生成字幕。",
-  },
-  {
-    title: "Analysis",
-    text: "基于 Subtitle 生成简体中文摘要；免费 Account 每日 3 次 Analysis，结果仅自己可见。",
-  },
-  {
-    title: "思维导图",
-    text: "把 Analysis 结果整理成可展开的主题结构，便于复盘与讲解。",
-  },
-  {
-    title: "历史与 VIP",
-    text: "在「我的分析」找回历史结果；VIP 会员解除每日 Analysis 的 Quota 限制。",
-  },
-];
+const steps = guideSteps;
 
 const result = computed(() => store.result);
 const error = computed(() => store.error);
@@ -391,7 +353,7 @@ function cancelCompliance(): void {
           class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
         >
           <h3 class="text-base font-semibold text-slate-900">{{ capability.title }}</h3>
-          <p class="flex-1 text-sm leading-relaxed text-slate-600">{{ capability.text }}</p>
+          <p class="flex-1 text-sm leading-relaxed text-slate-600">{{ capability.summary }}</p>
           <RouterLink
             to="/features"
             class="text-sm font-medium text-slate-900 underline transition-colors hover:text-slate-600"
