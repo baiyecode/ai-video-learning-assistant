@@ -537,7 +537,8 @@ const PRICING_DESCRIPTION = `AI 视频学习助手价格页：免费账号每日
 const TERMS_DESCRIPTION =
   "AI 视频学习助手使用条款：说明合规使用与禁止用途、临时文件与下载链接的保留策略、版权与投诉方式，并提供 /terms#report 举报表单的提交入口。";
 
-const HOME_BREADCRUMB: Breadcrumb = { name: "首页", path: "/" };
+/** Shared first breadcrumb for every page below the home page. */
+export const HOME_BREADCRUMB: Breadcrumb = { name: "首页", path: "/" };
 
 /**
  * Route-name keyed registry. Public entries are prerendered to their own .html;

@@ -8,6 +8,7 @@ import { AUTHOR_NAME } from "@/site/articles";
 import { defaultArticleCollection } from "@/site/article-sources";
 import {
   DEFAULT_SHARE_IMAGE,
+  HOME_BREADCRUMB,
   INDEX_ROBOTS,
   SITE_NAME,
   canonicalUrl,
@@ -88,7 +89,7 @@ export function articlesListDescriptor(collection: ArticleCollection): PageDescr
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
     breadcrumbs: [
-      { name: "首页", path: "/" },
+      HOME_BREADCRUMB,
       { name: "文章", path: ARTICLES_LIST_PATH },
     ],
     jsonLd: (context) => [blogNode(context, collection)],
@@ -110,7 +111,7 @@ export function articleDescriptor(article: Article): PageDescriptor {
     imageAlt: article.title,
     article: { ...dates, tags: article.tags },
     breadcrumbs: [
-      { name: "首页", path: "/" },
+      HOME_BREADCRUMB,
       { name: "文章", path: ARTICLES_LIST_PATH },
       { name: article.title, path: articlePath(article.slug) },
     ],
