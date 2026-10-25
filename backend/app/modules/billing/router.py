@@ -22,11 +22,23 @@ from app.ports import Clock
 router = APIRouter(tags=["billing"])
 
 
-def _origin(request: Request) -> str:
-    """Browser origin used to build Stripe's success/cancel redirects."""
+def _origin(request: Request, settings: Settings) -> str:
+    """Browser origin for Stripe's success/cancel/portal redirects.
+
+    The ``Origin`` header is caller-supplied and the resulting URL is where
+    Stripe lands the payer, so an unvalidated header is an open-redirect
+    channel; only a configured origin is honoured, anything else falls back
+    to the app's own base URL.
+    """
     header = request.headers.get("origin")
     if header:
-        return header.rstrip("/")
+        normalized = header.rstrip("/")
+        allowed = {o.rstrip("/") for o in settings.cors_origins} | {
+            str(settings.frontend_base_url).rstrip("/"),
+            str(request.base_url).rstrip("/"),
+        }
+        if normalized in allowed:
+            return normalized
     return str(request.base_url).rstrip("/")
 
 
@@ -38,7 +50,7 @@ async def create_checkout(
     settings: Settings = Depends(get_settings),
 ) -> CheckoutOut:
     return await service.open_checkout(
-        adapters.billing_gateway, settings, account, origin=_origin(request)
+        adapters.billing_gateway, settings, account, origin=_origin(request, settings)
     )
 
 
@@ -48,10 +60,11 @@ async def create_portal(
     account: Account = Depends(get_current_account),
     session: AsyncSession = Depends(get_session),
     adapters: Adapters = Depends(get_adapters),
+    settings: Settings = Depends(get_settings),
 ) -> PortalOut:
     """Self-service management link: card updates and invoices stay with the provider."""
     return await service.open_portal(
-        session, adapters.billing_gateway, account, origin=_origin(request)
+        session, adapters.billing_gateway, account, origin=_origin(request, settings)
     )
 
 

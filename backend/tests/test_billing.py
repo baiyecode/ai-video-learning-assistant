@@ -75,6 +75,23 @@ async def test_logged_in_account_receives_the_gateway_checkout_url(client: Async
     assert response.json() == {"url": FAKE_CHECKOUT_URL}
 
 
+async def test_forged_origin_never_reaches_the_stripe_redirects(
+    client: AsyncClient, app: FastAPI
+) -> None:
+    """Success/cancel URLs are built from a trusted origin, not the caller's header."""
+    auth = bearer(await register(client, email="redirect@example.com"))
+
+    response = await client.post(
+        "/api/billing/checkout", headers={**auth, "Origin": "https://evil.example"}
+    )
+
+    assert response.status_code == 200, response.text
+    checkout = app.state.adapters.billing_gateway.created_checkouts[-1]
+    assert str(checkout["success_url"]).startswith("http://testserver/")
+    assert "evil.example" not in str(checkout["success_url"])
+    assert "evil.example" not in str(checkout["cancel_url"])
+
+
 async def test_membership_is_free_before_any_subscription(client: AsyncClient) -> None:
     auth = bearer(await register(client))
 

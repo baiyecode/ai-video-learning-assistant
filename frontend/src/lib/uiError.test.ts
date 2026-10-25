@@ -27,10 +27,11 @@ describe("uiErrorMessage", () => {
     expect(uiErrorMessage(error)).toBe("抖音暂未开放");
   });
 
-  it("treats budget exhaustion as an upgrade moment too", () => {
+  it("keeps the site-wide budget cap out of the upgrade funnel", () => {
     const error = asUiError(new ApiError("budget_exhausted", "预算已用完", 429));
-    expect(isQuotaExhausted(error)).toBe(true);
-    expect(uiErrorMessage(error)).toContain("不限次");
+    expect(isQuotaExhausted(error)).toBe(false);
+    expect(uiErrorMessage(error)).not.toContain("升级 VIP");
+    expect(uiErrorMessage(error)).toContain("请稍后再试");
   });
 
   it("falls back to the server message for codes the funnel does not own", () => {
