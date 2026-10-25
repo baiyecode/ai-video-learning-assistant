@@ -20,6 +20,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app import messages
 from app.config import Settings
 from app.container import Adapters
 from app.deps import get_adapters, get_clock, get_current_account, get_rate_limiter, get_session, get_settings
@@ -60,7 +61,8 @@ _MESSAGE_REGISTER_ACK = "如果这是你本人的操作，请查收邮箱中的�
 _MESSAGE_VERIFICATION_SENT = "验证邮件已发送，请查收邮箱"
 _MESSAGE_ALREADY_VERIFIED = "邮箱已验证，无需再次发送"
 #: Ticket #43: a send that never left the process must not read as a delivery claim.
-_MESSAGE_EMAIL_SEND_FAILED = "邮件发送失败，请稍后重试"
+#: Ticket #44: the sentence itself is ``messages.EMAIL_SERVICE_UNAVAILABLE`` so the
+#: SMTP adapter's own 503 for the same condition cannot drift from this one.
 
 
 class Credentials(BaseModel):
@@ -202,7 +204,7 @@ async def _deliver(adapters: Adapters, message) -> None:
             exc_info=True,
         )
         raise AppError(
-            503, ErrorCode.SERVICE_UNAVAILABLE, _MESSAGE_EMAIL_SEND_FAILED, details={}
+            503, ErrorCode.SERVICE_UNAVAILABLE, messages.EMAIL_SERVICE_UNAVAILABLE, details={}
         ) from exc
 
 
