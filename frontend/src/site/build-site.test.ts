@@ -172,7 +172,7 @@ describe("buildSite", () => {
     const { document } = new JSDOM(html).window;
 
     expect(document.querySelectorAll("h1")).toHaveLength(1);
-    expect(document.title).toBe("视频下载与 AI 分析 · AI 视频学习助手");
+    expect(document.title).toBe("视频下载、字幕导出与 AI 摘要 · AI 视频学习助手");
     expect(document.title).not.toContain("功能：视频解析");
     expect(document.querySelector('meta[name="description"]')?.getAttribute("content")).not.toBe(
       new JSDOM(featuresHtml).window.document

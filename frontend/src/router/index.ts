@@ -7,7 +7,9 @@ import { applyHead } from "@/site/head";
 import { descriptorForRoute, resolveSiteOrigin } from "@/site/seo";
 import ArticleView from "@/views/ArticleView.vue";
 import ArticlesView from "@/views/ArticlesView.vue";
+import FaqView from "@/views/FaqView.vue";
 import FeaturesView from "@/views/FeaturesView.vue";
+import GuideView from "@/views/GuideView.vue";
 import HomeView from "@/views/HomeView.vue";
 
 export interface AppRouterOptions {
@@ -37,6 +39,16 @@ export function createAppRouter(
         path: "/features",
         name: "features",
         component: FeaturesView,
+      },
+      {
+        path: "/guide",
+        name: "guide",
+        component: GuideView,
+      },
+      {
+        path: "/faq",
+        name: "faq",
+        component: FaqView,
       },
       {
         path: "/login",

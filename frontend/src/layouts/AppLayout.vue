@@ -38,15 +38,36 @@ watch(() => route.query, consumeProviderReturn);
 
 <template>
   <div class="flex min-h-screen flex-col bg-slate-50 text-slate-900 antialiased">
+    <a
+      href="#main-content"
+      class="sr-only focus:not-sr-only focus:absolute focus:left-4 focus:top-4 focus:z-50 focus:rounded-lg focus:bg-slate-900 focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-white"
+    >
+      跳到主要内容
+    </a>
     <header class="border-b border-slate-200 bg-white">
-      <div class="mx-auto flex w-full max-w-5xl items-center justify-between px-4 py-3">
+      <div
+        class="mx-auto flex w-full max-w-5xl flex-wrap items-center justify-between gap-x-4 gap-y-2 px-4 py-3"
+      >
         <RouterLink to="/" class="text-lg font-semibold tracking-tight text-slate-900">
           AI 视频学习助手
         </RouterLink>
-        <nav class="flex items-center gap-4 text-sm text-slate-600">
+        <nav
+          aria-label="主导航"
+          class="flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-slate-600"
+        >
           <RouterLink to="/" class="transition-colors hover:text-slate-900">首页</RouterLink>
+          <RouterLink to="/features" class="transition-colors hover:text-slate-900">
+            功能
+          </RouterLink>
+          <RouterLink to="/guide" class="transition-colors hover:text-slate-900">
+            使用指南
+          </RouterLink>
+          <RouterLink to="/faq" class="transition-colors hover:text-slate-900">FAQ</RouterLink>
+          <RouterLink to="/articles" class="transition-colors hover:text-slate-900">
+            文章
+          </RouterLink>
           <RouterLink to="/pricing" class="transition-colors hover:text-slate-900">
-            升级会员
+            价格
           </RouterLink>
           <template v-if="auth.isAuthenticated">
             <RouterLink
@@ -82,7 +103,11 @@ watch(() => route.query, consumeProviderReturn);
 
     <EmailVerificationBanner />
 
-    <main class="mx-auto w-full max-w-5xl flex-1 px-4 py-10">
+    <main
+      id="main-content"
+      tabindex="-1"
+      class="mx-auto w-full max-w-5xl flex-1 px-4 py-10 focus:outline-none"
+    >
       <slot />
     </main>
 

@@ -28,7 +28,7 @@ describe("router head updates", () => {
     );
 
     await router.push("/");
-    expect(document.title).toBe("视频下载与 AI 分析 · AI 视频学习助手");
+    expect(document.title).toBe("视频下载、字幕导出与 AI 摘要 · AI 视频学习助手");
     expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
       "https://example.com/",
     );

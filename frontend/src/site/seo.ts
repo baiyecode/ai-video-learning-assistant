@@ -8,6 +8,8 @@
  * on one source.
  */
 import { MONTHLY_PRICE_USD, PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
+import { faqItems } from "@/site/faq-content";
+import { guideSteps } from "@/site/guide-content";
 
 export const SITE_NAME = "AI 视频学习助手";
 export const DEFAULT_SHARE_IMAGE = "/brand/share-card.png";
@@ -149,6 +151,23 @@ export function webPageNode(context: JsonLdContext): JsonLdNode {
 }
 
 /**
+ * The site entity itself: `/` declares the WebSite that every WebPage is part
+ * of. ``url`` is the origin root so the whole site shares one stable @id.
+ */
+export function websiteNode(context: JsonLdContext): JsonLdNode {
+  const { descriptor, origin } = context;
+  return {
+    "@type": "WebSite",
+    "@id": `${origin}/#website`,
+    url: `${origin}/`,
+    name: SITE_NAME,
+    description: descriptor.description,
+    inLanguage: "zh-CN",
+    publisher: { "@id": `${origin}/#organization` },
+  };
+}
+
+/**
  * The one paid plan as structured data. The price is the same constant the
  * visible headline renders; no rating or review nodes are invented.
  */
@@ -208,6 +227,44 @@ export function breadcrumbListNode(context: JsonLdContext): JsonLdNode {
       position: index + 1,
       name: crumb.name,
       item: canonicalUrl(origin, crumb.path),
+    })),
+  };
+}
+
+/**
+ * `/guide`: the HowTo steps come from the same module the visible ordered list
+ * renders, so name/text are verbatim-identical by construction.
+ */
+export function howToNode(context: JsonLdContext): JsonLdNode {
+  const url = context.canonicalUrl;
+  return {
+    "@type": "HowTo",
+    "@id": `${url}#howto`,
+    name: "使用指南：从页面地址到 AI 分析",
+    description: context.descriptor.description,
+    inLanguage: "zh-CN",
+    step: guideSteps.map((step, index) => ({
+      "@type": "HowToStep",
+      position: index + 1,
+      name: step.title,
+      text: step.text,
+    })),
+  };
+}
+
+/** `/faq`: every Question/Answer is the exact string the page renders. */
+export function faqPageNode(context: JsonLdContext): JsonLdNode {
+  const url = context.canonicalUrl;
+  return {
+    "@type": "FAQPage",
+    "@id": `${url}#faq`,
+    url,
+    name: "常见问题",
+    inLanguage: "zh-CN",
+    mainEntity: faqItems.map((item) => ({
+      "@type": "Question",
+      name: item.question,
+      acceptedAnswer: { "@type": "Answer", text: item.answer },
     })),
   };
 }
@@ -408,9 +465,12 @@ export function validateDescriptors(descriptors: readonly PageDescriptor[]): voi
 }
 
 const HOME_DESCRIPTION =
-  "粘贴 B 站或 YouTube 页面地址，解析视频并下载文件、导出 SRT/VTT/TXT 字幕，再基于字幕生成简体中文 AI 摘要与思维导图，并查看个人 Analysis 历史。";
+  "AI 视频学习助手首页：粘贴 B 站或 YouTube 页面地址，完成视频下载、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；免费账号每日 3 次 Analysis。";
 const FEATURES_DESCRIPTION =
   "AI 视频学习助手功能总览：解析 B 站与 YouTube 页面地址、下载视频、导出字幕、生成 AI 摘要与思维导图，并说明 Analysis 历史、免费 Quota 与 VIP 会员的边界。";
+const GUIDE_DESCRIPTION =
+  "使用指南：三步解析 B 站或 YouTube 页面地址，下载视频或导出 SRT/VTT/TXT 字幕，再登录生成 AI 摘要与思维导图；并说明平台差异、DRM、链接过期、Quota 与邮箱验证的排查方法。";
+const FAQ_DESCRIPTION = `AI 视频学习助手常见问题：支持的 Platform 与抖音灰度、免费每日 3 次 Analysis、VIP ${PRICE_HEADLINE}、无 Subtitle 不能 Analysis、不做 ASR、文件保留 1 小时与下载链接 15 分钟有效。`;
 const PRICING_DESCRIPTION = `AI 视频学习助手价格页：免费账号每日 3 次 Analysis，VIP 会员 ${PRICE_HEADLINE}（USD）解锁 ${PRICE_BENEFIT}；按月自动续费，可随时在订阅管理中取消，实际扣款以 Stripe 结账页为准。`;
 const TERMS_DESCRIPTION =
   "AI 视频学习助手使用条款：说明合规使用与禁止用途、临时文件与下载链接的保留策略、版权与投诉方式，并提供 /terms#report 举报表单的提交入口。";
@@ -425,11 +485,12 @@ export const pageDescriptors: readonly PageDescriptor[] = [
   {
     name: "home",
     path: "/",
-    title: "视频下载与 AI 分析",
+    title: "视频下载、字幕导出与 AI 摘要",
     description: HOME_DESCRIPTION,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
+    jsonLd: (context) => [websiteNode(context), pricingApplicationNode(context)],
   },
   {
     name: "features",
@@ -442,6 +503,30 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     imageAlt: "AI 视频学习助手功能总览",
     breadcrumbs: [HOME_BREADCRUMB, { name: "功能", path: "/features" }],
     jsonLd: (context) => [webPageNode(context)],
+  },
+  {
+    name: "guide",
+    path: "/guide",
+    title: "使用指南：解析、下载与 AI 分析",
+    description: GUIDE_DESCRIPTION,
+    robots: INDEX_ROBOTS,
+    ogType: "website",
+    image: DEFAULT_SHARE_IMAGE,
+    imageAlt: "AI 视频学习助手使用指南",
+    breadcrumbs: [HOME_BREADCRUMB, { name: "使用指南", path: "/guide" }],
+    jsonLd: (context) => [webPageNode(context), howToNode(context)],
+  },
+  {
+    name: "faq",
+    path: "/faq",
+    title: "常见问题：平台、Quota 与价格",
+    description: FAQ_DESCRIPTION,
+    robots: INDEX_ROBOTS,
+    ogType: "website",
+    image: DEFAULT_SHARE_IMAGE,
+    imageAlt: "AI 视频学习助手常见问题",
+    breadcrumbs: [HOME_BREADCRUMB, { name: "常见问题", path: "/faq" }],
+    jsonLd: (context) => [webPageNode(context), faqPageNode(context)],
   },
   {
     name: "pricing",

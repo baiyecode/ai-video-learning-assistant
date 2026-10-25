@@ -6,6 +6,7 @@ import ComplianceNotice from "@/components/ComplianceNotice.vue";
 import DownloadPanel from "@/components/DownloadPanel.vue";
 import SubtitlePanel from "@/components/SubtitlePanel.vue";
 import { acknowledgeCompliance, complianceMessageForCode } from "@/lib/compliance";
+import { PRICE_HEADLINE } from "@/lib/billing";
 import { asUiError, isQuotaExhausted, uiErrorMessage, type UiError } from "@/lib/uiError";
 import {
   formatDuration,
@@ -13,6 +14,8 @@ import {
   platformLabel,
   subtitleSourceLabel,
 } from "@/lib/video";
+import { useArticleCollection } from "@/site/article-sources";
+import { homeFaqItems } from "@/site/faq-content";
 import { useAnalysisStore } from "@/stores/analysis";
 import { useAuthStore } from "@/stores/auth";
 import { useVideoStore } from "@/stores/video";
@@ -24,6 +27,52 @@ const router = useRouter();
 const url = ref("");
 const creatingAnalysis = ref(false);
 const analysisError = ref<UiError | null>(null);
+
+/** Marketing content lives below the tool and disappears once a Video resolves. */
+const latestArticles = useArticleCollection().published.slice(0, 3);
+const marketingFaqs = homeFaqItems;
+
+const steps = [
+  {
+    title: "解析",
+    text: "粘贴 B 站或 YouTube 的页面地址，确认视频是否可下载、是否带有 Subtitle。",
+  },
+  {
+    title: "下载或导出 Subtitle",
+    text: "选择清晰度保存文件，或把已有字幕导出为 SRT、VTT、TXT。",
+  },
+  {
+    title: "登录生成 Analysis",
+    text: "登录并验证邮箱后，基于 Subtitle 生成简体中文摘要与思维导图。",
+  },
+];
+
+const capabilities = [
+  {
+    title: "解析",
+    text: "先确认一个页面地址能否下载、导出字幕或生成 Analysis，而不是反复试错。",
+  },
+  {
+    title: "Download",
+    text: "选择清晰度与格式，由服务端转存并交付；链接 15 分钟内有效，文件最多保留 1 小时。",
+  },
+  {
+    title: "Subtitle 导出",
+    text: "把已有字幕导出为 SRT、VTT 或 TXT，并标出人工字幕与平台自动生成字幕。",
+  },
+  {
+    title: "Analysis",
+    text: "基于 Subtitle 生成简体中文摘要；免费账号每日 3 次，结果仅自己可见。",
+  },
+  {
+    title: "思维导图",
+    text: "把 Analysis 结果整理成可展开的主题结构，便于复盘与讲解。",
+  },
+  {
+    title: "历史与 VIP",
+    text: "在「我的分析」找回历史结果；VIP 会员解除每日 Analysis 次数限制。",
+  },
+];
 
 const result = computed(() => store.result);
 const error = computed(() => store.error);
@@ -121,6 +170,14 @@ function cancelCompliance(): void {
     <p class="text-center text-xs text-slate-500">
       仅限个人备份或已获授权内容，不支持播放列表、直播与 DRM 内容。
     </p>
+
+    <noscript>
+      <p
+        class="rounded-lg border border-amber-200 bg-amber-50 p-3 text-center text-xs text-amber-800"
+      >
+        本工具需要 JavaScript 才能解析页面地址；下方的产品介绍、使用指南、常见问题与文章仍可直接阅读。
+      </p>
+    </noscript>
 
     <div
       v-if="store.loading"
@@ -285,4 +342,175 @@ function cancelCompliance(): void {
       @cancel="cancelCompliance"
     />
   </section>
+
+  <!-- Marketing surface: only while there is no resolved Video, so the result
+       card stays the focus once a page address has been parsed. -->
+  <div v-if="!result" class="mx-auto mt-12 max-w-4xl space-y-10">
+    <section id="home-value" aria-labelledby="home-value-heading" class="max-w-3xl space-y-3">
+      <h2 id="home-value-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        把公开视频变成可用的学习材料
+      </h2>
+      <p class="leading-relaxed text-slate-600">
+        先确认页面地址能否解析、视频是否带有 Subtitle，再按需保存文件或生成摘要。解析、Download、Subtitle 导出与 Analysis 在同一条流程里完成，
+        不需要在多个工具之间搬运文本。
+      </p>
+      <a
+        href="#main-content"
+        class="inline-block text-sm font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+      >
+        回到顶部开始解析
+      </a>
+    </section>
+
+    <section id="home-steps" aria-labelledby="home-steps-heading" class="space-y-4">
+      <h2 id="home-steps-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        三步完成一次解析
+      </h2>
+      <ol class="grid gap-4 sm:grid-cols-3">
+        <li
+          v-for="(step, index) in steps"
+          :key="step.title"
+          class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <span class="text-xs font-medium text-slate-400">步骤 {{ index + 1 }}</span>
+          <h3 class="text-lg font-semibold text-slate-900">{{ step.title }}</h3>
+          <p class="text-sm leading-relaxed text-slate-600">{{ step.text }}</p>
+        </li>
+      </ol>
+    </section>
+
+    <section id="home-capabilities" aria-labelledby="home-capabilities-heading" class="space-y-4">
+      <h2 id="home-capabilities-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        六项能力
+      </h2>
+      <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div
+          v-for="capability in capabilities"
+          :key="capability.title"
+          class="flex flex-col gap-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <h3 class="text-base font-semibold text-slate-900">{{ capability.title }}</h3>
+          <p class="flex-1 text-sm leading-relaxed text-slate-600">{{ capability.text }}</p>
+          <RouterLink
+            to="/features"
+            class="text-sm font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+          >
+            查看功能说明
+          </RouterLink>
+        </div>
+      </div>
+    </section>
+
+    <section id="home-platforms" aria-labelledby="home-platforms-heading" class="space-y-4">
+      <h2 id="home-platforms-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        支持的 Platform 与限制
+      </h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 class="text-base font-semibold text-slate-900">支持的 Platform</h3>
+          <ul class="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
+            <li>B 站：解析、Download 与 Subtitle 导出。</li>
+            <li>YouTube：解析、Download 与 Subtitle 导出。</li>
+            <li>抖音：仅在部署开启灰度（APP_DOUYIN_ENABLED）时可用，产物为单一清晰度且带水印。</li>
+          </ul>
+        </div>
+        <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 class="text-base font-semibold text-slate-900">关键限制</h3>
+          <ul class="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
+            <li>单个 Video 最长 2 小时、最大 2 GB。</li>
+            <li>服务端文件最多保留 1 小时，下载链接 15 分钟内有效。</li>
+            <li>不支持播放列表、直播、DRM 与会员专属内容。</li>
+            <li>不做 ASR：没有 Subtitle 就不能导出字幕或生成 Analysis。</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section
+      id="home-pricing"
+      aria-labelledby="home-pricing-heading"
+      class="space-y-3 rounded-xl border border-slate-200 bg-white p-6 shadow-sm"
+    >
+      <h2 id="home-pricing-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        价格与升级
+      </h2>
+      <p class="text-sm leading-relaxed text-slate-600">
+        免费账号每日 3 次 Analysis；VIP 会员
+        <strong class="font-semibold text-slate-900">{{ PRICE_HEADLINE }}</strong>
+        解锁 Analysis 不限次，按月自动续费，可随时在订阅管理中取消。
+      </p>
+      <RouterLink
+        to="/pricing"
+        class="inline-block rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700"
+      >
+        查看价格与升级
+      </RouterLink>
+    </section>
+
+    <section id="home-faq" aria-labelledby="home-faq-heading" class="space-y-4">
+      <h2 id="home-faq-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        常见问题
+      </h2>
+      <div class="grid gap-4 sm:grid-cols-2">
+        <div
+          v-for="item in marketingFaqs"
+          :key="item.question"
+          class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm"
+        >
+          <h3 class="text-base font-semibold text-slate-900">{{ item.question }}</h3>
+          <p class="text-sm leading-relaxed text-slate-600">{{ item.answer }}</p>
+        </div>
+      </div>
+      <RouterLink
+        to="/faq"
+        class="inline-block text-sm font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+      >
+        查看全部常见问题
+      </RouterLink>
+    </section>
+
+    <section id="home-articles" aria-labelledby="home-articles-heading" class="space-y-4">
+      <h2 id="home-articles-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        最新文章
+      </h2>
+      <ul class="grid gap-4 sm:grid-cols-3">
+        <li v-for="article in latestArticles" :key="article.slug">
+          <article class="flex h-full flex-col gap-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+            <h3 class="text-base font-semibold text-slate-900">
+              <RouterLink
+                :to="`/articles/${article.slug}`"
+                class="transition-colors hover:text-slate-600"
+              >
+                {{ article.title }}
+              </RouterLink>
+            </h3>
+            <p class="flex-1 text-sm leading-relaxed text-slate-600">{{ article.description }}</p>
+            <p class="text-xs text-slate-500">
+              <time :datetime="article.published">{{ article.published }}</time>
+              · 约 {{ article.readingMinutes }} 分钟阅读
+            </p>
+          </article>
+        </li>
+      </ul>
+      <RouterLink
+        to="/articles"
+        class="inline-block text-sm font-medium text-slate-900 underline transition-colors hover:text-slate-600"
+      >
+        全部文章
+      </RouterLink>
+    </section>
+
+    <section id="home-compliance" aria-labelledby="home-compliance-heading" class="space-y-3">
+      <h2 id="home-compliance-heading" class="text-2xl font-bold tracking-tight text-slate-900">
+        合规使用
+      </h2>
+      <p class="text-sm leading-relaxed text-slate-600">
+        本工具仅用于个人备份或已获授权的内容；不支持播放列表、直播、DRM 与会员专属内容。侵权或滥用可通过
+        <RouterLink to="/terms#report" class="font-medium text-slate-900 underline hover:text-slate-600">
+          举报表单
+        </RouterLink>
+        反馈。
+      </p>
+    </section>
+  </div>
 </template>
