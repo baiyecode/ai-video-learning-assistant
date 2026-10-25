@@ -63,8 +63,8 @@ describe("resolveSiteOrigin", () => {
   // instead of ignoring it (the pre-fix alias of import.meta always returned
   // undefined in the client bundle, so canonical/OG were rewritten to
   // http://localhost:5173 after the SPA mounted). The authoritative check that
-  // Vite statically replaces the value is the build grep documented in the
-  // README: `VITE_SITE_ORIGIN=https://example.com npm run build` plus grep of
+  // Vite statically replaces the value is the build grep:
+  // `VITE_SITE_ORIGIN=https://example.com npm run build` followed by grepping
   // dist/assets/index-*.js; this test only guards the resolution logic.
   it("reads the build-time VITE_SITE_ORIGIN when called without an argument", () => {
     vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
