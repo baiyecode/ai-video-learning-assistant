@@ -15,6 +15,11 @@ const inheritedEnv = Object.fromEntries(
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
+  // One worker: spec files share the fake-adapter backend and its SQLite file.
+  // Two files resolving the same brand-new Video at once hit a known backend
+  // race (duplicate Subtitle insert on the losing side -> 500), which is out of
+  // this ticket's scope; serialising keeps the required local run deterministic.
+  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,

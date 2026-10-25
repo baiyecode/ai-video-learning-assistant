@@ -84,6 +84,74 @@ test.describe("static navigation", () => {
   });
 });
 
+test.describe("article reading", () => {
+  test.skip(!enabled, "Set PLAYWRIGHT_E2E=1 to start both servers with fake adapters");
+
+  test("the detail page lists its sections and a TOC link scrolls to the anchor", async ({
+    page,
+  }) => {
+    await page.goto("/articles/bilibili-subtitle-download");
+    await expect(page.getByRole("heading", { level: 1 })).toContainText(
+      "B 站视频字幕怎么下载",
+    );
+
+    const toc = page.getByRole("navigation", { name: "文章目录" });
+    await expect(toc).toBeVisible();
+
+    const sectionTitle = "SRT、VTT 与 TXT 怎么选";
+    const sectionId = "srt-vtt-与-txt-怎么选";
+    const target = page.locator(`h2[id="${sectionId}"]`);
+    // The anchor the TOC points at exists in the rendered body.
+    await expect(target).toHaveCount(1);
+
+    await toc.getByRole("link", { name: sectionTitle, exact: true }).click();
+
+    // The browser moved to the anchor: the URL carries the hash and the heading
+    // was scrolled into view.
+    await expect(page).toHaveURL(/#.+/);
+    const hash = await page.evaluate(() => decodeURIComponent(window.location.hash));
+    expect(hash).toBe(`#${sectionId}`);
+    await expect
+      .poll(() => page.evaluate(() => window.scrollY))
+      .toBeGreaterThan(0);
+    await expect
+      .poll(() =>
+        target.evaluate((element) => element.getBoundingClientRect().top),
+      )
+      .toBeLessThan(400);
+  });
+});
+
+test.describe("private routes", () => {
+  test.skip(!enabled, "Set PLAYWRIGHT_E2E=1 to start both servers with fake adapters");
+
+  test("login and verify-email stay noindex, and /account bounces to login", async ({ page }) => {
+    for (const route of ["/login", "/verify-email"]) {
+      await page.goto(route);
+      await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+        "content",
+        "noindex,nofollow",
+      );
+    }
+
+    await page.goto("/account");
+    await expect(page).toHaveURL(/\/login\?next=/);
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+      "content",
+      "noindex,nofollow",
+    );
+  });
+
+  test("an unknown path renders the 404 page", async ({ page }) => {
+    await page.goto("/definitely-not-a-page");
+    await expect(page.getByRole("heading", { level: 1 })).toHaveText("页面不存在");
+    await expect(page.locator('meta[name="robots"]')).toHaveAttribute(
+      "content",
+      "noindex,nofollow",
+    );
+  });
+});
+
 test.describe("mobile layout", () => {
   test.skip(!enabled, "Set PLAYWRIGHT_E2E=1 to start both servers with fake adapters");
   test.use({ viewport: { width: 375, height: 800 } });
