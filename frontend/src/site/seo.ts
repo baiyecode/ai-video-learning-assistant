@@ -3,10 +3,11 @@
  * the prerender build and the client router (ADR-0005).
  *
  * This module is deliberately DOM-free so it can be imported from the browser
- * bundle, plain Node (prerender script) and tests. The only import is the pure
- * billing constants module, which keeps the visible price and structured data
- * on one source.
+ * bundle, plain Node (prerender script) and tests. Its only local imports are the pure
+ * billing constants module and the shared build-arg reader, which keep the visible
+ * price and structured data on one source.
  */
+import { readBuildEnv } from "@/lib/build-env";
 import {
   DAILY_FREE_ANALYSIS_LIMIT,
   MONTHLY_PRICE_USD,
@@ -115,19 +116,11 @@ export function isIndexableDescriptor(descriptor: PageDescriptor): boolean {
 }
 
 /**
- * Build-time origin. Vite replaces this exact ``import.meta.env.VITE_SITE_ORIGIN``
- * property access with the configured string at build time; aliasing
- * ``import.meta`` would defeat that static replacement and leave the runtime
- * falling back to the dev origin. Plain Node has no ``import.meta.env``, so the
- * access throws and is caught.
+ * Build-time origin. Vite replaces the exact ``import.meta.env.VITE_SITE_ORIGIN``
+ * property access inside ``readBuildEnv`` with the configured string at build time, and
+ * plain Node (no ``import.meta.env``) gets ``undefined`` instead of a throw — both rules
+ * now live in the one shared build-arg reader rather than a local ``try`` here.
  */
-function viteSiteOrigin(): string | undefined {
-  try {
-    return import.meta.env.VITE_SITE_ORIGIN;
-  } catch {
-    return undefined;
-  }
-}
 
 /** Raised at build time when ``VITE_SITE_ORIGIN`` is not a bare http(s) origin. */
 export class SiteOriginError extends Error {
@@ -179,7 +172,7 @@ function assertBareOrigin(raw: string): string {
  * Vite development, which falls back loudly instead of shipping a broken
  * relative canonical.
  */
-export function resolveSiteOrigin(value: string | undefined = viteSiteOrigin()): string {
+export function resolveSiteOrigin(value: string | undefined = readBuildEnv("VITE_SITE_ORIGIN")): string {
   const trimmed = value?.trim() ?? "";
   if (!trimmed) {
     console.warn(`[seo] VITE_SITE_ORIGIN is not set; falling back to ${DEFAULT_DEV_ORIGIN}.`);

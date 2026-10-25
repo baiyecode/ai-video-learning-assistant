@@ -106,6 +106,8 @@ async def test_lifecycle_events_advance_the_membership_status(
         "cancel_at_period_end": False,
         "vip_active": False,
         "portal_url": "/api/billing/portal",
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
 
@@ -135,6 +137,8 @@ async def test_payment_succeeded_restores_an_active_membership(client: AsyncClie
         "cancel_at_period_end": False,
         "vip_active": True,
         "portal_url": "/api/billing/portal",
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
 
@@ -167,6 +171,8 @@ async def test_subscription_updated_backfills_the_period_end_the_checkout_omitte
         "cancel_at_period_end": False,
         "vip_active": True,
         "portal_url": "/api/billing/portal",
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
 
@@ -403,6 +409,8 @@ async def test_subscription_updated_records_cancel_at_period_end_for_the_vip_pre
         "cancel_at_period_end": True,
         "vip_active": True,
         "portal_url": "/api/billing/portal",
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
     # The real deletion ends the membership regardless of the outstanding flag.
@@ -609,6 +617,8 @@ async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
         "cancel_at_period_end": False,
         "vip_active": False,
         "portal_url": "/api/billing/portal",
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
     fifth = await _create_analysis(

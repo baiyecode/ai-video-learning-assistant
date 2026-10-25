@@ -6,12 +6,24 @@
  * checkout redirect parameter). These helpers only render what that response says.
  */
 
+import { readBuildEnvNumber } from "@/lib/build-env";
+
 export interface MembershipDto {
   status: string;
   period_end: string | null;
   /** Provider's scheduled cancellation: VIP is kept until ``period_end`` (story 8). */
   cancel_at_period_end: boolean;
   vip_active: boolean;
+  /**
+   * Portal *entry* path minted per call by ``POST /billing/portal`` — never a
+   * provider-hosted link, and identical for every status. Only a VIP Account gets an
+   * entry point on the UI (issue #44): ``portalEntryVisible()`` is the single rule.
+   */
+  portal_url: string;
+  /** Display monthly price in USD from the running server's ``Settings`` (ticket #41). */
+  monthly_price_usd: number;
+  /** Free daily Analysis Quota the server actually enforces (same source). */
+  daily_free_analysis_limit: number;
 }
 
 export const FREE_STATUS = "free";
@@ -21,35 +33,31 @@ export const TRIAL_ENDING_STATUS = "trial_ending";
 export const CANCELED_STATUS = "canceled";
 
 /**
- * Committed fallbacks for the display price and free Quota, used only when the
- * deploy-time ``VITE_`` injection is absent (plain ``npm run build``, unit tests).
- * The single repricing/re-quota knob is the deploy env: docker-compose funnels
- * ``APP_ANALYSIS_DAILY_QUOTA`` / ``APP_SUBSCRIPTION_MONTHLY_USD`` into BOTH the backend
- * (which enforces the Quota and mirrors the price) and the frontend ``VITE_`` build
- * args, so pricing page, sitemap, llms.txt and every descriptor move together. These
- * fallbacks must equal the backend ``Settings`` defaults; ``billing.test.ts`` reads
- * ``backend/app/config.py`` and fails loudly if they drift, so the discovery layer can
- * never silently lie.
+ * Committed fallbacks for the display price and free Quota, used only when neither the
+ * runtime ``GET /me/membership`` payload nor the deploy-time ``VITE_`` injection is
+ * available (prerendered marketing pages, plain ``npm run build``, unit tests).
+ * The knob itself is ``Settings.subscription_monthly_usd`` / ``analysis_daily_quota``
+ * in ``backend/app/config.py``: the running server reports those values on the
+ * membership read (see ``MONTHLY_PRICE_USD`` below), and docker-compose mirrors the same
+ * env pair into the frontend build args so the prerendered Marketing Pages, sitemap and
+ * llms.txt move with them. These fallbacks must equal the backend ``Settings`` defaults;
+ * ``billing.test.ts`` reads ``backend/app/config.py`` and fails loudly if they drift, so
+ * the discovery layer can never silently lie.
  */
 export const DEFAULT_MONTHLY_PRICE_USD = 4.99;
 export const DEFAULT_DAILY_FREE_ANALYSIS_LIMIT = 3;
 
-/** Parse an injected build-time number, falling back on absence or junk input. */
-function envNumber(raw: string | undefined, fallback: number): number {
-  if (raw === undefined || raw === "") return fallback;
-  const parsed = Number(raw);
-  return Number.isFinite(parsed) ? parsed : fallback;
-}
-
 /**
  * The single monthly plan (spec: "$4.99/月、Analysis 不限次").
  * Derived from ``VITE_SUBSCRIPTION_MONTHLY_USD`` (mirrors backend
- * ``Settings.subscription_monthly_usd``); Vite replaces this exact ``import.meta.env``
- * access at build time. The hosted checkout page of the payment provider remains the
- * final word on the charged amount (已注明「以支付方为准」).
+ * ``Settings.subscription_monthly_usd``) through the shared build-arg reader. For a
+ * signed-in Account the runtime source wins: ``priceHeadline()`` renders the price the
+ * server reported on ``/me/membership``, so a deployment started with a different
+ * ``APP_SUBSCRIPTION_MONTHLY_USD`` cannot show a stale literal. The hosted checkout page
+ * of the payment provider remains the final word on the charged amount (已注明「以支付方为准」).
  */
-export const MONTHLY_PRICE_USD = envNumber(
-  import.meta.env.VITE_SUBSCRIPTION_MONTHLY_USD,
+export const MONTHLY_PRICE_USD = readBuildEnvNumber(
+  "VITE_SUBSCRIPTION_MONTHLY_USD",
   DEFAULT_MONTHLY_PRICE_USD,
 );
 export const PRICE_HEADLINE = `$${MONTHLY_PRICE_USD.toFixed(2)}/月`;
@@ -59,11 +67,16 @@ export const PRICE_PROVIDER_NOTICE = "以上为当前标价，实际扣款以支
 /**
  * The free Analysis Quota, derived from ``VITE_ANALYSIS_DAILY_QUOTA`` (mirrors backend
  * ``Settings.analysis_daily_quota``, the value the API actually enforces). The single
- * source for the "每日 N 次" copy, so repricing the Quota is one deploy-env edit and a
- * quota change can no longer leave the marketing/discovery copy behind.
+ * build-time source for the "每日 N 次" copy, so repricing the Quota is one deploy-env
+ * edit and a quota change can no longer leave the marketing/discovery copy behind.
+ * ``integer`` because the backend field is an ``int``: a fractional deploy arg is refused
+ * (fallback) instead of rounded, so the copy never advertises an allowance the server
+ * would reject.
  */
-export const DAILY_FREE_ANALYSIS_LIMIT = Math.round(
-  envNumber(import.meta.env.VITE_ANALYSIS_DAILY_QUOTA, DEFAULT_DAILY_FREE_ANALYSIS_LIMIT),
+export const DAILY_FREE_ANALYSIS_LIMIT = readBuildEnvNumber(
+  "VITE_ANALYSIS_DAILY_QUOTA",
+  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
+  { integer: true },
 );
 export const FREE_DAILY_ANALYSIS_LABEL = `每日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis`;
 
@@ -122,6 +135,40 @@ export function expirationNotice(membership: MembershipDto | null): string | nul
 
 export function hasVipMembership(membership: MembershipDto | null): boolean {
   return membership?.vip_active === true;
+}
+
+/**
+ * The monthly display price the UI renders: the running server's ``Settings`` value as
+ * reported by ``GET /me/membership``, falling back to the build-time mirror while the
+ * read is pending (and for prerendered marketing, where there is no payload at all).
+ * One pair of functions, so no view re-derives a price literal.
+ */
+export function monthlyPriceUsdFor(membership: MembershipDto | null): number {
+  return membership?.monthly_price_usd ?? MONTHLY_PRICE_USD;
+}
+
+export function priceHeadlineFor(membership: MembershipDto | null): string {
+  return `$${monthlyPriceUsdFor(membership).toFixed(2)}/月`;
+}
+
+/** The free Quota the server enforces, with the same build-time fallback. */
+export function dailyFreeAnalysisLimitFor(membership: MembershipDto | null): number {
+  return membership?.daily_free_analysis_limit ?? DAILY_FREE_ANALYSIS_LIMIT;
+}
+
+export function freeDailyAnalysisLabelFor(membership: MembershipDto | null): string {
+  return `每日 ${dailyFreeAnalysisLimitFor(membership)} 次 Analysis`;
+}
+
+/**
+ * Whether the UI may offer the billing portal entry. The backend reports ``portal_url``
+ * for every status (the managed link is minted by the POST), but only a VIP Account has
+ * a subscription to manage — for anyone else ``POST /billing/portal`` answers
+ * ``404 subscription_not_found``. The product decision (issue #44) is therefore: expose
+ * the entry only while VIP is active *and* the server gave a path.
+ */
+export function portalEntryVisibleFor(membership: MembershipDto | null): boolean {
+  return hasVipMembership(membership) && Boolean(membership?.portal_url);
 }
 
 /** Short Asia/Shanghai calendar day for membership notices, e.g. "2月14日". */

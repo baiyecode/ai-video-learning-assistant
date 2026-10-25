@@ -36,7 +36,10 @@ class MembershipOut(BaseModel):
     placeholder required by the P2 contract: the mounted path of
     ``POST /billing/portal``, which mints the managed Stripe link per call. The GET
     never mints a link, so this value is a stable entry point, identical across
-    statuses.
+    statuses. ``monthly_price_usd`` / ``daily_free_analysis_limit`` echo the running
+    ``Settings`` (ticket #41 follow-up): the deploy-time pricing knob reaches the UI
+    through this read instead of only through the frontend's build-time mirror, so a
+    server started with a different price cannot disagree with what it serves.
     """
 
     status: str
@@ -44,6 +47,8 @@ class MembershipOut(BaseModel):
     cancel_at_period_end: bool = False
     vip_active: bool = False
     portal_url: str
+    monthly_price_usd: float
+    daily_free_analysis_limit: int
 
 
 class WebhookOut(BaseModel):

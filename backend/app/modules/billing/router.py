@@ -73,8 +73,9 @@ async def get_membership(
     account: Account = Depends(get_current_account),
     session: AsyncSession = Depends(get_session),
     clock: Clock = Depends(get_clock),
+    settings: Settings = Depends(get_settings),
 ) -> MembershipOut:
-    return await service.membership(session, account.id, now=clock.now())
+    return await service.membership(session, account.id, settings, now=clock.now())
 
 
 @router.post(

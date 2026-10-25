@@ -13,6 +13,7 @@ from typing import Any
 
 import httpx
 import pytest
+from app.config import Settings
 from app.modules.billing.models import Subscription
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
@@ -111,6 +112,8 @@ async def test_membership_is_free_before_any_subscription(client: AsyncClient) -
         "cancel_at_period_end": False,
         "vip_active": False,
         "portal_url": PORTAL_ENTRY_URL,
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
 
@@ -131,6 +134,57 @@ async def test_membership_carries_the_portal_entry_placeholder(client: AsyncClie
     assert response.status_code == 404, response.text
 
 
+async def test_membership_reports_the_pricing_knob_it_enforces(
+    client: AsyncClient, settings: Settings
+) -> None:
+    """Ticket #41 / issue #44: ``APP_SUBSCRIPTION_MONTHLY_USD`` has a runtime consumer.
+
+    The setting used to be read only by its own test, so "one repricing knob" held for a
+    docker-compose deploy but not for a running server. The membership read now carries
+    the display price and the free Quota the backend actually enforces, which is what
+    the Account screen renders.
+    """
+    auth = bearer(await register(client, email="pricing@example.com"))
+
+    body = (await client.get("/api/me/membership", headers=auth)).json()
+
+    assert body["monthly_price_usd"] == settings.subscription_monthly_usd
+    assert body["daily_free_analysis_limit"] == settings.analysis_daily_quota
+
+
+async def test_a_repriced_deployment_reports_the_new_price_and_quota(
+    tmp_path: Path,
+) -> None:
+    """One deploy-time edit moves the reported price and free Quota together.
+
+    The expected pair comes from the overrides themselves, never from a frontend
+    literal: a deployment repriced to 8.50 USD with a 5-analysis allowance must say so
+    over the API, or the marketing/env mirror and the running server have diverged.
+    """
+    from app.main import create_app
+
+    tuned = Settings(
+        _env_file=None,
+        env="test",
+        secret_key="test-only-secret",
+        database_url=f"sqlite+aiosqlite:///{(tmp_path / 'repriced.db').as_posix()}",
+        data_dir=tmp_path / "data",
+        log_level="WARNING",
+        subscription_monthly_usd=8.5,
+        analysis_daily_quota=5,
+    )
+    app = create_app(settings=tuned)
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+
+    async with LifespanManager(app):
+        async with AsyncClient(transport=transport, base_url="http://testserver") as http_client:
+            auth = bearer(await register(http_client, email="repriced@example.com", expect=503))
+            body = (await http_client.get("/api/me/membership", headers=auth)).json()
+
+    assert body["monthly_price_usd"] == 8.5
+    assert body["daily_free_analysis_limit"] == 5
+
+
 async def test_membership_reports_a_recorded_subscription(client: AsyncClient, app: FastAPI) -> None:
     response = await register(client, email="vip@example.com")
     await seed_subscription(app, response.json()["account"]["id"])
@@ -144,6 +198,8 @@ async def test_membership_reports_a_recorded_subscription(client: AsyncClient, a
         "cancel_at_period_end": False,
         "vip_active": True,
         "portal_url": PORTAL_ENTRY_URL,
+        "monthly_price_usd": 4.99,
+        "daily_free_analysis_limit": 3,
     }
 
 

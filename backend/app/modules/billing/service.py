@@ -173,12 +173,18 @@ async def open_portal(
     return PortalOut(url=portal.url)
 
 
-async def membership(session: AsyncSession, account_id: str, *, now: datetime) -> MembershipOut:
+async def membership(
+    session: AsyncSession, account_id: str, settings: Settings, *, now: datetime
+) -> MembershipOut:
     """The Account's subscription truth: the derived read, never a recomputing write.
 
     ``portal_url`` is the spec's portal *entry* placeholder (issue #17 AC): the
     mounted POST path, identical for every status because the managed Stripe link
     is only ever minted by that POST, never by this read.
+
+    The displayed price and the free Quota ride along from ``settings`` (ticket #41
+    follow-up): they are the values the server enforces, so the UI has a runtime source
+    for them and ``APP_SUBSCRIPTION_MONTHLY_USD`` is no longer read only by its own test.
     """
     state = await membership_state(session, account_id, now=now)
     return MembershipOut(
@@ -187,6 +193,8 @@ async def membership(session: AsyncSession, account_id: str, *, now: datetime) -
         cancel_at_period_end=state.cancel_at_period_end,
         vip_active=state.vip_active,
         portal_url=PORTAL_ENTRY_PATH,
+        monthly_price_usd=settings.subscription_monthly_usd,
+        daily_free_analysis_limit=settings.analysis_daily_quota,
     )
 
 

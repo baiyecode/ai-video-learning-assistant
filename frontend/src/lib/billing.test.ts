@@ -12,15 +12,21 @@ import {
   DEFAULT_MONTHLY_PRICE_USD,
   FREE_DAILY_ANALYSIS_LABEL,
   FREE_STATUS,
+  MONTHLY_PRICE_USD,
   PAST_DUE_STATUS,
   PRICE_BENEFIT,
   PRICE_HEADLINE,
   PRICE_PROVIDER_NOTICE,
+  dailyFreeAnalysisLimitFor,
   expirationNotice,
   formatPeriodEnd,
+  freeDailyAnalysisLabelFor,
   hasVipMembership,
   membershipAlert,
   membershipStatusLabel,
+  monthlyPriceUsdFor,
+  portalEntryVisibleFor,
+  priceHeadlineFor,
   renewalNotice,
   type MembershipDto,
 } from "@/lib/billing";
@@ -34,6 +40,9 @@ function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
     period_end: "2026-02-14T09:00:00+00:00",
     cancel_at_period_end: false,
     vip_active: true,
+    portal_url: "/api/billing/portal",
+    monthly_price_usd: DEFAULT_MONTHLY_PRICE_USD,
+    daily_free_analysis_limit: DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
     ...overrides,
   };
 }
@@ -125,6 +134,66 @@ describe("pricing copy", () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.resetModules();
+  });
+});
+
+describe("membership-driven pricing (the runtime single source)", () => {
+  it("renders the price and free Quota the server reported", () => {
+    // ``backend/app/config.py::Settings`` is the knob; /me/membership carries its values,
+    // so a deployment repriced at runtime cannot be contradicted by the Account screen.
+    const reported = membership({ monthly_price_usd: 8.5, daily_free_analysis_limit: 5 });
+
+    expect(monthlyPriceUsdFor(reported)).toBe(8.5);
+    expect(priceHeadlineFor(reported)).toBe("$8.50/月");
+    expect(dailyFreeAnalysisLimitFor(reported)).toBe(5);
+    expect(freeDailyAnalysisLabelFor(reported)).toBe("每日 5 次 Analysis");
+  });
+
+  it("falls back to the build-time pair until /me/membership resolves", () => {
+    // Prerendered marketing and the loading state have no payload; they read the same
+    // module-level constants, never a third copy of the number.
+    expect(monthlyPriceUsdFor(null)).toBe(MONTHLY_PRICE_USD);
+    expect(priceHeadlineFor(null)).toBe(PRICE_HEADLINE);
+    expect(dailyFreeAnalysisLimitFor(null)).toBe(DAILY_FREE_ANALYSIS_LIMIT);
+    expect(freeDailyAnalysisLabelFor(null)).toBe(FREE_DAILY_ANALYSIS_LABEL);
+  });
+});
+
+describe("portal entry visibility", () => {
+  it("offers the portal entry only to an Account that holds VIP", () => {
+    // Product decision (issue #44): the backend always reports ``portal_url``, but the
+    // frontend exposes it only while VIP is active — a free Account has no subscription
+    // to manage and the POST would answer 404 subscription_not_found.
+    expect(portalEntryVisibleFor(membership())).toBe(true);
+    expect(portalEntryVisibleFor(membership({ status: "past_due", vip_active: false }))).toBe(false);
+    expect(
+      portalEntryVisibleFor(membership({ status: FREE_STATUS, vip_active: false })),
+    ).toBe(false);
+    expect(portalEntryVisibleFor(null)).toBe(false);
+  });
+
+  it("needs an actual entry path, not just the VIP flag", () => {
+    expect(portalEntryVisibleFor(membership({ portal_url: "" }))).toBe(false);
+  });
+});
+
+describe("MembershipDto shape parity", () => {
+  it("mirrors exactly the fields backend MembershipOut declares", () => {
+    // The DTO used to lag behind the response (no ``portal_url``), so every new field
+    // widened the drift silently. This reads the independent backend source: a field
+    // added to ``MembershipOut`` without its frontend twin fails here.
+    const schemas = readFileSync(
+      path.join(REPO_ROOT, "backend", "app", "modules", "billing", "schemas.py"),
+      "utf8",
+    );
+    const classBody = schemas.match(/class MembershipOut\(BaseModel\):[\s\S]*?\nclass /)?.[0] ?? "";
+    // Only annotation lines count; the docstring's prose has indented sentences too.
+    const backendFields = [
+      ...classBody.matchAll(/^ {4}(\w+): (?:str|int|float|bool)\b/gm),
+    ].map((match) => match[1]);
+
+    expect(backendFields.length).toBeGreaterThanOrEqual(6);
+    expect(Object.keys(membership()).sort()).toEqual([...backendFields].sort());
   });
 });
 

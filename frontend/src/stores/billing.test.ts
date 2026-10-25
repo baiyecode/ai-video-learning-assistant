@@ -17,13 +17,16 @@ const FREE: MembershipDto = {
   period_end: null,
   cancel_at_period_end: false,
   vip_active: false,
+  portal_url: "/api/billing/portal",
+  monthly_price_usd: 4.99,
+  daily_free_analysis_limit: 3,
 };
 
 function membership(overrides: Partial<MembershipDto> = {}): MembershipDto {
   return {
+    ...FREE,
     status: "active",
     period_end: "2026-02-14T08:00:00+00:00",
-    cancel_at_period_end: false,
     vip_active: true,
     ...overrides,
   };
