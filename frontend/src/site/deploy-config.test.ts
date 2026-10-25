@@ -111,3 +111,31 @@ describe("site origin deploy wiring", () => {
     expect(envExample).toMatch(/https origin/i);
   });
 });
+
+describe("billing single-source deploy wiring", () => {
+  it("bakes the price and free-quota mirrors into the Docker build", () => {
+    expect(dockerfile).toContain('ARG VITE_ANALYSIS_DAILY_QUOTA="3"');
+    expect(dockerfile).toContain("ENV VITE_ANALYSIS_DAILY_QUOTA=$VITE_ANALYSIS_DAILY_QUOTA");
+    expect(dockerfile).toContain('ARG VITE_SUBSCRIPTION_MONTHLY_USD="4.99"');
+    expect(dockerfile).toContain(
+      "ENV VITE_SUBSCRIPTION_MONTHLY_USD=$VITE_SUBSCRIPTION_MONTHLY_USD",
+    );
+  });
+
+  it("feeds the web build from the SAME env vars the api enforces", () => {
+    // One repricing/re-quota edit (the APP_ env) drives backend enforcement AND the
+    // static marketing, so the two can never drift into a silent lie.
+    expect(compose).toMatch(
+      /VITE_ANALYSIS_DAILY_QUOTA: \$\{APP_ANALYSIS_DAILY_QUOTA:-3\}/,
+    );
+    expect(compose).toMatch(
+      /VITE_SUBSCRIPTION_MONTHLY_USD: \$\{APP_SUBSCRIPTION_MONTHLY_USD:-4\.99\}/,
+    );
+    expect(compose).toMatch(/APP_ANALYSIS_DAILY_QUOTA: \$\{APP_ANALYSIS_DAILY_QUOTA:-3\}/);
+  });
+
+  it("documents the mirrored VITE_ quota/price in the env example", () => {
+    expect(envExample).toMatch(/VITE_ANALYSIS_DAILY_QUOTA/);
+    expect(envExample).toMatch(/VITE_SUBSCRIPTION_MONTHLY_USD/);
+  });
+});

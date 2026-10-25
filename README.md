@@ -95,6 +95,12 @@ cd frontend && npm run build
 它决定 canonical、OG/Twitter 卡与 sitemap 里的绝对地址。直接用 `npm run build` 时未设置则回退
 `http://localhost:5173` 并打印警告；回环 origin 会生成 `Disallow: /`，只能用于本地自测，不能用来验证收录。
 
+价格与免费 Quota 只有一处定义：`frontend/src/lib/billing.ts` 的展示常量从构建期 `VITE_SUBSCRIPTION_MONTHLY_USD`
+与 `VITE_ANALYSIS_DAILY_QUOTA` 派生，pricing 页、sitemap、llms.txt 与各描述符都由它取数。compose 把**同一组**
+`APP_SUBSCRIPTION_MONTHLY_USD` / `APP_ANALYSIS_DAILY_QUOTA`（后端真正强制的值）分别镜像进 `api` 环境与 `web` 构建参数，
+因此改价或改配额只需编辑那一个 env 变量，前后端与发现层一起生效，不会静默说谎。`billing.test.ts` 会读取
+`backend/app/config.py`，断言前端回退默认值与后端 `Settings` 默认值一致，漂移即测试失败。
+
 Playwright 用例默认跳过。设置 `PLAYWRIGHT_E2E=1` 时它会用假适配器自动启动后端与前端 dev server，
 跑通以下链路（`frontend/e2e/`）：
 
