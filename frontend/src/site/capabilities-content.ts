@@ -4,6 +4,12 @@
  * Marketing Pages cannot drift apart; the home page renders ``summary`` and the
  * features page expands the same entry into problem/usage/limit.
  */
+import {
+  DAILY_FREE_ANALYSIS_LIMIT,
+  FREE_DAILY_ANALYSIS_LABEL,
+  PRICE_HEADLINE,
+} from "@/lib/billing";
+
 export interface Capability {
   title: string;
   /** One-paragraph summary shown in the home page's capability grid. */
@@ -40,10 +46,10 @@ export const capabilities: readonly Capability[] = [
   },
   {
     title: "Analysis",
-    summary: "基于 Subtitle 生成简体中文摘要；免费 Account 每日 3 次 Analysis，结果仅自己可见。",
+    summary: `基于 Subtitle 生成简体中文摘要；免费 Account ${FREE_DAILY_ANALYSIS_LABEL}，结果仅自己可见。`,
     problem: "长视频没时间完整看完，希望先读到结构化的简体中文要点。",
     usage:
-      "登录并验证邮箱后，对带字幕的视频发起 Analysis，基于字幕生成摘要。免费账号每个自然日 3 次，Analysis 默认仅自己可见。",
+      `登录并验证邮箱后，对带字幕的视频发起 Analysis，基于字幕生成摘要。免费账号每个自然日 ${DAILY_FREE_ANALYSIS_LIMIT} 次，Analysis 默认仅自己可见。`,
     limit: "没有字幕的视频不能分析；Quota 在成功创建时消耗，失败会退回。",
   },
   {
@@ -59,7 +65,7 @@ export const capabilities: readonly Capability[] = [
     summary: "在「我的分析」找回历史结果；VIP 会员解除每日 Analysis 的 Quota 限制。",
     problem: "找回过去生成的内容，并在需要时解除每日 Analysis 的 Quota 限制。",
     usage:
-      "「我的分析」保留你的 Analysis 历史。VIP 会员 $4.99/月，Analysis 不限次；支付由 Stripe 托管，可随时取消，取消后在当期结束前仍可使用。",
-    limit: "免费账号每天 3 次 Analysis；价格与扣款以支付方结账页展示为准。",
+      `「我的分析」保留你的 Analysis 历史。VIP 会员 ${PRICE_HEADLINE}，Analysis 不限次；支付由 Stripe 托管，可随时取消，取消后在当期结束前仍可使用。`,
+    limit: `免费账号每天 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis；价格与扣款以支付方结账页展示为准。`,
   },
 ];

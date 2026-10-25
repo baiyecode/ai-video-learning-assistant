@@ -7,7 +7,12 @@
  * billing constants module, which keeps the visible price and structured data
  * on one source.
  */
-import { MONTHLY_PRICE_USD, PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
+import {
+  DAILY_FREE_ANALYSIS_LIMIT,
+  MONTHLY_PRICE_USD,
+  PRICE_BENEFIT,
+  PRICE_HEADLINE,
+} from "@/lib/billing";
 import {
   DESCRIPTION_MAX_LENGTH,
   DESCRIPTION_MIN_LENGTH,
@@ -526,14 +531,13 @@ export function validateDescriptors(descriptors: readonly PageDescriptor[]): voi
   }
 }
 
-const HOME_DESCRIPTION =
-  "AI 视频学习助手首页：粘贴 B 站或 YouTube 页面地址，完成视频下载、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；免费账号每日 3 次 Analysis。";
+const HOME_DESCRIPTION = `AI 视频学习助手首页：粘贴 B 站或 YouTube 页面地址，完成视频下载、导出 SRT/VTT/TXT 字幕，并基于字幕生成 AI 摘要与思维导图；免费账号每日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis。`;
 const FEATURES_DESCRIPTION =
   "AI 视频学习助手功能总览：解析 B 站与 YouTube 页面地址、下载视频、导出字幕、生成 AI 摘要与思维导图，并说明 Analysis 历史、免费 Quota 与 VIP 会员的边界。";
 const GUIDE_DESCRIPTION =
   "使用指南：三步解析 B 站或 YouTube 页面地址，下载视频或导出 SRT/VTT/TXT 字幕，再登录生成 AI 摘要与思维导图；并说明平台差异、DRM、链接过期、Quota 与邮箱验证的排查方法。";
-const FAQ_DESCRIPTION = `AI 视频学习助手常见问题：支持的 Platform 与抖音灰度、免费每日 3 次 Analysis、VIP ${PRICE_HEADLINE}、无 Subtitle 不能 Analysis、不做 ASR、文件保留 1 小时与下载链接 15 分钟有效。`;
-const PRICING_DESCRIPTION = `AI 视频学习助手价格页：免费账号每日 3 次 Analysis，VIP 会员 ${PRICE_HEADLINE}（USD）解锁 ${PRICE_BENEFIT}；按月自动续费，可随时在订阅管理中取消，实际扣款以 Stripe 结账页为准。`;
+const FAQ_DESCRIPTION = `AI 视频学习助手常见问题：支持的 Platform 与抖音灰度、免费每日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis、VIP ${PRICE_HEADLINE}、无 Subtitle 不能 Analysis、不做 ASR、文件保留 1 小时与下载链接 15 分钟有效。`;
+const PRICING_DESCRIPTION = `AI 视频学习助手价格页：免费账号每日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis，VIP 会员 ${PRICE_HEADLINE}（USD）解锁 ${PRICE_BENEFIT}；按月自动续费，可随时在订阅管理中取消，实际扣款以 Stripe 结账页为准。`;
 const TERMS_DESCRIPTION =
   "AI 视频学习助手使用条款：说明合规使用与禁止用途、临时文件与下载链接的保留策略、版权与投诉方式，并提供 /terms#report 举报表单的提交入口。";
 

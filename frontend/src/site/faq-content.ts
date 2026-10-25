@@ -5,7 +5,7 @@
  * Every answer stays inside verified product behaviour (see recon §1): no ASR,
  * no platform-wide promises, no DRM bypass, no invented permanence.
  */
-import { PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
+import { DAILY_FREE_ANALYSIS_LIMIT, PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
 
 export interface FaqItem {
   question: string;
@@ -24,7 +24,7 @@ export const faqItems: readonly FaqItem[] = [
   {
     question: "免费账号每天可以做几次 Analysis？",
     answer:
-      "每个 Account 每个 Asia/Shanghai 自然日 3 次 Analysis。只有成功创建新的 Analysis 才消耗 Quota，失败会退回；查看已有结果不消耗 Quota。",
+      `每个 Account 每个 Asia/Shanghai 自然日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis。只有成功创建新的 Analysis 才消耗 Quota，失败会退回；查看已有结果不消耗 Quota。`,
   },
   {
     question: "VIP 会员多少钱？可以随时取消吗？",

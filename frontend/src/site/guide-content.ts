@@ -3,6 +3,8 @@
  * on `/guide` and the HowTo JSON-LD. Keeping them here means the page and the
  * structured data cannot disagree about what the workflow is.
  */
+import { FREE_DAILY_ANALYSIS_LABEL } from "@/lib/billing";
+
 export interface GuideStep {
   title: string;
   text: string;
@@ -19,6 +21,6 @@ export const guideSteps: readonly GuideStep[] = [
   },
   {
     title: "登录生成 Analysis",
-    text: "登录并验证邮箱后，对带 Subtitle 的视频点击「AI 分析」，系统基于字幕生成简体中文摘要与思维导图；免费 Account 每日 3 次。",
+    text: `登录并验证邮箱后，对带 Subtitle 的视频点击「AI 分析」，系统基于字幕生成简体中文摘要与思维导图；免费 Account ${FREE_DAILY_ANALYSIS_LABEL}。`,
   },
 ];

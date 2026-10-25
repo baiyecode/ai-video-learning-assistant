@@ -17,14 +17,7 @@ export function applyHead(descriptor: PageDescriptor, origin: string, doc: Docum
   }
 
   for (const spec of headTags(descriptor, origin)) {
-    let element: Element;
-    if (spec.tag === "title") {
-      element = doc.createElement("title");
-    } else if (spec.tag === "script") {
-      element = doc.createElement("script");
-    } else {
-      element = doc.createElement(spec.tag);
-    }
+    const element = doc.createElement(spec.tag);
 
     for (const [name, value] of Object.entries(spec.attrs)) {
       element.setAttribute(name, value);

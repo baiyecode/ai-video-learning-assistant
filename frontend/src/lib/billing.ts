@@ -30,6 +30,13 @@ export const PRICE_HEADLINE = `$${MONTHLY_PRICE_USD.toFixed(2)}/月`;
 export const PRICE_BENEFIT = "Analysis 不限次";
 export const PRICE_PROVIDER_NOTICE = "以上为当前标价，实际扣款以支付方（Stripe）结账页展示的条款为准。";
 
+/**
+ * Mirrors backend ``Settings.analysis_daily_quota``: the free Analysis Quota.
+ * The single source for the "每日 N 次" copy so a quota change is one edit.
+ */
+export const DAILY_FREE_ANALYSIS_LIMIT = 3;
+export const FREE_DAILY_ANALYSIS_LABEL = `每日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis`;
+
 const STATUS_LABELS: Record<string, string> = {
   [FREE_STATUS]: "免费版",
   [ACTIVE_STATUS]: "VIP 订阅中",

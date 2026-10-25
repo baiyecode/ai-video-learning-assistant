@@ -30,8 +30,8 @@ function articleDates(article: Article): { published: string; updated: string } 
   return { published: article.published, updated: article.updated ?? article.published };
 }
 
-function blogPostingNode(context: JsonLdContext, article: Article): JsonLdNode {
-  const url = context.canonicalUrl;
+/** The fields every BlogPosting of an Article shares; callers add their own. */
+function blogPostingCore(url: string, article: Article): JsonLdNode {
   const dates = articleDates(article);
   return {
     "@type": "BlogPosting",
@@ -41,6 +41,13 @@ function blogPostingNode(context: JsonLdContext, article: Article): JsonLdNode {
     description: article.description,
     datePublished: dates.published,
     dateModified: dates.updated,
+  };
+}
+
+function blogPostingNode(context: JsonLdContext, article: Article): JsonLdNode {
+  const url = context.canonicalUrl;
+  return {
+    ...blogPostingCore(url, article),
     inLanguage: "zh-CN",
     author: { "@type": "Organization", name: AUTHOR_NAME, url: `${context.origin}/` },
     mainEntityOfPage: { "@type": "WebPage", "@id": url },
@@ -63,19 +70,9 @@ function blogNode(context: JsonLdContext, collection: ArticleCollection): JsonLd
     description: ARTICLES_LIST_DESCRIPTION,
     inLanguage: "zh-CN",
     publisher: { "@type": "Organization", "@id": `${context.origin}/#organization` },
-    blogPost: collection.published.map((article) => {
-      const url = canonicalUrl(context.origin, articlePath(article.slug));
-      const dates = articleDates(article);
-      return {
-        "@type": "BlogPosting",
-        "@id": `${url}#article`,
-        url,
-        headline: article.title,
-        description: article.description,
-        datePublished: dates.published,
-        dateModified: dates.updated,
-      };
-    }),
+    blogPost: collection.published.map((article) =>
+      blogPostingCore(canonicalUrl(context.origin, articlePath(article.slug)), article),
+    ),
   };
 }
 

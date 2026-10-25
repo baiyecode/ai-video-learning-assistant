@@ -4,6 +4,7 @@
  * troubleshooting paths. Step titles/text come from ``guide-content`` so the
  * visible list and the HowTo JSON-LD are the same strings.
  */
+import { DAILY_FREE_ANALYSIS_LIMIT } from "@/lib/billing";
 import { guideSteps } from "@/site/guide-content";
 
 const platforms = [
@@ -43,7 +44,7 @@ const troubleshooting = [
   {
     question: "今日 Quota 已用尽",
     answer:
-      "免费 Account 每个 Asia/Shanghai 自然日 3 次 Analysis，次日重置；也可以在价格页升级 VIP 解除每日 Quota 限制。",
+      `免费 Account 每个 Asia/Shanghai 自然日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis，次日重置；也可以在价格页升级 VIP 解除每日 Quota 限制。`,
   },
   {
     question: "邮箱尚未验证",

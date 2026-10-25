@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 import {
   ACTIVE_STATUS,
   CANCELED_STATUS,
+  DAILY_FREE_ANALYSIS_LIMIT,
+  FREE_DAILY_ANALYSIS_LABEL,
   FREE_STATUS,
   PAST_DUE_STATUS,
   PRICE_BENEFIT,
@@ -69,6 +71,11 @@ describe("pricing copy", () => {
     expect(PRICE_HEADLINE).toBe("$4.99/月");
     expect(PRICE_BENEFIT).toBe("Analysis 不限次");
     expect(PRICE_PROVIDER_NOTICE).toContain("以支付方");
+  });
+
+  it("derives the free-quota sentence from the single limit constant", () => {
+    expect(DAILY_FREE_ANALYSIS_LIMIT).toBe(3);
+    expect(FREE_DAILY_ANALYSIS_LABEL).toBe("每日 3 次 Analysis");
   });
 });
 

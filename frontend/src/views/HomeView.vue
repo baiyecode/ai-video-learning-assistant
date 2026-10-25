@@ -6,7 +6,7 @@ import ComplianceNotice from "@/components/ComplianceNotice.vue";
 import DownloadPanel from "@/components/DownloadPanel.vue";
 import SubtitlePanel from "@/components/SubtitlePanel.vue";
 import { acknowledgeCompliance, complianceMessageForCode } from "@/lib/compliance";
-import { PRICE_HEADLINE } from "@/lib/billing";
+import { DAILY_FREE_ANALYSIS_LIMIT, PRICE_HEADLINE } from "@/lib/billing";
 import { asUiError, isQuotaExhausted, uiErrorMessage, type UiError } from "@/lib/uiError";
 import {
   formatDuration,
@@ -398,7 +398,7 @@ function cancelCompliance(): void {
         价格与升级
       </h2>
       <p class="text-sm leading-relaxed text-slate-600">
-        免费账号每日 3 次 Analysis；VIP 会员
+        免费账号每日 {{ DAILY_FREE_ANALYSIS_LIMIT }} 次 Analysis；VIP 会员
         <strong class="font-semibold text-slate-900">{{ PRICE_HEADLINE }}</strong>
         解锁 Analysis 不限次，按月自动续费，可随时在订阅管理中取消。
       </p>

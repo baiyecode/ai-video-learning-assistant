@@ -55,7 +55,7 @@ _LIFECYCLE_STATUS: dict[str, SubscriptionStatus] = {
 }
 """State-machine edges (spec): the recorded status only ever moves on these events."""
 
-_STRIPE_SUBSCRIPTION_STATUS: dict[str, SubscriptionStatus] = {
+_PROVIDER_SUBSCRIPTION_STATUS: dict[str, SubscriptionStatus] = {
     "active": SubscriptionStatus.ACTIVE,
     "trialing": SubscriptionStatus.TRIAL_ENDING,
     "past_due": SubscriptionStatus.PAST_DUE,
@@ -339,7 +339,7 @@ async def _apply_lifecycle(session: AsyncSession, event: WebhookEvent) -> bool:
         return False
     target = _LIFECYCLE_STATUS.get(event.type)
     if target is None and object_event:
-        target = _STRIPE_SUBSCRIPTION_STATUS.get(event.subscription_status or "")
+        target = _PROVIDER_SUBSCRIPTION_STATUS.get(event.subscription_status or "")
     subscription = await _find_subscription(session, event)
     if subscription is None:
         return False

@@ -220,7 +220,9 @@ function normalizeRoute(route: string): string {
 
 /**
  * Validate every root-relative link in a published Article against the pages
- * that actually exist. #36 reuses this for links outside articles.
+ * that actually exist. Path-only, so it also runs in the SPA bundle
+ * (``defaultArticleCollection``); the build additionally runs the site-wide
+ * ``validateSiteLinks`` audit, which covers anchors and generated HTML too.
  */
 export function validateArticleInternalLinks(
   article: Article,

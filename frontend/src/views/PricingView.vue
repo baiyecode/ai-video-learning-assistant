@@ -4,6 +4,7 @@ import { useRoute } from "vue-router";
 
 import { ApiError } from "@/lib/api";
 import {
+  DAILY_FREE_ANALYSIS_LIMIT,
   MONTHLY_PRICE_USD,
   PRICE_BENEFIT,
   PRICE_HEADLINE,
@@ -26,7 +27,7 @@ const priceUsd = MONTHLY_PRICE_USD.toFixed(2);
 const comparison = [
   {
     benefit: "每日 Analysis",
-    free: "3 次（Asia/Shanghai 自然日）",
+    free: `${DAILY_FREE_ANALYSIS_LIMIT} 次（Asia/Shanghai 自然日）`,
     vip: PRICE_BENEFIT,
   },
   { benefit: "视频解析", free: "可用", vip: "可用" },
@@ -52,7 +53,7 @@ const faqs = [
   {
     question: "免费 Quota 每天重置吗？",
     answer:
-      "会。免费账号每个 Asia/Shanghai 自然日 3 次 Analysis；成功创建才消耗，失败会退回，查看已有结果不消耗。",
+      `会。免费账号每个 Asia/Shanghai 自然日 ${DAILY_FREE_ANALYSIS_LIMIT} 次 Analysis；成功创建才消耗，失败会退回，查看已有结果不消耗。`,
   },
   {
     question: "开通 VIP 会改变 Download 限制吗？",

@@ -10,6 +10,8 @@ import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import { PRIVATE_APP_ROUTES } from "@/site/routes";
+
 const FRONTEND_ROOT = path.resolve(fileURLToPath(new URL("../..", import.meta.url)));
 const REPO_ROOT = path.resolve(FRONTEND_ROOT, "..");
 
@@ -52,7 +54,8 @@ describe("nginx.conf", () => {
   });
 
   it("serves private routes from the noindex app.html shell", () => {
-    const privateRoutes = block(nginx, "location ~ ^/(login|account|analyses|verify-email)");
+    const alternation = PRIVATE_APP_ROUTES.map((route) => route.slice(1)).join("|");
+    const privateRoutes = block(nginx, `location ~ ^/(${alternation})`);
     expect(privateRoutes).toContain("try_files /app.html =404;");
     expect(privateRoutes).toContain('X-Robots-Tag "noindex, nofollow"');
     expect(privateRoutes).toContain('Cache-Control "no-cache"');

@@ -7,7 +7,7 @@
 import { writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
+import { FREE_DAILY_ANALYSIS_LABEL, PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
 import type { ArticleCollection } from "@/site/articles";
 import { APP_SHELL_PATH, PRIVATE_APP_ROUTES } from "@/site/routes";
 import {
@@ -123,7 +123,7 @@ const LLMS_KEY_PAGES: readonly { path: string; label: string; summary: string }[
   {
     path: "/pricing",
     label: "价格",
-    summary: `免费 Account 每日 3 次 Analysis；VIP 会员 ${PRICE_HEADLINE}，${PRICE_BENEFIT}。`,
+    summary: `免费 Account ${FREE_DAILY_ANALYSIS_LABEL}；VIP 会员 ${PRICE_HEADLINE}，${PRICE_BENEFIT}。`,
   },
   {
     path: "/terms",
@@ -161,7 +161,7 @@ export function buildLlmsTxt(
     "",
     "## 价格与使用边界",
     "",
-    `- 免费 Account 每日 3 次 Analysis；VIP 会员 ${PRICE_HEADLINE}，${PRICE_BENEFIT}。`,
+    `- 免费 Account ${FREE_DAILY_ANALYSIS_LABEL}；VIP 会员 ${PRICE_HEADLINE}，${PRICE_BENEFIT}。`,
     "- 单视频最长 2 小时，最大 2 GB。",
     "- 服务端文件最多保留 1 小时，下载链接 15 分钟内有效。",
     "- 不做 ASR：没有 Subtitle 的视频不能导出 Subtitle，也不能发起 Analysis。",
