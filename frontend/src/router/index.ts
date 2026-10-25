@@ -1,8 +1,12 @@
 import { createRouter, createWebHistory, type Router, type RouterHistory } from "vue-router";
 
 import { useAuthStore } from "@/stores/auth";
+import { articlesListDescriptor, descriptorForArticleSlug } from "@/site/article-descriptors";
+import { defaultArticleCollection } from "@/site/article-sources";
 import { applyHead } from "@/site/head";
 import { descriptorForRoute, resolveSiteOrigin } from "@/site/seo";
+import ArticleView from "@/views/ArticleView.vue";
+import ArticlesView from "@/views/ArticlesView.vue";
 import FeaturesView from "@/views/FeaturesView.vue";
 import HomeView from "@/views/HomeView.vue";
 
@@ -76,6 +80,16 @@ export function createAppRouter(
         component: () => import("@/views/TermsView.vue"),
       },
       {
+        path: "/articles",
+        name: "articles",
+        component: ArticlesView,
+      },
+      {
+        path: "/articles/:slug",
+        name: "article",
+        component: ArticleView,
+      },
+      {
         path: "/:pathMatch(.*)*",
         name: "not-found",
         component: () => import("@/views/NotFoundView.vue"),
@@ -101,7 +115,14 @@ export function createAppRouter(
   // client-side navigation. Public and private pages share this one path.
   router.afterEach((to) => {
     if (!updateHead || typeof document === "undefined") return;
-    applyHead(descriptorForRoute(to.name), resolveSiteOrigin(), document);
+    const slug = typeof to.params.slug === "string" ? to.params.slug : "";
+    let descriptor = descriptorForRoute(to.name);
+    if (to.name === "article") {
+      descriptor = descriptorForArticleSlug(slug);
+    } else if (to.name === "articles") {
+      descriptor = articlesListDescriptor(defaultArticleCollection());
+    }
+    applyHead(descriptor, resolveSiteOrigin(), document);
   });
 
   return router;

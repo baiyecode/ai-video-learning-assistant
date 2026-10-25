@@ -48,4 +48,28 @@ describe("router head updates", () => {
     expect(document.querySelectorAll('meta[name="robots"]')).toHaveLength(1);
     expect(document.querySelectorAll('script[type="application/ld+json"]')).toHaveLength(1);
   });
+
+  it("updates the head for the Article list and a real Article slug", async () => {
+    vi.stubEnv("VITE_SITE_ORIGIN", "https://example.com");
+    const router = createAppRouter(createMemoryHistory());
+
+    await router.push("/articles");
+    await router.isReady();
+    expect(document.title).toBe("文章 · AI 视频学习助手");
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://example.com/articles",
+    );
+
+    await router.push("/articles/bilibili-subtitle-download");
+    expect(document.title).toBe(
+      "B 站视频字幕怎么下载？SRT、VTT 与 TXT 导出步骤 · AI 视频学习助手",
+    );
+    expect(document.querySelector('link[rel="canonical"]')?.getAttribute("href")).toBe(
+      "https://example.com/articles/bilibili-subtitle-download",
+    );
+    expect(
+      document.querySelector('meta[property="article:published_time"]')?.getAttribute("content"),
+    ).toBe("2026-10-25");
+    expect(document.querySelectorAll('script[type="application/ld+json"]')).toHaveLength(1);
+  });
 });

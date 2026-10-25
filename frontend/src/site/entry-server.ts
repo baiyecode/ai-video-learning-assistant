@@ -8,6 +8,9 @@
  */
 import { JSDOM } from "jsdom";
 
+import { ARTICLES_KEY } from "@/site/article-sources";
+import type { ArticleCollection } from "@/site/articles";
+
 export { buildSite } from "@/site/build-site";
 export { publicDescriptors, resolveSiteOrigin } from "@/site/seo";
 
@@ -41,7 +44,10 @@ export interface RenderedRoute {
 }
 
 /** Render one public route to the inner HTML of ``#app``. */
-export async function renderRoute(routePath: string): Promise<RenderedRoute> {
+export async function renderRoute(
+  routePath: string,
+  articles?: ArticleCollection,
+): Promise<RenderedRoute> {
   const [{ createSSRApp }, { renderToString }, { createPinia, setActivePinia }, { createMemoryHistory }] =
     await Promise.all([import("vue"), import("vue/server-renderer"), import("pinia"), import("vue-router")]);
   const [{ default: App }, { createAppRouter }] = await Promise.all([
@@ -53,6 +59,9 @@ export async function renderRoute(routePath: string): Promise<RenderedRoute> {
   const pinia = createPinia();
   app.use(pinia);
   setActivePinia(pinia);
+  // The same collection the builder validated drives list/detail rendering, so
+  // fixture content in tests and repo content in the build cannot diverge.
+  if (articles) app.provide(ARTICLES_KEY, articles);
 
   const router = createAppRouter(createMemoryHistory(), { updateHead: false });
   app.use(router);

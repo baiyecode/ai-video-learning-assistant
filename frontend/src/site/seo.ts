@@ -21,6 +21,13 @@ export interface Breadcrumb {
   path: string;
 }
 
+/** Article-only head fields; dates come from frontmatter, never from the clock. */
+export interface ArticleHeadMeta {
+  published: string;
+  updated: string;
+  tags?: readonly string[];
+}
+
 export type JsonLdNode = Record<string, unknown>;
 
 export interface JsonLdContext {
@@ -44,6 +51,8 @@ export interface PageDescriptor {
   image?: string;
   imageAlt?: string;
   breadcrumbs?: Breadcrumb[];
+  /** Set for Article pages: drives ``article:*`` Open Graph tags. */
+  article?: ArticleHeadMeta;
   /** Extra JSON-LD nodes. A BreadcrumbList is added when breadcrumbs exist. */
   jsonLd?: (context: JsonLdContext) => JsonLdNode[];
 }
@@ -145,6 +154,17 @@ export function breadcrumbListNode(context: JsonLdContext): JsonLdNode {
   };
 }
 
+/** Shared publisher/author entity for article and marketing JSON-LD. */
+export function organizationNode(context: JsonLdContext): JsonLdNode {
+  return {
+    "@type": "Organization",
+    "@id": `${context.origin}/#organization`,
+    name: SITE_NAME,
+    url: `${context.origin}/`,
+    logo: { "@type": "ImageObject", url: context.imageUrl },
+  };
+}
+
 function meta(attrs: Record<string, string>): HeadTag {
   return { tag: "meta", attrs: { ...attrs, [MANAGED_ATTRIBUTE]: "" } };
 }
@@ -183,6 +203,19 @@ export function headTags(descriptor: PageDescriptor, origin: string): HeadTag[] 
     meta({ property: "og:image:height", content: "630" }),
     meta({ property: "og:image:alt", content: imageAlt }),
     meta({ property: "og:locale", content: "zh_CN" }),
+  );
+
+  if (descriptor.article) {
+    tags.push(
+      meta({ property: "article:published_time", content: descriptor.article.published }),
+      meta({ property: "article:modified_time", content: descriptor.article.updated }),
+    );
+    for (const tag of descriptor.article.tags ?? []) {
+      tags.push(meta({ property: "article:tag", content: tag }));
+    }
+  }
+
+  tags.push(
     meta({ name: "twitter:card", content: "summary_large_image" }),
     meta({ name: "twitter:title", content: title }),
     meta({ name: "twitter:description", content: descriptor.description }),
@@ -255,6 +288,19 @@ export function validateDescriptors(descriptors: readonly PageDescriptor[]): voi
     }
     if (descriptor.ogType !== "website" && descriptor.ogType !== "article") {
       throw new SeoDescriptorError(route, `invalid og:type "${descriptor.ogType}"`);
+    }
+
+    if (descriptor.article) {
+      const { published, updated } = descriptor.article;
+      if (descriptor.ogType !== "article") {
+        throw new SeoDescriptorError(route, "article dates require og:type article");
+      }
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(published) || !/^\d{4}-\d{2}-\d{2}$/.test(updated)) {
+        throw new SeoDescriptorError(route, "article dates must use YYYY-MM-DD");
+      }
+      if (updated < published) {
+        throw new SeoDescriptorError(route, "article modified time must not precede published time");
+      }
     }
 
     if (!isPublicDescriptor(descriptor)) continue;

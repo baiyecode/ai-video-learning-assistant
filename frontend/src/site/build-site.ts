@@ -17,6 +17,13 @@ import {
   validateDescriptors,
   type PageDescriptor,
 } from "@/site/seo";
+import { articleDescriptors } from "@/site/article-descriptors";
+import {
+  buildArticleCollection,
+  type ArticleCollection,
+  type ArticleSource,
+} from "@/site/articles";
+import { defaultArticleSources } from "@/site/article-sources";
 
 export interface RenderedRoute {
   html: string;
@@ -25,9 +32,14 @@ export interface RenderedRoute {
 export interface BuildSiteOptions {
   origin: string;
   descriptors?: readonly PageDescriptor[];
+  /** Raw Markdown sources; tests inject fixtures, the build uses the repo content. */
+  articleSources?: readonly ArticleSource[];
   shellHtml: string;
   outputDir: string;
-  renderRoute: (path: string) => Promise<RenderedRoute> | RenderedRoute;
+  renderRoute: (
+    path: string,
+    articles?: ArticleCollection,
+  ) => Promise<RenderedRoute> | RenderedRoute;
 }
 
 export interface BuiltPage {
@@ -91,7 +103,16 @@ function assertArtifact(descriptor: PageDescriptor, html: string): void {
 }
 
 export async function buildSite(options: BuildSiteOptions): Promise<BuildSiteResult> {
-  const descriptors = options.descriptors ?? pageDescriptors;
+  const staticDescriptors = options.descriptors ?? pageDescriptors;
+  const articles = buildArticleCollection(options.articleSources ?? defaultArticleSources, {
+    publicRoutes: publicDescriptors(staticDescriptors).map((descriptor) => descriptor.path),
+  });
+  // Content-derived Article pages join the same registry, so title/description
+  // uniqueness and the head contract are validated once for the whole site.
+  const descriptors: readonly PageDescriptor[] = [
+    ...staticDescriptors,
+    ...articleDescriptors(articles),
+  ];
   validateDescriptors(descriptors);
 
   const pages = publicDescriptors(descriptors);
@@ -112,7 +133,7 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildSiteRes
 
     let rendered: RenderedRoute;
     try {
-      rendered = await options.renderRoute(descriptor.path);
+      rendered = await options.renderRoute(descriptor.path, articles);
     } catch (error) {
       const reason = error instanceof Error ? error.message : String(error);
       throw new Error(`Prerender failed for route ${descriptor.path}: ${reason}`);
@@ -122,7 +143,9 @@ export async function buildSite(options: BuildSiteOptions): Promise<BuildSiteRes
     assertArtifact(descriptor, html);
 
     const file = outputFileFor(descriptor.path);
-    await writeFile(path.join(options.outputDir, file), html, "utf8");
+    const filePath = path.join(options.outputDir, file);
+    await mkdir(path.dirname(filePath), { recursive: true });
+    await writeFile(filePath, html, "utf8");
     built.push({ path: descriptor.path, file });
   }
 
