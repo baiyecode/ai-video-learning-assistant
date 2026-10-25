@@ -91,11 +91,61 @@ const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
  */
 const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*|\}\}/;
 
+/** The two known tokens, blanked out before the literal-claim guard runs. */
+const KNOWN_PLACEHOLDER_TOKEN_PATTERN = /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/g;
+
 /**
- * Resolve every ``{{PLACEHOLDER}}`` in one Article field to its build-time value.
- * Known placeholders are replaced first, so anything that still looks like a
- * placeholder afterwards (unknown name, unclosed ``{{`` or stray ``}}``) fails the
- * build naming the file instead of leaking ``{{...}}`` into a published page.
+ * A hand-written monthly-price claim in the source (``$9.99/月`` or any
+ * ``$数字.数字/月`` shape). Interpolated placeholders are masked out before this
+ * runs, so only un-templated literals are caught.
+ */
+const LITERAL_PRICE_PATTERN = /\$[\d.]+\/月/u;
+
+/**
+ * A hand-written daily-quota claim in the source: a daily prefix (``每日``,
+ * ``每天`` or ``自然日``) followed by a bare number and ``次``, any spacing.
+ * The prefix is part of the pattern on purpose — ``消耗 1 次`` or ``1 次 Quota``
+ * describe a single consumption unit, not the daily allowance, and stay legal.
+ */
+const LITERAL_QUOTA_PATTERN = /(?:每日|每天|自然日)\s*\d+\s*次/u;
+
+/**
+ * The strict literal-claim guard (issue #45): refuse a field whose SOURCE —
+ * with the known placeholder tokens masked out — still spells a money or quota
+ * claim by hand. Checking the masked source instead of the interpolated text is
+ * what makes the two rules mutually clear: the resolved ``$4.99/月`` of a legal
+ * placeholder never trips it, while an Article mixing placeholders and
+ * hand-written numbers fails naming the file and the offending snippet.
+ * A bare ``数字 次`` without a daily prefix is not a Quota claim (``消耗 1 次``
+ * and ``1 次 Quota`` describe one consumption unit and stay legal), so the
+ * quota guard keys on the daily prefix, not the count.
+ */
+function assertNoUntemplatedClaims(fileName: string, raw: string): void {
+  const untemplated = raw.replace(KNOWN_PLACEHOLDER_TOKEN_PATTERN, "");
+
+  const literalPrice = LITERAL_PRICE_PATTERN.exec(untemplated)?.[0];
+  if (literalPrice) {
+    throw new ArticleContentError(
+      fileName,
+      `literal monthly price "${literalPrice}": money claims must use the placeholders {{MONTHLY_PRICE_USD}} or {{DAILY_FREE_QUOTA}}, not hand-written numbers`,
+    );
+  }
+
+  const literalQuota = LITERAL_QUOTA_PATTERN.exec(untemplated)?.[0];
+  if (literalQuota) {
+    throw new ArticleContentError(
+      fileName,
+      `literal daily quota "${literalQuota}": quota claims must use the placeholder {{DAILY_FREE_QUOTA}} (as in "每日 {{DAILY_FREE_QUOTA}} 次"), not hand-written numbers`,
+    );
+  }
+}
+
+/**
+ * Resolve every ``{{PLACEHOLDER}}`` in one Article field to its build-time value,
+ * then run the literal-claim guard on the same field's source. Ordering is part
+ * of the contract: an unknown or unclosed placeholder fails first with its own
+ * message (P4-1 behavior), so a field only reaches the guard once its
+ * placeholders are valid.
  */
 function interpolatePlaceholders(fileName: string, text: string): string {
   const resolved = text.replace(PLACEHOLDER_PATTERN, (token, name: string) => {
@@ -119,6 +169,7 @@ function interpolatePlaceholders(fileName: string, text: string): string {
     );
   }
 
+  assertNoUntemplatedClaims(fileName, text);
   return resolved;
 }
 
@@ -339,6 +390,7 @@ export function parseArticle(fileName: string, source: string): Article {
   }
 
   const tagsRaw = fields.get("tags");
+  if (tagsRaw) assertNoUntemplatedClaims(fileName, tagsRaw);
   const tags = tagsRaw ? parseTags(fileName, tagsRaw) : [];
   const draftRaw = fields.get("draft");
   const draft = draftRaw ? parseDraft(fileName, draftRaw) : false;

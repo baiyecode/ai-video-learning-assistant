@@ -332,4 +332,27 @@ describe("article artifacts", () => {
 
     await expect(build(outDir, broken)).rejects.toThrow(/broken-article\.md/);
   });
+
+  it("fails the prerender build when an Article hand-writes a price or quota claim", async () => {
+    const outDir = await tempDir();
+    const handPriced: ArticleSource[] = [
+      {
+        fileName: "hand-priced.md",
+        source: fixtureSource("手写价格的文章", "手写价格的文章", {}, "\n\n限时价 $9.99/月。"),
+      },
+    ];
+    await expect(build(outDir, handPriced)).rejects.toThrow(
+      /hand-priced\.md.*literal monthly price "\$9\.99\/月"/,
+    );
+
+    const handQuota: ArticleSource[] = [
+      {
+        fileName: "hand-quota.md",
+        source: fixtureSource("手写配额的文章", "手写配额的文章", {}, "\n\n免费用户每日 5 次 Analysis。"),
+      },
+    ];
+    await expect(build(outDir, handQuota)).rejects.toThrow(
+      /hand-quota\.md.*literal daily quota "每日 5 次"/,
+    );
+  });
 });

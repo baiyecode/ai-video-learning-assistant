@@ -286,6 +286,95 @@ describe("article price placeholder interpolation", () => {
   });
 });
 
+describe("article literal-claim guard", () => {
+  it("fails the build on a hand-written monthly price in the body", () => {
+    expectFailure(
+      "literal-price.md",
+      validSource({}, `${BODY}\n\n限时优惠，会员只要 $9.99/月。`),
+      /literal monthly price "\$9\.99\/月"/,
+    );
+  });
+
+  it("fails the build on a hand-written daily quota in every prefix and spacing variant", () => {
+    expectFailure(
+      "literal-quota-meiri.md",
+      validSource({}, `${BODY}\n\n免费用户每日 3 次 Analysis。`),
+      /literal daily quota "每日 3 次"/,
+    );
+    expectFailure(
+      "literal-quota-meitian.md",
+      validSource({}, `${BODY}\n\n免费用户每天5次 Analysis。`),
+      /literal daily quota "每天5次"/,
+    );
+    expectFailure(
+      "literal-quota-ziranri.md",
+      validSource({}, `${BODY}\n\n按 Asia/Shanghai 自然日 3    次 重置。`),
+      /literal daily quota "自然日 3    次"/,
+    );
+  });
+
+  it("fails on the literal when an Article mixes placeholders and hand-written numbers", () => {
+    expectFailure(
+      "mixed-claims.md",
+      validSource({}, `${BODY}\n\n现价 ${PRICE_PLACEHOLDER}，限时旧价 $9.99/月。`),
+      /literal monthly price "\$9\.99\/月"/,
+    );
+    expectFailure(
+      "mixed-quota.md",
+      validSource({}, `${BODY}\n\n免费 每日 ${QUOTA_PLACEHOLDER} 次，加量档 每日 5 次。`),
+      /literal daily quota "每日 5 次"/,
+    );
+  });
+
+  it("resolves placeholders first: an unknown placeholder still fails as a placeholder problem", () => {
+    expectFailure(
+      "unknown-and-literal.md",
+      validSource({}, `${BODY}\n\n会员 {{MONTHLY_PRICE}}，旧价 $9.99/月。`),
+      /unknown placeholder "\{\{MONTHLY_PRICE\}\}"/,
+    );
+    expectFailure(
+      "unclosed-and-literal.md",
+      validSource({}, `${BODY}\n\n会员 {{MONTHLY_PRICE_USD，旧价 $9.99/月。`),
+      /unclosed placeholder/,
+    );
+  });
+
+  it("guards the frontmatter description and the tags, not only the body", () => {
+    expectFailure(
+      "literal-in-description.md",
+      validSource({
+        description: `${DESCRIPTION.slice(0, 100)}会员 $9.99/月，值得一看。`,
+      }),
+      /literal monthly price "\$9\.99\/月"/,
+    );
+    expectFailure(
+      "literal-in-tags.md",
+      validSource({ tags: `[视频总结, 每日 5 次, 字幕]` }),
+      /literal daily quota "每日 5 次"/,
+    );
+  });
+
+  it("keeps a bare 数字 次 legal: it is a consumption unit, not a daily quota claim", () => {
+    const article = parseArticle(
+      "single-consumption.md",
+      validSource(
+        {},
+        `${BODY}\n\n只要成功生成一次，消耗的都是 1 次 Quota。\n\n| 发起一次新的 Analysis 并成功 | 消耗 1 次 |`,
+      ),
+    );
+    expect(article.body).toContain("消耗 1 次");
+  });
+
+  it("does not trip on a correctly templated claim", () => {
+    const article = parseArticle(
+      "templated-only.md",
+      validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
+    );
+    expect(article.body).toContain("$4.99/月");
+    expect(article.body).toContain("自然日 3 次");
+  });
+});
+
 describe("buildArticleCollection", () => {
   const sources: ArticleSource[] = [
     {
