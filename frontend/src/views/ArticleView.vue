@@ -97,7 +97,7 @@ const related = computed(() =>
     <section class="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm">
       <h2 class="text-lg font-semibold text-slate-900">继续阅读与试用</h2>
       <p class="mt-2 text-sm text-slate-600">
-        回到工具粘贴页面地址，解析 Video 后即可导出 Subtitle；需要 AI 摘要时再登录账号。
+        回到工具粘贴页面地址，解析视频后即可导出 Subtitle；需要 AI 摘要时再登录账号。
       </p>
       <div class="mt-4 flex flex-wrap justify-center gap-3">
         <RouterLink

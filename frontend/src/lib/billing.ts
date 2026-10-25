@@ -75,7 +75,7 @@ export function expirationNotice(membership: MembershipDto | null): string | nul
   const day = formatPeriodEnd(membership.period_end);
   if (!day) return null;
   if (membership.cancel_at_period_end) {
-    return `已取消续费，VIP 将保留至 ${day}，届时将失去 VIP 并恢复免费额度。`;
+    return `已取消续费，VIP 将保留至 ${day}，届时将失去 VIP 并恢复免费 Quota。`;
   }
   if (membership.status === TRIAL_ENDING_STATUS) {
     return `将于 ${day} 失去 VIP。`;
@@ -115,7 +115,7 @@ export function membershipAlert(membership: MembershipDto | null): string | null
   }
   if (membership.status === TRIAL_ENDING_STATUS && membership.period_end) {
     const day = formatPeriodEnd(membership.period_end);
-    return day ? `试用会员将于 ${day} 到期，之后恢复免费额度。` : null;
+    return day ? `试用会员将于 ${day} 到期，之后恢复免费 Quota。` : null;
   }
   return null;
 }

@@ -42,7 +42,7 @@ const features = [
   },
   {
     title: "历史与 VIP",
-    problem: "找回过去生成的内容，并在需要时解除每日 Analysis 次数限制。",
+    problem: "找回过去生成的内容，并在需要时解除每日 Analysis 的 Quota 限制。",
     usage:
       "「我的分析」保留你的 Analysis 历史。VIP 会员 $4.99/月，Analysis 不限次；支付由 Stripe 托管，可随时取消，取消后在当期结束前仍可使用。",
     limit: "免费账号每天 3 次 Analysis；价格与扣款以支付方结账页展示为准。",

@@ -62,7 +62,7 @@ const capabilities = [
   },
   {
     title: "Analysis",
-    text: "基于 Subtitle 生成简体中文摘要；免费账号每日 3 次，结果仅自己可见。",
+    text: "基于 Subtitle 生成简体中文摘要；免费 Account 每日 3 次 Analysis，结果仅自己可见。",
   },
   {
     title: "思维导图",
@@ -70,7 +70,7 @@ const capabilities = [
   },
   {
     title: "历史与 VIP",
-    text: "在「我的分析」找回历史结果；VIP 会员解除每日 Analysis 次数限制。",
+    text: "在「我的分析」找回历史结果；VIP 会员解除每日 Analysis 的 Quota 限制。",
   },
 ];
 
@@ -418,7 +418,7 @@ function cancelCompliance(): void {
         <div class="space-y-2 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 class="text-base font-semibold text-slate-900">关键限制</h3>
           <ul class="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-600">
-            <li>单个 Video 最长 2 小时、最大 2 GB。</li>
+            <li>单个视频最长 2 小时、最大 2 GB。</li>
             <li>服务端文件最多保留 1 小时，下载链接 15 分钟内有效。</li>
             <li>不支持播放列表、直播、DRM 与会员专属内容。</li>
             <li>不做 ASR：没有 Subtitle 就不能导出字幕或生成 Analysis。</li>

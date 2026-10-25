@@ -166,7 +166,7 @@ export function buildLlmsTxt(
     `- 免费 Account 每日 3 次 Analysis；VIP 会员 ${PRICE_HEADLINE}，${PRICE_BENEFIT}。`,
     "- 单视频最长 2 小时，最大 2 GB。",
     "- 服务端文件最多保留 1 小时，下载链接 15 分钟内有效。",
-    "- 不做 ASR：没有 Subtitle 的 Video 不能导出 Subtitle，也不能发起 Analysis。",
+    "- 不做 ASR：没有 Subtitle 的视频不能导出 Subtitle，也不能发起 Analysis。",
     "- Analysis 私有：结果仅本人可见，不生成公开页面。",
     `- 不支持播放列表、直播、DRM 与会员专属内容；举报入口见[使用条款](${canonicalUrl(origin, "/terms")}#report)。`,
     "",

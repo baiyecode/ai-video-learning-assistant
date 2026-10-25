@@ -43,7 +43,7 @@ const troubleshooting = [
   {
     question: "今日 Quota 已用尽",
     answer:
-      "免费 Account 每个 Asia/Shanghai 自然日 3 次 Analysis，次日重置；也可以在价格页升级 VIP 解除每日次数限制。",
+      "免费 Account 每个 Asia/Shanghai 自然日 3 次 Analysis，次日重置；也可以在价格页升级 VIP 解除每日 Quota 限制。",
   },
   {
     question: "邮箱尚未验证",
@@ -53,7 +53,7 @@ const troubleshooting = [
   {
     question: "解析或 Download 失败",
     answer:
-      "确认单个 Video 不超过 2 小时、2 GB，且不是播放列表、直播、DRM 或会员专属内容；Visitor 每小时最多发起 5 次 Download。",
+      "确认单个视频不超过 2 小时、2 GB，且不是播放列表、直播、DRM 或会员专属内容；Visitor 每小时最多发起 5 次 Download。",
   },
 ];
 </script>

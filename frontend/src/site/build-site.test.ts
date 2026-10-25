@@ -242,7 +242,7 @@ describe("pricing page", () => {
     // Head: unique title/description, absolute canonical, indexable.
     expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(document.querySelector("h1")?.textContent?.trim()).toBe("升级 VIP 会员");
-    expect(document.title).toBe("价格：免费额度与 VIP 会员 · AI 视频学习助手");
+    expect(document.title).toBe("价格：免费 Quota 与 VIP 会员 · AI 视频学习助手");
     const description =
       document.querySelector('meta[name="description"]')?.getAttribute("content") ?? "";
     expect(description.length).toBeGreaterThanOrEqual(70);

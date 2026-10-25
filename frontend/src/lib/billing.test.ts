@@ -44,7 +44,7 @@ describe("membership helpers", () => {
     const alert = membershipAlert(
       membership({ status: "trial_ending", period_end: "2026-02-14T09:00:00+00:00" })
     );
-    expect(alert).toBe("试用会员将于 2月14日 到期，之后恢复免费额度。");
+    expect(alert).toBe("试用会员将于 2月14日 到期，之后恢复免费 Quota。");
   });
 
   it("shifts the period end into the Asia/Shanghai calendar day", () => {

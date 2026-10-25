@@ -28,7 +28,7 @@ export const faqItems: readonly FaqItem[] = [
   },
   {
     question: "VIP 会员多少钱？可以随时取消吗？",
-    answer: `VIP 会员 ${PRICE_HEADLINE}（USD），按月自动续费，解锁「${PRICE_BENEFIT}」。可在个人中心的订阅管理进入 Stripe 门户随时取消；取消后 VIP 保留至当期结束，之后恢复免费额度。`,
+    answer: `VIP 会员 ${PRICE_HEADLINE}（USD），按月自动续费，解锁「${PRICE_BENEFIT}」。可在个人中心的订阅管理进入 Stripe 门户随时取消；取消后 VIP 保留至当期结束，之后恢复免费 Quota。`,
   },
   {
     question: "没有 Subtitle 的视频能生成 Analysis 吗？",
@@ -53,7 +53,7 @@ export const faqItems: readonly FaqItem[] = [
   {
     question: "单个视频有什么大小与时长限制？",
     answer:
-      "单个 Video 最长 2 小时、最大 2 GB；播放列表、直播、DRM 内容与会员专属内容不在支持范围内。",
+      "单个视频最长 2 小时、最大 2 GB；播放列表、直播、DRM 内容与会员专属内容不在支持范围内。",
   },
   {
     question: "Analysis 结果会被公开吗？",
@@ -78,7 +78,7 @@ export const faqItems: readonly FaqItem[] = [
   {
     question: "今日 Analysis 的 Quota 用完了怎么办？",
     answer:
-      "免费 Account 的 Quota 会在下一个 Asia/Shanghai 自然日重置；也可以升级 VIP 会员解除每日次数限制。",
+      "免费 Account 的 Quota 会在下一个 Asia/Shanghai 自然日重置；也可以升级 VIP 会员解除每日 Quota 限制。",
   },
 ];
 

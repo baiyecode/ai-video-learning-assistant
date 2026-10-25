@@ -47,7 +47,7 @@ const faqs = [
   {
     question: "如何取消订阅？",
     answer:
-      "在个人中心的「订阅管理」中进入 Stripe 门户取消自动续费；取消后不再扣费，VIP 权益保留至当期结束，之后恢复免费额度。",
+      "在个人中心的「订阅管理」中进入 Stripe 门户取消自动续费；取消后不再扣费，VIP 权益保留至当期结束，之后恢复免费 Quota。",
   },
   {
     question: "免费 Quota 每天重置吗？",
@@ -174,7 +174,7 @@ async function upgrade(): Promise<void> {
       <ul class="list-disc space-y-1 pl-5 text-sm leading-relaxed text-slate-700">
         <li>订阅通过 Stripe 托管的结账页按月扣费，本产品不接触或保存卡号。</li>
         <li>可随时在个人中心的「订阅管理」中进入 Stripe 门户取消自动续费。</li>
-        <li>取消后不再续费，VIP 权益保留至当期结束，之后恢复免费额度。</li>
+        <li>取消后不再续费，VIP 权益保留至当期结束，之后恢复免费 Quota。</li>
         <li>实际扣款金额与条款以支付方结账页展示为准。</li>
       </ul>
     </section>

@@ -586,7 +586,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
   {
     name: "pricing",
     path: "/pricing",
-    title: "价格：免费额度与 VIP 会员",
+    title: "价格：免费 Quota 与 VIP 会员",
     description: PRICING_DESCRIPTION,
     robots: INDEX_ROBOTS,
     ogType: "website",
