@@ -105,6 +105,7 @@ async def test_lifecycle_events_advance_the_membership_status(
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
         "is_vip": False,
+        "portal_url": "/api/billing/portal",
     }
 
 
@@ -133,6 +134,7 @@ async def test_payment_succeeded_restores_an_active_membership(client: AsyncClie
         "period_end": "2026-03-14T10:00:00+00:00",
         "cancel_at_period_end": False,
         "is_vip": True,
+        "portal_url": "/api/billing/portal",
     }
 
 
@@ -164,6 +166,7 @@ async def test_subscription_updated_backfills_the_period_end_the_checkout_omitte
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
         "is_vip": True,
+        "portal_url": "/api/billing/portal",
     }
 
 
@@ -399,6 +402,7 @@ async def test_subscription_updated_records_cancel_at_period_end_for_the_vip_pre
         "period_end": PERIOD_END,
         "cancel_at_period_end": True,
         "is_vip": True,
+        "portal_url": "/api/billing/portal",
     }
 
     # The real deletion ends the membership regardless of the outstanding flag.
@@ -604,6 +608,7 @@ async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
         "is_vip": False,
+        "portal_url": "/api/billing/portal",
     }
 
     fifth = await _create_analysis(

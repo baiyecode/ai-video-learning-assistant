@@ -187,5 +187,21 @@ onMounted(async () => {
         </button>
       </form>
     </section>
+
+    <section
+      id="terms-cta"
+      class="rounded-xl border border-slate-200 bg-white p-6 text-center shadow-sm"
+    >
+      <h2 class="text-lg font-semibold text-slate-900">条款读完，回到工具</h2>
+      <p class="mt-2 text-sm text-slate-600">
+        回到首页粘贴页面地址，先解析；需要字幕与摘要时再登录账号。
+      </p>
+      <RouterLink
+        to="/"
+        class="mt-4 inline-block rounded-lg bg-slate-900 px-5 py-2 text-sm font-medium text-white transition-colors hover:bg-slate-700"
+      >
+        回到首页开始解析
+      </RouterLink>
+    </section>
   </article>
 </template>

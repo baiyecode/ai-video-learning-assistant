@@ -100,7 +100,7 @@ function cancelCompliance(): void {
   <section class="mx-auto max-w-3xl space-y-6">
     <div class="space-y-3 text-center">
       <h1 class="text-3xl font-bold tracking-tight text-slate-900 sm:text-4xl">
-        粘贴视频地址，下载并读懂它
+        粘贴视频地址，下载视频、导出字幕并生成 AI 摘要
       </h1>
       <p class="text-slate-600">
         解析公开视频，导出字幕，并基于字幕生成简体中文摘要与思维导图。
