@@ -21,6 +21,9 @@ export default defineConfig({
     },
   },
   build: {
+    // The prerender build reads the client-build shell; the manifest keeps the
+    // hashed entry mapping available for later P3 slices and validation.
+    manifest: true,
     rollupOptions: {
       output: {
         manualChunks(id) {
