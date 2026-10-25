@@ -27,7 +27,12 @@ from app.modules.billing.models import (
     SubscriptionStatus,
     new_id,
 )
-from app.modules.billing.schemas import CheckoutOut, MembershipOut, PortalOut
+from app.modules.billing.schemas import (
+    PORTAL_ENTRY_PATH,
+    CheckoutOut,
+    MembershipOut,
+    PortalOut,
+)
 from app.modules.identity.models import Account
 from app.ports import BillingGateway, Clock, WebhookEvent
 from app.timeutil import required_utc
@@ -169,13 +174,19 @@ async def open_portal(
 
 
 async def membership(session: AsyncSession, account_id: str, *, now: datetime) -> MembershipOut:
-    """The Account's subscription truth: the derived read, never a recomputing write."""
+    """The Account's subscription truth: the derived read, never a recomputing write.
+
+    ``portal_url`` is the spec's portal *entry* placeholder (issue #17 AC): the
+    mounted POST path, identical for every status because the managed Stripe link
+    is only ever minted by that POST, never by this read.
+    """
     state = await membership_state(session, account_id, now=now)
     return MembershipOut(
         status=state.status,
         period_end=state.period_end.isoformat() if state.period_end is not None else None,
         cancel_at_period_end=state.cancel_at_period_end,
         vip_active=state.vip_active,
+        portal_url=PORTAL_ENTRY_PATH,
     )
 
 

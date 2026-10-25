@@ -151,7 +151,11 @@ describe("article artifacts", () => {
     );
 
     const headings = [...document.querySelectorAll("h2")].map((node) => node.textContent?.trim());
-    expect(headings).toEqual(["较新的测试文章", "较早的测试文章"]);
+    // Article titles newest first, then the back-to-tool CTA heading (story 12).
+    expect(headings).toEqual(["较新的测试文章", "较早的测试文章", "读完就试一次"]);
+    expect(document.querySelector('#articles-cta a[href="/"]')?.textContent?.trim()).toBe(
+      "回到首页开始解析",
+    );
     expect(document.body.textContent).not.toContain("草稿测试文章");
     expect(document.body.textContent).toContain("2026-10-25");
     expect(document.body.textContent).toContain("B站");

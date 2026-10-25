@@ -150,7 +150,11 @@ describe("seed Article artifacts", () => {
     expect(document.querySelectorAll("h1")).toHaveLength(1);
     expect(
       [...document.querySelectorAll("h2")].map((node) => node.textContent?.trim()),
-    ).toEqual(collection.published.map((article) => article.title));
+    ).toEqual([
+      ...collection.published.map((article) => article.title),
+      // Back-to-tool CTA closes the index page (P3 story 12).
+      "读完就试一次",
+    ]);
     expect(document.querySelectorAll('a[href^="/articles/"]')).toHaveLength(4);
   });
 

@@ -25,6 +25,11 @@ from tests.fakes import FAKE_CHECKOUT_URL
 
 PASSWORD = "correct-horse"
 
+# Spec literal (P2 API 契约 + #17 AC): the portal entry placeholder exposed by
+# GET /me/membership is the POST endpoint that mints the managed link, not a
+# provider-hosted URL. Asserted as a literal, not imported from the service.
+PORTAL_ENTRY_URL = "/api/billing/portal"
+
 
 def bearer(response: Any) -> dict[str, str]:
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
@@ -103,7 +108,25 @@ async def test_membership_is_free_before_any_subscription(client: AsyncClient) -
         "period_end": None,
         "cancel_at_period_end": False,
         "vip_active": False,
+        "portal_url": PORTAL_ENTRY_URL,
     }
+
+
+async def test_membership_carries_the_portal_entry_placeholder(client: AsyncClient) -> None:
+    """P2 spec: ``GET /me/membership`` returns ``{ status, period_end, portal_url }``.
+
+    ``portal_url`` is the portal *entry* placeholder (#17 AC): the POST endpoint that
+    mints the managed Stripe link per call. The GET never mints one, so the value is
+    stable across statuses and is not a provider-hosted URL.
+    """
+    auth = bearer(await register(client, email="placeholder@example.com"))
+
+    body = (await client.get("/api/me/membership", headers=auth)).json()
+
+    assert body["status"] == "free"
+    assert body["portal_url"] == PORTAL_ENTRY_URL
+    response = await client.post("/api/billing/portal", headers=auth)
+    assert response.status_code == 404, response.text
 
 
 async def test_membership_reports_a_recorded_subscription(client: AsyncClient, app: FastAPI) -> None:
@@ -118,6 +141,7 @@ async def test_membership_reports_a_recorded_subscription(client: AsyncClient, a
         "period_end": "2026-02-14T08:00:00+00:00",
         "cancel_at_period_end": False,
         "vip_active": True,
+        "portal_url": PORTAL_ENTRY_URL,
     }
 
 

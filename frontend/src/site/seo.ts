@@ -65,6 +65,13 @@ export interface PageDescriptor {
   path: string;
   title: string;
   description: string;
+  /**
+   * Membership in the public Marketing Page surface: prerendered to its own
+   * artifact, link-audited and validated for unique titles/descriptions.
+   * Independent of ``robots`` — a public page may opt out of indexing while
+   * staying prerendered (issue #42: this used to be conflated with INDEX_ROBOTS).
+   */
+  public: boolean;
   robots: RobotsDirective;
   ogType: OgType;
   /** Site-relative path (or absolute URL) of the 1200x630 share card. */
@@ -93,8 +100,18 @@ export class SeoDescriptorError extends Error {
 /** Managed nodes carry this marker so runtime updates replace instead of append. */
 export const MANAGED_ATTRIBUTE = "data-seo-managed";
 
+/**
+ * The page is part of the public Marketing Page surface: it is prerendered and
+ * link-audited. Deliberately NOT tied to ``robots`` — a future noindex marketing
+ * page stays public (a real static artifact) instead of silently dropping out.
+ */
 export function isPublicDescriptor(descriptor: PageDescriptor): boolean {
-  return descriptor.robots === INDEX_ROBOTS;
+  return descriptor.public;
+}
+
+/** Public *and* search-indexable: the full head contract and the sitemap set. */
+export function isIndexableDescriptor(descriptor: PageDescriptor): boolean {
+  return descriptor.public && descriptor.robots === INDEX_ROBOTS;
 }
 
 /**
@@ -353,8 +370,9 @@ function isArticleNode(node: JsonLdNode): boolean {
 
 /**
  * The pure head contract: descriptor + origin -> ordered tag list.
- * Public pages get title/description/canonical/robots/OG/Twitter/JSON-LD;
- * private pages get only an unindexed title and robots directive.
+ * Indexable pages get title/description/canonical/robots/OG/Twitter/JSON-LD;
+ * anything else (private routes, public noindex pages) gets only an unindexed
+ * title and its own robots directive.
  */
 export function headTags(descriptor: PageDescriptor, origin: string): HeadTag[] {
   const title = documentTitle(descriptor);
@@ -362,8 +380,8 @@ export function headTags(descriptor: PageDescriptor, origin: string): HeadTag[] 
     { tag: "title", attrs: { [MANAGED_ATTRIBUTE]: "" }, text: title },
   ];
 
-  if (!isPublicDescriptor(descriptor)) {
-    tags.push(meta({ name: "robots", content: NOINDEX_ROBOTS }));
+  if (!isIndexableDescriptor(descriptor)) {
+    tags.push(meta({ name: "robots", content: descriptor.robots }));
     return tags;
   }
 
@@ -482,6 +500,12 @@ export function validateDescriptors(descriptors: readonly PageDescriptor[]): voi
     if (descriptor.ogType !== "website" && descriptor.ogType !== "article") {
       throw new SeoDescriptorError(route, `invalid og:type "${descriptor.ogType}"`);
     }
+    if (!descriptor.public && descriptor.robots === INDEX_ROBOTS) {
+      throw new SeoDescriptorError(
+        route,
+        `private descriptor must not claim "${INDEX_ROBOTS}"; use "${NOINDEX_ROBOTS}"`,
+      );
+    }
 
     if (descriptor.article) {
       const { published, updated } = descriptor.article;
@@ -554,6 +578,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/",
     title: "视频下载、字幕导出与 AI 摘要",
     description: HOME_DESCRIPTION,
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
@@ -564,6 +589,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/features",
     title: "功能：视频解析、字幕导出与 AI 分析",
     description: FEATURES_DESCRIPTION,
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
@@ -576,6 +602,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/guide",
     title: "使用指南：解析、下载与 AI 分析",
     description: GUIDE_DESCRIPTION,
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
@@ -588,6 +615,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/faq",
     title: "常见问题：平台、Quota 与价格",
     description: FAQ_DESCRIPTION,
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
@@ -600,6 +628,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/pricing",
     title: "价格：免费 Quota 与 VIP 会员",
     description: PRICING_DESCRIPTION,
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
@@ -614,6 +643,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/terms",
     title: "使用条款与举报",
     description: TERMS_DESCRIPTION,
+    public: true,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
@@ -625,6 +655,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/login",
     title: "登录",
     description: "登录 AI 视频学习助手账号。",
+    public: false,
     robots: NOINDEX_ROBOTS,
     ogType: "website",
   },
@@ -633,6 +664,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/account",
     title: "个人中心",
     description: "管理 AI 视频学习助手账号与订阅。",
+    public: false,
     robots: NOINDEX_ROBOTS,
     ogType: "website",
   },
@@ -641,6 +673,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/verify-email",
     title: "邮箱验证",
     description: "验证 AI 视频学习助手账号邮箱。",
+    public: false,
     robots: NOINDEX_ROBOTS,
     ogType: "website",
   },
@@ -649,6 +682,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/analyses",
     title: "我的 Analysis",
     description: "查看 AI 视频学习助手的 Analysis 历史。",
+    public: false,
     robots: NOINDEX_ROBOTS,
     ogType: "website",
   },
@@ -657,6 +691,7 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "/analyses/:id",
     title: "AI 分析",
     description: "查看单个视频的 AI 分析结果。",
+    public: false,
     robots: NOINDEX_ROBOTS,
     ogType: "website",
   },
@@ -665,14 +700,20 @@ export const pageDescriptors: readonly PageDescriptor[] = [
     path: "*",
     title: "页面不存在",
     description: "请求的页面不存在。",
+    public: false,
     robots: NOINDEX_ROBOTS,
     ogType: "website",
   },
 ];
 
-const NOT_FOUND_DESCRIPTOR = pageDescriptors.find(
-  (descriptor) => descriptor.name === "not-found",
-) as PageDescriptor;
+/** Checked registry lookup: a missing route fails loudly instead of casting. */
+function requireDescriptor(name: string): PageDescriptor {
+  const found = pageDescriptors.find((descriptor) => descriptor.name === name);
+  if (!found) throw new SeoDescriptorError(name, "the registry has no such route name");
+  return found;
+}
+
+const NOT_FOUND_DESCRIPTOR: PageDescriptor = requireDescriptor("not-found");
 
 /** The unmatched-route descriptor; ``404.html`` is built from it. */
 export const notFoundDescriptor: PageDescriptor = NOT_FOUND_DESCRIPTOR;
@@ -685,8 +726,16 @@ export function descriptorForRoute(name: string | symbol | null | undefined): Pa
   return NOT_FOUND_DESCRIPTOR;
 }
 
+/** The prerender/link-audit set: every page on the public Marketing Page surface. */
 export function publicDescriptors(
   descriptors: readonly PageDescriptor[] = pageDescriptors,
 ): PageDescriptor[] {
   return descriptors.filter(isPublicDescriptor);
+}
+
+/** The sitemap/llms set: public pages the crawlers may index. */
+export function indexableDescriptors(
+  descriptors: readonly PageDescriptor[] = pageDescriptors,
+): PageDescriptor[] {
+  return descriptors.filter(isIndexableDescriptor);
 }

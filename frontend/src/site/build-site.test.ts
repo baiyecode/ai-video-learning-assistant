@@ -315,14 +315,19 @@ describe("terms page", () => {
       "index,follow,max-image-preview:large",
     );
 
-    // The existing clauses stay a continuous hierarchy below the only H1.
+    // The existing clauses stay a continuous hierarchy below the only H1, then
+    // the back-to-tool CTA (P3 story 12) closes the page.
     expect([...document.querySelectorAll("h2")].map((node) => node.textContent?.trim())).toEqual([
       "一、合规使用",
       "二、禁止用途",
       "三、临时文件与保留策略",
       "四、版权与投诉",
       "五、举报方式",
+      "条款读完，回到工具",
     ]);
+    expect(document.querySelector('#terms-cta a[href="/"]')?.textContent?.trim()).toBe(
+      "回到首页开始解析",
+    );
     const levels = headingLevels(document);
     expect(levels[0]).toBe(1);
     for (let index = 1; index < levels.length; index += 1) {

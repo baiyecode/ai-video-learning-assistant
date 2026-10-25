@@ -78,7 +78,14 @@ beforeAll(async () => {
     outputDir: outDir,
     renderRoute,
   });
-  for (const file of ["index.html", "guide.html", "faq.html", "features.html", "articles.html"]) {
+  for (const file of [
+    "index.html",
+    "guide.html",
+    "faq.html",
+    "features.html",
+    "articles.html",
+    "terms.html",
+  ]) {
     const html = await readFile(path.join(outDir, file), "utf8");
     const dom = new JSDOM(html);
     documents.set(file, dom.window.document);
@@ -100,7 +107,12 @@ describe("home marketing page", () => {
     const document = page("index.html");
 
     expect(document.querySelectorAll("h1")).toHaveLength(1);
-    expect(textOf(document.querySelector("h1"))).toContain("粘贴视频地址");
+    const h1 = textOf(document.querySelector("h1"));
+    expect(h1).toContain("粘贴视频地址");
+    // P3 spec: the home H1 itself carries the core keywords, not just <title>.
+    for (const keyword of ["下载", "字幕", "AI 摘要"]) {
+      expect(h1, `H1 missing core keyword ${keyword}`).toContain(keyword);
+    }
     expect(document.querySelector("title")?.textContent).toBe(
       "视频下载、字幕导出与 AI 摘要 · AI 视频学习助手",
     );
@@ -360,6 +372,20 @@ describe("/faq", () => {
     }
     expect(text).not.toMatch(/支持所有平台|无水印|自动转写|永久免费|DRM 破解|100% 成功/);
   });
+});
+
+describe("back-to-tool CTA (P3 story 12)", () => {
+  // Header nav lives outside <main>; only an in-page CTA matches here, so every
+  // Marketing Page must offer its own explicit way back to the tool.
+  for (const file of ["features.html", "guide.html", "faq.html", "terms.html", "articles.html"]) {
+    it(`${file} links back to the home tool`, () => {
+      const document = page(file);
+      const ctas = [...document.querySelectorAll('main a[href="/"]')];
+
+      expect(ctas.length, `${file} has no in-page link to /`).toBeGreaterThan(0);
+      expect(ctas.some((node) => textOf(node).includes("回到首页")), `${file} CTA copy`).toBe(true);
+    });
+  }
 });
 
 describe("site navigation", () => {

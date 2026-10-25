@@ -77,6 +77,7 @@ async def test_checkout_completed_event_activates_membership(client: AsyncClient
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
         "vip_active": True,
+        "portal_url": "/api/billing/portal",
     }
 
 
@@ -352,6 +353,7 @@ async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscri
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
         "vip_active": True,
+        "portal_url": "/api/billing/portal",
     }
 
     async with app.state.sessionmaker() as session:

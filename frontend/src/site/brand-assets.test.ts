@@ -164,6 +164,7 @@ describe("social share contract", () => {
       title: "测试文章",
       description:
         "这篇文章用于验证文章类描述符会自动获得组织发布者引用，并复用全站分享图与绝对地址；正文与标题只服务于构建产物测试，不包含任何真实内容、外部依赖或用户数据。",
+      public: true,
       robots: INDEX_ROBOTS,
       ogType: "article",
       image: DEFAULT_SHARE_IMAGE,
