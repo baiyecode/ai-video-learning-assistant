@@ -2,9 +2,12 @@
  * The page registry and SEO descriptors: the single source of truth shared by
  * the prerender build and the client router (ADR-0005).
  *
- * This module is deliberately dependency-free and DOM-free so it can be
- * imported from the browser bundle, plain Node (prerender script) and tests.
+ * This module is deliberately DOM-free so it can be imported from the browser
+ * bundle, plain Node (prerender script) and tests. The only import is the pure
+ * billing constants module, which keeps the visible price and structured data
+ * on one source.
  */
+import { MONTHLY_PRICE_USD, PRICE_BENEFIT, PRICE_HEADLINE } from "@/lib/billing";
 
 export const SITE_NAME = "AI 视频学习助手";
 export const DEFAULT_SHARE_IMAGE = "/brand/share-card.png";
@@ -128,6 +131,32 @@ export function webPageNode(context: JsonLdContext): JsonLdNode {
       url: `${origin}/`,
     },
     primaryImageOfPage: { "@type": "ImageObject", url: context.imageUrl },
+  };
+}
+
+/**
+ * The one paid plan as structured data. The price is the same constant the
+ * visible headline renders; no rating or review nodes are invented.
+ */
+export function pricingApplicationNode(context: JsonLdContext): JsonLdNode {
+  const url = context.canonicalUrl;
+  return {
+    "@type": "SoftwareApplication",
+    "@id": `${url}#software`,
+    name: SITE_NAME,
+    applicationCategory: "MultimediaApplication",
+    operatingSystem: "Web",
+    url,
+    description: context.descriptor.description,
+    featureList: [PRICE_BENEFIT, "视频解析与 Download", "Subtitle 导出"],
+    offers: {
+      "@type": "Offer",
+      "@id": `${url}#offer`,
+      price: MONTHLY_PRICE_USD,
+      priceCurrency: "USD",
+      availability: "https://schema.org/InStock",
+      url,
+    },
   };
 }
 
@@ -295,10 +324,9 @@ const HOME_DESCRIPTION =
   "粘贴 B 站或 YouTube 页面地址，解析视频并下载文件、导出 SRT/VTT/TXT 字幕，再基于字幕生成简体中文 AI 摘要与思维导图，并查看个人 Analysis 历史。";
 const FEATURES_DESCRIPTION =
   "AI 视频学习助手功能总览：解析 B 站与 YouTube 页面地址、下载视频、导出字幕、生成 AI 摘要与思维导图，并说明 Analysis 历史、免费 Quota 与 VIP 会员的边界。";
-const PRICING_DESCRIPTION =
-  "AI 视频学习助手 VIP 会员 $4.99/月，解锁 Analysis 不限次；免费账号每日 3 次，订阅由 Stripe 托管支付，可随时取消，实际扣款以结账页为准。";
+const PRICING_DESCRIPTION = `AI 视频学习助手价格页：免费账号每日 3 次 Analysis，VIP 会员 ${PRICE_HEADLINE}（USD）解锁 ${PRICE_BENEFIT}；按月自动续费，可随时在订阅管理中取消，实际扣款以 Stripe 结账页为准。`;
 const TERMS_DESCRIPTION =
-  "AI 视频学习助手使用条款：说明服务范围与使用边界、禁止行为、举报与投诉入口、内容权利、文件留存与链接有效期，以及付费订阅、取消与退款相关约定。";
+  "AI 视频学习助手使用条款：说明合规使用与禁止用途、临时文件与下载链接的保留策略、版权与投诉方式，并提供 /terms#report 举报表单的提交入口。";
 
 const HOME_BREADCRUMB: Breadcrumb = { name: "首页", path: "/" };
 
@@ -331,18 +359,21 @@ export const pageDescriptors: readonly PageDescriptor[] = [
   {
     name: "pricing",
     path: "/pricing",
-    title: "升级 VIP 会员",
+    title: "价格：免费额度与 VIP 会员",
     description: PRICING_DESCRIPTION,
     robots: INDEX_ROBOTS,
     ogType: "website",
     image: DEFAULT_SHARE_IMAGE,
     breadcrumbs: [HOME_BREADCRUMB, { name: "升级会员", path: "/pricing" }],
-    jsonLd: (context) => [webPageNode(context)],
+    jsonLd: (context) => [
+      { ...webPageNode(context), mainEntity: { "@id": `${context.canonicalUrl}#software` } },
+      pricingApplicationNode(context),
+    ],
   },
   {
     name: "terms",
     path: "/terms",
-    title: "使用条款",
+    title: "使用条款与举报",
     description: TERMS_DESCRIPTION,
     robots: INDEX_ROBOTS,
     ogType: "website",
