@@ -4,11 +4,7 @@
  * public page, an allowed private app route, or a real anchor on the target
  * page. Broken links fail the build naming the source page and the target.
  */
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import path from "node:path";
-
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
@@ -16,34 +12,10 @@ import { defaultArticleSources } from "@/site/article-sources";
 import type { ArticleSource } from "@/site/articles";
 import { validateSiteLinks } from "@/site/site-links";
 import { INDEX_ROBOTS, pageDescriptors, type PageDescriptor } from "@/site/seo";
+import { SHELL, useTempDirs } from "@/site/test-support";
 
 const ORIGIN = "https://example.com";
-const SHELL = [
-  "<!doctype html>",
-  '<html lang="zh-CN">',
-  "  <head>",
-  '    <meta charset="UTF-8" />',
-  '    <meta name="description" content="stale shell description" />',
-  "    <title>AI 视频学习助手</title>",
-  "  </head>",
-  '  <body class="bg-slate-50">',
-  '    <div id="app"></div>',
-  '    <script type="module" src="/assets/index-abc123.js"></script>',
-  "  </body>",
-  "</html>",
-].join("\n");
-
-const createdDirs: string[] = [];
-
-afterEach(async () => {
-  await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
-
-async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "seo-links-"));
-  createdDirs.push(dir);
-  return dir;
-}
+const tempDir = useTempDirs("seo-links-");
 
 function fixtureDescriptor(path: string): PageDescriptor {
   return {

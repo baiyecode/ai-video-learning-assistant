@@ -3,44 +3,19 @@
  * pages, rendered from the real Vue views and the real descriptor registry.
  * Tests parse the written HTML with jsdom; nothing touches the network or Vite.
  */
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { JSDOM } from "jsdom";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
 import { pageDescriptors, type PageDescriptor } from "@/site/seo";
+import { SHELL, useTempDirs } from "@/site/test-support";
 
 const ORIGIN = "https://example.com";
-const SHELL = [
-  "<!doctype html>",
-  '<html lang="zh-CN">',
-  "  <head>",
-  '    <meta charset="UTF-8" />',
-  '    <meta name="description" content="stale shell description" />',
-  "    <title>AI 视频学习助手</title>",
-  "  </head>",
-  '  <body class="bg-slate-50">',
-  '    <div id="app"></div>',
-  '    <script type="module" src="/assets/index-abc123.js"></script>',
-  "  </body>",
-  "</html>",
-].join("\n");
-
-const createdDirs: string[] = [];
-
-async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "seo-build-"));
-  createdDirs.push(dir);
-  return dir;
-}
-
-afterEach(async () => {
-  await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
+const tempDir = useTempDirs("seo-build-");
 
 function collectTypes(value: unknown, types: string[] = []): string[] {
   if (Array.isArray(value)) {

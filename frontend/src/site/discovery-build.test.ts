@@ -3,11 +3,10 @@
  * sitemap.xml, robots.txt and llms.txt built from the same descriptors and
  * Article collection the public pages use. No network, no Vite build.
  */
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { buildSite } from "@/site/build-site";
 import { buildRobotsTxt } from "@/site/discovery";
@@ -15,22 +14,9 @@ import { renderRoute } from "@/site/entry-server";
 import { defaultArticleSources } from "@/site/article-sources";
 import type { ArticleSource } from "@/site/articles";
 import { pageDescriptors } from "@/site/seo";
+import { SHELL, useTempDirs } from "@/site/test-support";
 
 const ORIGIN = "https://example.com";
-const SHELL = [
-  "<!doctype html>",
-  '<html lang="zh-CN">',
-  "  <head>",
-  '    <meta charset="UTF-8" />',
-  '    <meta name="description" content="stale shell description" />',
-  "    <title>AI 视频学习助手</title>",
-  "  </head>",
-  '  <body class="bg-slate-50">',
-  '    <div id="app"></div>',
-  '    <script type="module" src="/assets/index-abc123.js"></script>',
-  "  </body>",
-  "</html>",
-].join("\n");
 
 const PUBLIC_URLS = [
   `${ORIGIN}/`,
@@ -53,17 +39,7 @@ const ARTICLE_LASTMOD: Record<string, string> = {
   "/articles/douyin-video-parsing": "2026-10-22",
 };
 
-const createdDirs: string[] = [];
-
-async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "seo-discovery-"));
-  createdDirs.push(dir);
-  return dir;
-}
-
-afterEach(async () => {
-  await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
+const tempDir = useTempDirs("seo-discovery-");
 
 async function build(outDir: string, overrides?: Partial<Parameters<typeof buildSite>[0]>) {
   return buildSite({

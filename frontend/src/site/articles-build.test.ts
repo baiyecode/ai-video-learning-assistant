@@ -3,33 +3,19 @@
  * out. Asserts the list/detail pages, the head contract, JSON-LD dates, the TOC
  * anchors and that dangerous Markdown never reaches the product.
  */
-import { mkdtemp, readFile, rm, stat } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 
 import { JSDOM } from "jsdom";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
 import type { ArticleSource } from "@/site/articles";
 import { pageDescriptors } from "@/site/seo";
+import { SHELL, useTempDirs } from "@/site/test-support";
 
 const ORIGIN = "https://example.com";
-const SHELL = [
-  "<!doctype html>",
-  '<html lang="zh-CN">',
-  "  <head>",
-  '    <meta charset="UTF-8" />',
-  '    <meta name="description" content="stale shell description" />',
-  "    <title>AI 视频学习助手</title>",
-  "  </head>",
-  '  <body class="bg-slate-50">',
-  '    <div id="app"></div>',
-  '    <script type="module" src="/assets/index-abc123.js"></script>',
-  "  </body>",
-  "</html>",
-].join("\n");
 
 const BODY_BASE = "这是一段用于构建产物测试的文章正文，包含足够多的字符以便通过长度校验。".repeat(25);
 
@@ -112,17 +98,7 @@ const SOURCES: ArticleSource[] = [
   { fileName: "draft-post.md", source: draftSource },
 ];
 
-const createdDirs: string[] = [];
-
-async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "article-build-"));
-  createdDirs.push(dir);
-  return dir;
-}
-
-afterEach(async () => {
-  await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
+const tempDir = useTempDirs("article-build-");
 
 async function build(outDir: string, articleSources: readonly ArticleSource[] = SOURCES) {
   return buildSite({

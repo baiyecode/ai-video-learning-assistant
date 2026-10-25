@@ -3,47 +3,21 @@
  * plus a non-indexable SPA shell (``app.html``) and a real 404 document
  * (``404.html``). Parsed with jsdom; no network, no Vite build.
  */
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { JSDOM } from "jsdom";
-import { afterEach, describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest";
 
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
 import { applyHead } from "@/site/head";
 import { pageDescriptors, type PageDescriptor } from "@/site/seo";
+import { SHELL, useTempDirs } from "@/site/test-support";
 
 const ORIGIN = "https://example.com";
 const NOINDEX = "noindex,nofollow";
-const SHELL = [
-  "<!doctype html>",
-  '<html lang="zh-CN">',
-  "  <head>",
-  '    <meta charset="UTF-8" />',
-  '    <meta name="description" content="stale shell description" />',
-  "    <title>AI 视频学习助手</title>",
-  '    <link rel="stylesheet" href="/assets/index-abc123.css" />',
-  "  </head>",
-  '  <body class="bg-slate-50">',
-  '    <div id="app"></div>',
-  '    <script type="module" src="/assets/index-abc123.js"></script>',
-  "  </body>",
-  "</html>",
-].join("\n");
-
-const createdDirs: string[] = [];
-
-async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(path.join(tmpdir(), "seo-private-"));
-  createdDirs.push(dir);
-  return dir;
-}
-
-afterEach(async () => {
-  await Promise.all(createdDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
-});
+const tempDir = useTempDirs("seo-private-");
 
 async function build(outDir: string): Promise<void> {
   await buildSite({

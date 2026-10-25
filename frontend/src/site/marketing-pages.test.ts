@@ -3,8 +3,7 @@
  * directory, then assert the real HTML for `/`, `/guide` and `/faq` plus the
  * navigation and cross-page consistency rules. No network, no Vite.
  */
-import { mkdtemp, readFile, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 
 import { JSDOM } from "jsdom";
@@ -14,22 +13,9 @@ import { defaultArticleCollection } from "@/site/article-sources";
 import { buildSite, type BuildSiteResult } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
 import { pageDescriptors } from "@/site/seo";
+import { createTempDir, removeTempDirs, SHELL } from "@/site/test-support";
 
 const ORIGIN = "https://example.com";
-const SHELL = [
-  "<!doctype html>",
-  '<html lang="zh-CN">',
-  "  <head>",
-  '    <meta charset="UTF-8" />',
-  '    <meta name="description" content="stale shell description" />',
-  "    <title>AI 视频学习助手</title>",
-  "  </head>",
-  '  <body class="bg-slate-50">',
-  '    <div id="app"></div>',
-  '    <script type="module" src="/assets/index-abc123.js"></script>',
-  "  </body>",
-  "</html>",
-].join("\n");
 
 let outDir = "";
 let build: BuildSiteResult;
@@ -84,7 +70,7 @@ function textOf(node: Element | null): string {
 }
 
 beforeAll(async () => {
-  outDir = await mkdtemp(path.join(tmpdir(), "seo-marketing-"));
+  outDir = await createTempDir("seo-marketing-");
   build = await buildSite({
     origin: ORIGIN,
     descriptors: pageDescriptors,
@@ -100,7 +86,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  if (outDir) await rm(outDir, { recursive: true, force: true });
+  if (outDir) await removeTempDirs([outDir]);
 });
 
 function page(file: string): Document {
