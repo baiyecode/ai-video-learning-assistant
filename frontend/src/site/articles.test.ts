@@ -244,7 +244,7 @@ describe("article price placeholder interpolation", () => {
     expectFailure(
       "stray-brace.md",
       validSource({}, `${BODY}\n\n会员每月 4.99/月}} 即可解锁。`),
-      /unclosed placeholder "\}\}"/,
+      /stray placeholder closer "\}\}"/,
     );
     expectFailure(
       "doubled-brace.md",
@@ -292,6 +292,14 @@ describe("article literal-claim guard", () => {
       "literal-price.md",
       validSource({}, `${BODY}\n\n限时优惠，会员只要 $9.99/月。`),
       /literal monthly price "\$9\.99\/月"/,
+    );
+  });
+
+  it("catches a thousands-separated hand-written monthly price", () => {
+    expectFailure(
+      "literal-price-thousands.md",
+      validSource({}, `${BODY}\n\n企业版只要 $1,000.00/月。`),
+      /literal monthly price "\$1,000\.00\/月"/,
     );
   });
 

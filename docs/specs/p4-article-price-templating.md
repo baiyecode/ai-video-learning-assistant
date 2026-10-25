@@ -1,6 +1,6 @@
 ## Problem Statement
 
-营销文章（`frontend/content/articles/*.md`，4 篇）的正文和 frontmatter `description` 里硬编码了「$4.99/月」和「每日 3 次」共 9 处。部署方通过 `APP_SUBSCRIPTION_MONTHLY_USD` / `APP_ANALYSIS_DAILY_QUOTA` 改价或改免费配额时，这些数字不会跟着变：
+营销文章（`frontend/content/articles/*.md`，4 篇）的正文和 frontmatter `description` 里硬编码了「$4.99/月」和「每日 3 次」，分布在 9 个源行、共 14 处字面出现。部署方通过 `APP_SUBSCRIPTION_MONTHLY_USD` / `APP_ANALYSIS_DAILY_QUOTA` 改价或改免费配额时，这些数字不会跟着变：
 
 - 用户看到的价格页/结账页/个人中心是新价，文章却还在承诺旧价——同一站点两套说法，直接侵蚀转化信任；
 - `description` 进 SEO meta 与 llms.txt 等 GEO 产物，AI 答案引擎抓到的是会说谎的摘要；

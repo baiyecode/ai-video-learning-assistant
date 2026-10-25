@@ -87,7 +87,8 @@ const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
 /**
  * Anything that still looks like a broken placeholder once the known tokens are
  * resolved: an unclosed ``{{`` (reported up to the first space or brace, so a build
- * log stays readable) or a stray ``}}``.
+ * log stays readable) or a stray ``}}`` closer with no opener, which gets its own
+ * message because the two mistakes need different fixes.
  */
 const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*|\}\}/;
 
@@ -95,19 +96,23 @@ const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*|\}\}/;
 const KNOWN_PLACEHOLDER_TOKEN_PATTERN = /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/g;
 
 /**
- * A hand-written monthly-price claim in the source (``$9.99/月`` or any
- * ``$数字.数字/月`` shape). Interpolated placeholders are masked out before this
- * runs, so only un-templated literals are caught.
+ * A hand-written monthly-price claim in the source (``$9.99/月``, or any
+ * ``$数字.数字/月`` shape, including thousands separators like ``$1,000.00/月``).
+ * Interpolated placeholders are masked out before this runs, so only un-templated
+ * literals are caught.
+ * Exported so the seed-content test asserts the real content against this exact
+ * pattern instead of a hand-copied one.
  */
-const LITERAL_PRICE_PATTERN = /\$[\d.]+\/月/u;
+export const LITERAL_PRICE_PATTERN = /\$[\d.,]+\/月/u;
 
 /**
  * A hand-written daily-quota claim in the source: a daily prefix (``每日``,
  * ``每天`` or ``自然日``) followed by a bare number and ``次``, any spacing.
  * The prefix is part of the pattern on purpose — ``消耗 1 次`` or ``1 次 Quota``
  * describe a single consumption unit, not the daily allowance, and stay legal.
+ * Exported for the same reason as ``LITERAL_PRICE_PATTERN``.
  */
-const LITERAL_QUOTA_PATTERN = /(?:每日|每天|自然日)\s*\d+\s*次/u;
+export const LITERAL_QUOTA_PATTERN = /(?:每日|每天|自然日)\s*\d+\s*次/u;
 
 /**
  * The strict literal-claim guard (issue #45): refuse a field whose SOURCE —
@@ -127,7 +132,7 @@ function assertNoUntemplatedClaims(fileName: string, raw: string): void {
   if (literalPrice) {
     throw new ArticleContentError(
       fileName,
-      `literal monthly price "${literalPrice}": money claims must use the placeholders {{MONTHLY_PRICE_USD}} or {{DAILY_FREE_QUOTA}}, not hand-written numbers`,
+      `literal monthly price "${literalPrice}": money claims must use the placeholder {{MONTHLY_PRICE_USD}}, not hand-written numbers`,
     );
   }
 
@@ -165,7 +170,9 @@ function interpolatePlaceholders(fileName: string, text: string): string {
   if (residual) {
     throw new ArticleContentError(
       fileName,
-      `unclosed placeholder "${residual}": expected the form {{MONTHLY_PRICE_USD}} or {{DAILY_FREE_QUOTA}}`,
+      residual.startsWith("{{")
+        ? `unclosed placeholder "${residual}": expected the form {{MONTHLY_PRICE_USD}} or {{DAILY_FREE_QUOTA}}`
+        : `stray placeholder closer "${residual}": a lone }} has no opening {{; the only allowed placeholders are {{MONTHLY_PRICE_USD}} and {{DAILY_FREE_QUOTA}}`,
     );
   }
 

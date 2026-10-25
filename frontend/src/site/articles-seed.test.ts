@@ -11,7 +11,12 @@ import path from "node:path";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { extractInternalLinks, parseArticle } from "@/site/articles";
+import {
+  LITERAL_PRICE_PATTERN,
+  LITERAL_QUOTA_PATTERN,
+  extractInternalLinks,
+  parseArticle,
+} from "@/site/articles";
 import { defaultArticleCollection, defaultArticleSources } from "@/site/article-sources";
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
@@ -164,10 +169,8 @@ describe("seed Article sources pass the literal-claim guard", () => {
       expect(source, `${fileName} uses at least one placeholder`).toMatch(
         /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/,
       );
-      expect(source, `${fileName} has no literal monthly price`).not.toMatch(/\$[\d.]+\/月/);
-      expect(source, `${fileName} has no literal daily quota`).not.toMatch(
-        /(?:每日|每天|自然日)\s*\d+\s*次/,
-      );
+      expect(source, `${fileName} has no literal monthly price`).not.toMatch(LITERAL_PRICE_PATTERN);
+      expect(source, `${fileName} has no literal daily quota`).not.toMatch(LITERAL_QUOTA_PATTERN);
     }
   });
 
