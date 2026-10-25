@@ -11,7 +11,7 @@ export interface MembershipDto {
   period_end: string | null;
   /** Provider's scheduled cancellation: VIP is kept until ``period_end`` (story 8). */
   cancel_at_period_end: boolean;
-  is_vip: boolean;
+  vip_active: boolean;
 }
 
 export const FREE_STATUS = "free";
@@ -97,14 +97,14 @@ export function renewalNotice(membership: MembershipDto | null): string | null {
 
 /**
  * The "到期预告" shown once access is winding down (stories 8/9):
- * only while the Account truly still holds VIP — ``is_vip`` with the status in
+ * only while the Account truly still holds VIP — ``vip_active`` with the status in
  * ``active``/``trial_ending`` and ``period_end`` ahead of now. A scheduled
  * cancellation (``cancel_at_period_end``) promises the retention end date; a
  * trial promises its loss date. Past Due sells the portal fix and a real
  * cancellation is already non-VIP: neither gets a retention preview.
  */
 export function expirationNotice(membership: MembershipDto | null): string | null {
-  if (!membership || !membership.is_vip) return null;
+  if (!membership || !membership.vip_active) return null;
   const withinPaidPeriod =
     membership.status === ACTIVE_STATUS || membership.status === TRIAL_ENDING_STATUS;
   if (!withinPaidPeriod) return null;
@@ -120,8 +120,8 @@ export function expirationNotice(membership: MembershipDto | null): string | nul
   return null;
 }
 
-export function isVipMembership(membership: MembershipDto | null): boolean {
-  return membership?.is_vip === true;
+export function hasVipMembership(membership: MembershipDto | null): boolean {
+  return membership?.vip_active === true;
 }
 
 /** Short Asia/Shanghai calendar day for membership notices, e.g. "2月14日". */

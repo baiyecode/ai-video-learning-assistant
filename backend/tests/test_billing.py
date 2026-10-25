@@ -102,7 +102,7 @@ async def test_membership_is_free_before_any_subscription(client: AsyncClient) -
         "status": "free",
         "period_end": None,
         "cancel_at_period_end": False,
-        "is_vip": False,
+        "vip_active": False,
     }
 
 
@@ -117,7 +117,7 @@ async def test_membership_reports_a_recorded_subscription(client: AsyncClient, a
         "status": "active",
         "period_end": "2026-02-14T08:00:00+00:00",
         "cancel_at_period_end": False,
-        "is_vip": True,
+        "vip_active": True,
     }
 
 

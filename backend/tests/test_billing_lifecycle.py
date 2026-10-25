@@ -104,7 +104,7 @@ async def test_lifecycle_events_advance_the_membership_status(
         "status": expected_status,
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
-        "is_vip": False,
+        "vip_active": False,
     }
 
 
@@ -132,7 +132,7 @@ async def test_payment_succeeded_restores_an_active_membership(client: AsyncClie
         "status": "active",
         "period_end": "2026-03-14T10:00:00+00:00",
         "cancel_at_period_end": False,
-        "is_vip": True,
+        "vip_active": True,
     }
 
 
@@ -163,7 +163,7 @@ async def test_subscription_updated_backfills_the_period_end_the_checkout_omitte
         "status": "active",
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
-        "is_vip": True,
+        "vip_active": True,
     }
 
 
@@ -187,7 +187,7 @@ async def test_subscription_updated_trialing_maps_to_trial_ending_and_keeps_vip(
 
     membership = await _membership(client, auth)
     assert membership["status"] == "trial_ending"
-    assert membership["is_vip"] is True
+    assert membership["vip_active"] is True
 
 
 async def test_subscription_updated_with_an_unrecognized_status_never_moves_state(
@@ -268,7 +268,7 @@ async def test_late_lifecycle_event_older_than_the_newest_is_audit_only(
 
     membership = await _membership(client, auth)
     assert membership["status"] == "active"
-    assert membership["is_vip"] is True
+    assert membership["vip_active"] is True
     rows = await _audit_rows(app, "evt_late_failure")
     assert [row.applied for row in rows] == [False]
 
@@ -398,7 +398,7 @@ async def test_subscription_updated_records_cancel_at_period_end_for_the_vip_pre
         "status": "active",
         "period_end": PERIOD_END,
         "cancel_at_period_end": True,
-        "is_vip": True,
+        "vip_active": True,
     }
 
     # The real deletion ends the membership regardless of the outstanding flag.
@@ -411,7 +411,7 @@ async def test_subscription_updated_records_cancel_at_period_end_for_the_vip_pre
     assert (await _post_event(client, deleted)).status_code == 200
     membership = await _membership(client, auth)
     assert membership["status"] == "canceled"
-    assert membership["is_vip"] is False
+    assert membership["vip_active"] is False
 
 
 async def test_active_subscription_past_period_end_presents_as_canceled(
@@ -435,7 +435,7 @@ async def test_active_subscription_past_period_end_presents_as_canceled(
 
     membership = await _membership(client, auth)
     assert membership["status"] == "canceled"
-    assert membership["is_vip"] is False
+    assert membership["vip_active"] is False
     assert membership["period_end"] == PERIOD_END
 
 
@@ -470,7 +470,7 @@ async def test_expired_membership_is_downgraded_on_the_next_analysis_read(
 
     membership = await _membership(client, headers)
     assert membership["status"] == "canceled"
-    assert membership["is_vip"] is False
+    assert membership["vip_active"] is False
 
     first = await _create_analysis(
         client, headers, await _resolve_video(client, adapters, headers, "lcexp100000")
@@ -603,7 +603,7 @@ async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
         "status": "canceled",
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
-        "is_vip": False,
+        "vip_active": False,
     }
 
     fifth = await _create_analysis(

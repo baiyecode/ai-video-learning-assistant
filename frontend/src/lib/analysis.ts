@@ -61,8 +61,8 @@ export function isUnlimitedQuota(quota: QuotaDto): boolean {
  * left and no VIP lifting it. VIP is read from `/me/membership` — the single
  * subscription source — never guessed from the sentinel.
  */
-export function isQuotaDepleted(quota: QuotaDto, isVip: boolean): boolean {
-  return !isUnlimitedQuota(quota) && quota.remaining <= 0 && !isVip;
+export function isQuotaDepleted(quota: QuotaDto, vipActive: boolean): boolean {
+  return !isUnlimitedQuota(quota) && quota.remaining <= 0 && !vipActive;
 }
 
 export const MINDMAP_MARKER = "## 思维导图";

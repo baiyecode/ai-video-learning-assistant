@@ -143,12 +143,12 @@ export async function injectPaymentSuccess(request: APIRequestContext, accountId
 }
 
 /** Membership as the backend reports it - the truth every P2-08 screen renders from. */
-export async function readMembership(request: APIRequestContext, email: string): Promise<{ status: string; is_vip: boolean }> {
+export async function readMembership(request: APIRequestContext, email: string): Promise<{ status: string; vip_active: boolean }> {
   const session = await request.post("/api/auth/login", { data: { email, password: PASSWORD } });
   const { access_token: accessToken } = (await session.json()) as { access_token: string };
   const membership = await request.get("/api/me/membership", {
     headers: { Authorization: `Bearer ${accessToken}` },
   });
   expect(membership.status(), await membership.text()).toBe(200);
-  return (await membership.json()) as { status: string; is_vip: boolean };
+  return (await membership.json()) as { status: string; vip_active: boolean };
 }

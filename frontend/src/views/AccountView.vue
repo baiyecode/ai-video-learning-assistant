@@ -60,7 +60,7 @@ async function openPortal(): Promise<void> {
         <h2 class="text-sm font-semibold text-slate-900">订阅状态</h2>
         <span
           class="rounded-full px-2 py-0.5 text-xs font-medium"
-          :class="billing.isVip ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
+          :class="billing.vipActive ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-600'"
         >
           {{ membershipStatusLabel(billing.membership) }}
         </span>

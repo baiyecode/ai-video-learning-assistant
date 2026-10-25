@@ -76,7 +76,7 @@ async def test_checkout_completed_event_activates_membership(client: AsyncClient
         "status": "active",
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
-        "is_vip": True,
+        "vip_active": True,
     }
 
 
@@ -351,7 +351,7 @@ async def test_newer_checkout_event_reactivates_and_updates_the_existing_subscri
         "status": "active",
         "period_end": PERIOD_END,
         "cancel_at_period_end": False,
-        "is_vip": True,
+        "vip_active": True,
     }
 
     async with app.state.sessionmaker() as session:

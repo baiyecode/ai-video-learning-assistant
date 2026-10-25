@@ -302,6 +302,16 @@ describe("llms.txt", () => {
     expect(llms).not.toContain(`${ORIGIN}/login`);
     expect(llms).not.toContain(`${ORIGIN}/app.html`);
   });
+
+  it("names the address a user pastes 页面地址, the README term", async () => {
+    const outDir = await tempDir();
+
+    await build(outDir);
+
+    const llms = await readFile(path.join(outDir, "llms.txt"), "utf8");
+    expect(llms).toContain("粘贴 B 站或 YouTube 页面地址");
+    expect(llms).not.toContain("视频地址");
+  });
 });
 
 describe("origin handling", () => {

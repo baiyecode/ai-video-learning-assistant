@@ -26,15 +26,16 @@ class MembershipOut(BaseModel):
     webhook state machine and gives the UI what it needs for the Past Due warning
     and the "VIP ends on ..." notice. ``cancel_at_period_end`` marks a *scheduled*
     cancellation: VIP is kept until ``period_end`` and the UI shows the loss
-    preview instead of treating the Account as canceled. ``is_vip`` is the
-    backend-derived Membership flag (status + period, never stored). The managed
-    portal link is not a GET field: it is minted per call by ``POST /billing/portal``.
+    preview instead of treating the Account as canceled. ``vip_active`` is the
+    backend-derived Membership flag (status + period, never stored; GLOSSARY _Avoid_
+    puts the old ``is_vip`` name off-limits). The managed portal link is not a GET
+    field: it is minted per call by ``POST /billing/portal``.
     """
 
     status: str
     period_end: str | None = None
     cancel_at_period_end: bool = False
-    is_vip: bool = False
+    vip_active: bool = False
 
 
 class WebhookOut(BaseModel):

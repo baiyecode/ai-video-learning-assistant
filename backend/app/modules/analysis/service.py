@@ -91,7 +91,7 @@ def _effective_daily_limit(state: MembershipState, settings: Settings) -> int:
 
     The atomic reservation is kept for VIPs so failure rollback stays untouched.
     """
-    return quota.UNLIMITED_DAILY_LIMIT if state.is_vip else settings.analysis_daily_quota
+    return quota.UNLIMITED_DAILY_LIMIT if state.vip_active else settings.analysis_daily_quota
 
 
 async def _create_once(
