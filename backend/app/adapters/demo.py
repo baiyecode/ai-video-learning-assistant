@@ -73,9 +73,9 @@ class DemoVideoSource:
     async def fetch_subtitle(self, video: ResolvedVideo, track: SubtitleTrack) -> SubtitlePayload:
         # The real adapter fetches captions over the network; that round-trip is the
         # window in which two concurrent resolves of one new Video both read "no
-        # Subtitle yet". Yielding here keeps the browser-level concurrency regression
-        # (frontend/e2e/concurrent-resolve.spec.ts) able to reproduce the historical
-        # duplicate-insert 500 instead of passing by scheduling luck.
+        # Subtitle yet". Yielding here keeps the browser-level concurrent-resolve
+        # regression able to reproduce the historical duplicate-insert 500 instead of
+        # passing by scheduling luck; that spec asserts the two requests overlap.
         await asyncio.sleep(_SUBTITLE_FETCH_DELAY_SECONDS)
         return SubtitlePayload(
             track=track,

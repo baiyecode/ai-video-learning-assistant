@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import messages
+from app import db, messages
 from app.errors import AppError, ErrorCode
 from app.ports import ResolvedVideo, SubtitleTrack, VideoSource
 
@@ -128,7 +128,8 @@ async def sync_selection(
 
     Concurrent resolves of the same new Video can both observe "no Subtitle yet" and
     both insert ``subtitles.video_id``. The loser of that unique constraint adopts the
-    winner's row instead of failing, mirroring ``_upsert_video``.
+    winner's row instead of failing; only that identity is recoverable, per
+    :func:`app.db.is_unique_conflict`.
     """
     # Capture the identity up front: a rollback expires ``video``, and touching an
     # expired instance would trigger lazy IO outside the async greenlet.
@@ -169,12 +170,16 @@ async def sync_selection(
         return await _find(session, video_id) is not None
 
     if not cues and not text:
+        # ``existing`` is the pre-fetch snapshot; a concurrent resolve may have committed
+        # the winning Subtitle since. Delete (and report) from the persisted truth, so the
+        # empty side can never remove the row the other request just won with.
+        persisted = await _find(session, video_id)
+        if persisted is not None:
+            return True
         if existing is not None:
             await session.delete(existing)
             await session.commit()
-        # Parent #51: report the row this request leaves persisted, not the pre-fetch
-        # observation - a concurrent resolve may have committed the winning Subtitle.
-        return await _find(session, video_id) is not None
+        return False
 
     row = existing if existing is not None else Subtitle(video_id=video_id)
     _apply_track(row, track, source_type, cues, text)
@@ -185,26 +190,17 @@ async def sync_selection(
     except IntegrityError as exc:
         # A concurrent resolve inserted the one Subtitle for this Video first.
         await session.rollback()
-        if not _is_subtitle_identity_conflict(exc):
+        if not db.is_unique_conflict(exc, "subtitles.video_id"):
             raise
         winner = await _find(session, video_id)
         if winner is None:
             raise
-        _apply_track(winner, track, source_type, cues, text)
-        await session.commit()
+        # The row already carries the winner's content: adopting means leaving it alone.
+        # Parent #51: both sides resolve the same Video, so this request still reports the
+        # Subtitle as available; only its losing write is dropped.
         # The rollback expired ``video``; reload it so the response reflects the DB.
         await session.refresh(video)
     return True
-
-
-def _is_subtitle_identity_conflict(exc: IntegrityError) -> bool:
-    """Whether ``exc`` is the expected concurrent insert on ``subtitles.video_id``."""
-    # SQLite is the only supported engine (ADR-0001), so require its UNIQUE errorname;
-    # the column check stays because it names the one identity this recovery may adopt.
-    if getattr(exc.orig, "sqlite_errorname", "") != "SQLITE_CONSTRAINT_UNIQUE":
-        return False
-    message = str(getattr(exc, "orig", exc)).lower()
-    return "subtitles.video_id" in message
 
 
 def _apply_track(

@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app import messages
+from app import db, messages
 from app.config import Settings
 from app.errors import AppError, ErrorCode
 from app.ports import Clock, ResolvedVideo, VideoSource, VideoUnavailableError
@@ -158,9 +158,12 @@ async def _upsert_video(
     try:
         await session.commit()
         return video
-    except IntegrityError:
-        # A concurrent resolve inserted the same identity first: adopt that row.
+    except IntegrityError as exc:
+        # Only the concurrent insert of this Video identity is recoverable; any other
+        # constraint violation would be adopted as a healthy-looking row.
         await session.rollback()
+        if not db.is_unique_conflict(exc, "videos.platform", "videos.platform_video_id"):
+            raise
         existing = await _find_video(session, platform, platform_video_id)
         if existing is None:
             raise

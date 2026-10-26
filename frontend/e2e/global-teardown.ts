@@ -2,20 +2,22 @@
  * Removes the run-scoped directory that ``playwright.config.ts`` created for this
  * e2e run (see ``E2E_RUN_ROOT`` there).
  *
- * The guard is deliberately strict: only a directory that
- *   - is a direct child of the OS temp directory, and
- *   - carries the run-scope prefix produced by ``fs.mkdtempSync``,
- * is deleted. That check means the hook can only ever target a Playwright run
- * directory under the OS temp directory - never a repository, development or
- * production path. A hand-provided ``E2E_RUN_ROOT`` with a different shape is
- * left untouched.
+ * Two conditions must both hold before anything is deleted:
+ *   - the path is a direct child of the OS temp directory and carries the run-scope
+ *     prefix produced by ``fs.mkdtempSync``, and
+ *   - the directory contains the ownership marker ``createRunScope`` writes into the
+ *     directory *it* created.
+ * The second condition is what makes a hand-exported ``E2E_RUN_ROOT`` safe: a path
+ * this run merely inherited was not created by it, so it keeps its contents. That
+ * means the hook can only ever target a directory this run made under the OS temp
+ * directory - never a repository, development or production path.
  */
 
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import { RUN_ROOT_PREFIX } from "./run-scope";
+import { RUN_ROOT_PREFIX, hasRunRootMarker } from "./run-scope";
 
 function removeRunRoot(runRoot: string): void {
   const options = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 } as const;
@@ -47,11 +49,11 @@ export default function globalTeardown(): void {
 
   const resolvedRunRoot = path.resolve(runRoot);
   const resolvedTempDir = path.resolve(os.tmpdir());
-  const isOwnRunDir =
+  const isRunScaffold =
     resolvedRunRoot !== resolvedTempDir &&
     path.dirname(resolvedRunRoot) === resolvedTempDir &&
     path.basename(resolvedRunRoot).startsWith(RUN_ROOT_PREFIX);
-  if (!isOwnRunDir) {
+  if (!isRunScaffold || !hasRunRootMarker(resolvedRunRoot)) {
     return;
   }
 

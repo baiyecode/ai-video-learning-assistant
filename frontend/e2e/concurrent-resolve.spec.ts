@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Response } from "@playwright/test";
+import { expect, test, type Page, type Request, type Response } from "@playwright/test";
 
 import { DEMO_SUBTITLE_LINE, DEMO_YOUTUBE_TITLE, demoYouTubeUrl } from "./goldenPath";
 
@@ -24,9 +24,12 @@ function runUniqueVideoId(): string {
 }
 
 function isResolveResponse(response: Response): boolean {
+  return isResolveRequest(response.request());
+}
+
+function isResolveRequest(request: Request): boolean {
   return (
-    response.request().method() === "POST" &&
-    new URL(response.url()).pathname === "/api/videos/resolve"
+    request.method() === "POST" && new URL(request.url()).pathname === "/api/videos/resolve"
   );
 }
 
@@ -34,6 +37,9 @@ async function openHome(page: Page, url: string): Promise<void> {
   await page.goto("/");
   await page.getByLabel("页面地址").fill(url);
 }
+
+/** One browser context's in-flight window for its resolve request, in test-process time. */
+type ResolveSpan = { start: number; end: number };
 
 test.describe("concurrent resolve", () => {
   test.skip(!enabled, "Set PLAYWRIGHT_E2E=1 to start both servers with fake adapters");
@@ -51,6 +57,16 @@ test.describe("concurrent resolve", () => {
       // Both pages are ready before either request starts: the race is the point.
       await Promise.all([openHome(firstPage, videoUrl), openHome(secondPage, videoUrl)]);
 
+      const spans = [firstPage, secondPage].map((page) => {
+        const span: ResolveSpan = { start: Number.NEGATIVE_INFINITY, end: Number.NEGATIVE_INFINITY };
+        page.on("request", (request) => {
+          if (isResolveRequest(request)) span.start = Date.now();
+        });
+        page.on("response", (response) => {
+          if (isResolveResponse(response)) span.end = Date.now();
+        });
+        return span;
+      });
       const firstResponse = firstPage.waitForResponse(isResolveResponse);
       const secondResponse = secondPage.waitForResponse(isResolveResponse);
       await Promise.all([
@@ -59,6 +75,22 @@ test.describe("concurrent resolve", () => {
       ]);
 
       const [firstResolve, secondResolve] = await Promise.all([firstResponse, secondResponse]);
+      spans.sort((left, right) => left.start - right.start);
+
+      // The regression is only proven if the two requests were genuinely in flight
+      // together: a backend that serialised them would answer 200/200 even with the #51
+      // bug present. Each span's own start and end come from that context's network
+      // events, so a serialised pair fails here instead of passing without having
+      // exercised the race - the demo adapter holds each caption fetch long enough that
+      // overlap is the norm.
+      for (const span of spans) {
+        expect(span.start, `a resolve was never observed: ${JSON.stringify(spans)}`).toBeGreaterThan(0);
+        expect(span.end, `a resolve was never completed: ${JSON.stringify(spans)}`).toBeGreaterThan(0);
+      }
+      expect(
+        spans[0].end,
+        `the two resolves did not overlap: ${JSON.stringify(spans)}`,
+      ).toBeGreaterThan(spans[1].start);
 
       // Both sides must succeed, and both must name the one Video row they raced on.
       expect(firstResolve.status(), await firstResolve.text()).toBe(200);

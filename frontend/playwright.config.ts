@@ -7,7 +7,7 @@ import {
   DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
   DEFAULT_MONTHLY_PRICE_USD,
 } from "./src/lib/billing-defaults";
-import { RUN_ROOT_PREFIX } from "./e2e/run-scope";
+import { RUN_ROOT_MARKER, RUN_ROOT_PREFIX } from "./e2e/run-scope";
 
 /**
  * Golden paths only (see e2e/golden-path*.spec.ts). Both servers start
@@ -24,6 +24,7 @@ const inheritedEnv = Object.fromEntries(
 type RunScope = {
   databaseUrl: string;
   dataDir: string;
+  mediaRoot: string;
 };
 
 /** Absolute SQLite URL with forward slashes, e.g. `sqlite+aiosqlite:///C:/tmp/x/e2e.db`. */
@@ -43,34 +44,43 @@ function sqliteUrl(filePath: string): string {
  *
  * `E2E_RUN_ROOT` is the hand-off to Playwright worker processes, which inherit the
  * main process environment and re-evaluate this config: only the evaluation that
- * creates the directory logs it; workers reuse the existing path. If the variable is
- * already set (e.g. by a debugging shell), that directory is used as-is.
+ * creates the directory logs it and writes the ownership marker; workers reuse the
+ * existing path. If the variable is already set (e.g. by a debugging shell), that
+ * directory is used as-is and, having been created by someone else, carries no
+ * marker - so teardown leaves it, and everything inside it, alone.
  */
 function createRunScope(): RunScope {
   const existingRoot = process.env.E2E_RUN_ROOT;
+  const created = !existingRoot;
   const root = existingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), RUN_ROOT_PREFIX));
   process.env.E2E_RUN_ROOT = root;
+  if (created) {
+    fs.writeFileSync(path.join(root, RUN_ROOT_MARKER), "");
+  }
 
   const dataDir = path.join(root, "data");
   fs.mkdirSync(dataDir, { recursive: true });
   const databaseUrl = sqliteUrl(path.join(root, "e2e.db"));
 
-  if (!existingRoot) {
+  if (created) {
     console.log(`[e2e] fresh run-scoped database: ${databaseUrl}`);
   }
-  return { databaseUrl, dataDir };
+  return { databaseUrl, dataDir, mediaRoot: path.join(dataDir, "media") };
 }
 
 const runScope = enabled ? createRunScope() : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
+  // Tests inside one spec file stay in declaration order: the golden paths walk a
+  // single browser session through register -> resolve -> analyse -> upgrade, so a
+  // later step depends on the row the previous step wrote. Spec *files* do run in
+  // parallel (Playwright's default worker count) and share one fake-adapter backend
+  // and one run-scoped SQLite file. The shared rows are the canned demo Videos
+  // (`demoP1Video`, `demoDouyinVideo`): concurrent resolves of one Video are idempotent
+  // by design (ticket #54) - e2e/concurrent-resolve.spec.ts covers exactly that. New
+  // tests that need their own Video pass a run-unique platform video id.
   fullyParallel: false,
-  // Spec files run in parallel (Playwright's default worker count). They share one
-  // fake-adapter backend and one run-scoped SQLite file; that is safe because resolving
-  // a Video is idempotent and every test creates run-unique data (Accounts, platform
-  // video ids). e2e/concurrent-resolve.spec.ts covers concurrent resolve explicitly.
-  // `fullyParallel: false` still keeps the tests inside one file in declaration order.
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,
@@ -81,8 +91,9 @@ export default defineConfig({
     locale: "zh-CN",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  // Deletes only the run-scoped temp directory; see the comment on `createRunScope`.
-  globalTeardown: "./e2e/global-teardown.ts",
+  // Registered only for a real run, matching where `createRunScope` is called: the
+  // hook deletes the run-scoped temp directory and has nothing to do otherwise.
+  globalTeardown: enabled ? "./e2e/global-teardown.ts" : undefined,
   ...(runScope
     ? {
         webServer: [
@@ -99,6 +110,10 @@ export default defineConfig({
               APP_SECRET_KEY: "e2e-secret-key-not-for-production",
               APP_DATABASE_URL: runScope.databaseUrl,
               APP_DATA_DIR: runScope.dataDir,
+              // Pin the media root too: it defaults to `<APP_DATA_DIR>/media`, but an
+              // exported APP_MEDIA_ROOT in the caller's shell would otherwise send
+              // downloaded demo media outside the run directory teardown owns.
+              APP_MEDIA_ROOT: runScope.mediaRoot,
               APP_AUTH_COOKIE_SECURE: "false",
               APP_CORS_ORIGINS: "[]",
               // Pin the CORS allowance off: an exported APP_CORS_ORIGINS in the caller's

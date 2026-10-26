@@ -9,11 +9,12 @@ import asyncio
 from dataclasses import replace
 
 import pytest
+from app import db
 from app.container import Adapters
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import ResolvedVideo, SubtitleTrack, VideoFormat, VideoUnavailableError
 from fastapi import FastAPI
-from httpx import AsyncClient
+from httpx import AsyncClient, Response
 from sqlalchemy import func, select
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -91,6 +92,20 @@ async def _subtitle_row_count(app: FastAPI, platform_video_id: str) -> int:
             .where(Video.platform_video_id == platform_video_id)
         )
         return int((await session.execute(stmt)).scalar_one())
+
+
+def _both_resolved(responses: list[Response], *, can_analyze: bool) -> str:
+    """The shared assertion of a two-request resolve: both 200, one Video, one answer.
+
+    Returns the agreed ``video.id`` so a test can keep asserting on the row it raced for.
+    """
+    assert [response.status_code for response in responses] == [200, 200], [
+        response.text for response in responses
+    ]
+    bodies = [response.json() for response in responses]
+    assert bodies[0]["video"]["id"] == bodies[1]["video"]["id"]
+    assert [body["can_analyze"] for body in bodies] == [can_analyze, can_analyze]
+    return str(bodies[0]["video"]["id"])
 
 
 async def test_resolve_youtube_returns_metadata_formats_and_subtitles(
@@ -362,18 +377,12 @@ async def test_concurrent_resolve_of_new_video_persists_one_subtitle(
         asyncio.gather(_resolve(client, YOUTUBE_URL), _resolve(client, YOUTUBE_URL)), timeout=10
     )
 
-    assert [response.status_code for response in responses] == [200, 200], [
-        response.text for response in responses
-    ]
-    bodies = [response.json() for response in responses]
-    assert bodies[0]["video"]["id"] == bodies[1]["video"]["id"]
-    assert bodies[0]["can_analyze"] is True
-    assert bodies[1]["can_analyze"] is True
+    video_id = _both_resolved(responses, can_analyze=True)
     assert len(source.subtitle_calls) == 2  # type: ignore[attr-defined]
     assert await _video_row_count(app, "youtube", "dQw4w9WgXcQ") == 1
     assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 1
 
-    exported = await client.get(f"/api/videos/{bodies[0]['video']['id']}/subtitles?format=srt")
+    exported = await client.get(f"/api/videos/{video_id}/subtitles?format=srt")
     assert exported.status_code == 200
     assert "示例字幕" in exported.text
 
@@ -387,13 +396,7 @@ async def test_concurrent_resolve_without_subtitles_stays_subtitle_free(
         asyncio.gather(_resolve(client, YOUTUBE_URL), _resolve(client, YOUTUBE_URL)), timeout=10
     )
 
-    assert [response.status_code for response in responses] == [200, 200], [
-        response.text for response in responses
-    ]
-    bodies = [response.json() for response in responses]
-    assert bodies[0]["video"]["id"] == bodies[1]["video"]["id"]
-    assert bodies[0]["can_analyze"] is False
-    assert bodies[1]["can_analyze"] is False
+    _both_resolved(responses, can_analyze=False)
     assert await _video_row_count(app, "youtube", "dQw4w9WgXcQ") == 1
     assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 0
 
@@ -468,6 +471,32 @@ async def test_empty_caption_result_reports_the_concurrently_persisted_subtitle(
     assert "示例字幕" in exported.text
 
 
+async def test_unclassifiable_conflict_is_a_500_not_an_adoption(
+    client: AsyncClient, adapters: Adapters, app: FastAPI, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The resolve seam answers 500 when the conflict is not the recoverable identity.
+
+    ``test_foreign_key_integrity_error_is_not_swallowed`` proves the classification
+    below the seam; this pins the other half of #54 criterion 5 - an IntegrityError the
+    classifier refuses becomes an internal error instead of a swallowed 200. The
+    conflict stays a real SQLite UNIQUE on ``subtitles.video_id``; only the
+    classification is refused, which is exactly the branch the guard protects.
+    """
+    source = adapters.video_source
+    source.videos = {YOUTUBE_URL: youtube_video()}  # type: ignore[attr-defined]
+    source.subtitle_barrier = asyncio.Barrier(2)  # type: ignore[attr-defined]
+    monkeypatch.setattr(db, "is_unique_conflict", lambda exc, *columns: False)
+
+    responses = await asyncio.gather(_resolve(client, YOUTUBE_URL), _resolve(client, YOUTUBE_URL))
+
+    assert sorted(response.status_code for response in responses) == [200, 500], [
+        response.text for response in responses
+    ]
+    refused = [response for response in responses if response.status_code == 500]
+    assert refused[0].json()["error"]["code"] == "internal_error"
+    assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 1
+
+
 async def test_concurrent_resolve_of_url_variants_shares_one_video_and_subtitle(
     client: AsyncClient, adapters: Adapters, app: FastAPI
 ) -> None:
@@ -484,12 +513,6 @@ async def test_concurrent_resolve_of_url_variants_shares_one_video_and_subtitle(
         asyncio.gather(_resolve(client, short_link), _resolve(client, watch_link)), timeout=10
     )
 
-    assert [response.status_code for response in responses] == [200, 200], [
-        response.text for response in responses
-    ]
-    bodies = [response.json() for response in responses]
-    assert bodies[0]["video"]["id"] == bodies[1]["video"]["id"]
-    assert bodies[0]["can_analyze"] is True
-    assert bodies[1]["can_analyze"] is True
+    _both_resolved(responses, can_analyze=True)
     assert await _video_row_count(app, "youtube", "dQw4w9WgXcQ") == 1
     assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 1
