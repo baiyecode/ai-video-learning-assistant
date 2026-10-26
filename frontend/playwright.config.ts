@@ -1,4 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
@@ -16,6 +19,51 @@ const enabled = process.env.PLAYWRIGHT_E2E === "1";
 const inheritedEnv = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );
+
+/** Prefix for the per-run temp directory; ``e2e/global-teardown.ts`` relies on it. */
+const RUN_ROOT_PREFIX = "ai-video-e2e-";
+
+type RunScope = {
+  databaseUrl: string;
+  dataDir: string;
+};
+
+/** Absolute SQLite URL with forward slashes, e.g. `sqlite+aiosqlite:///C:/tmp/x/e2e.db`. */
+function sqliteUrl(filePath: string): string {
+  return `sqlite+aiosqlite:///${filePath.replace(/\\/g, "/")}`;
+}
+
+/**
+ * Run-scoped, empty database and data directory.
+ *
+ * Every `PLAYWRIGHT_E2E=1` run gets its own directory under the OS temp directory
+ * (`fs.mkdtempSync` never reuses a name). The database is constructed as empty by
+ * the run itself: nothing is copied, and nothing has to be deleted beforehand -
+ * the first backend connection creates `e2e.db` and the app's startup hook creates
+ * the schema. A crashed or failed previous run therefore cannot leak state into
+ * this one. `e2e/global-teardown.ts` removes only the directory created here.
+ *
+ * `E2E_RUN_ROOT` is the hand-off to Playwright worker processes, which inherit the
+ * main process environment and re-evaluate this config: only the evaluation that
+ * creates the directory logs it; workers reuse the existing path. If the variable is
+ * already set (e.g. by a debugging shell), that directory is used as-is.
+ */
+function createRunScope(): RunScope {
+  const existingRoot = process.env.E2E_RUN_ROOT;
+  const root = existingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), RUN_ROOT_PREFIX));
+  process.env.E2E_RUN_ROOT = root;
+
+  const dataDir = path.join(root, "data");
+  fs.mkdirSync(dataDir, { recursive: true });
+  const databaseUrl = sqliteUrl(path.join(root, "e2e.db"));
+
+  if (!existingRoot) {
+    console.log(`[e2e] fresh run-scoped database: ${databaseUrl}`);
+  }
+  return { databaseUrl, dataDir };
+}
+
+const runScope = enabled ? createRunScope() : undefined;
 
 export default defineConfig({
   testDir: "./e2e",
@@ -35,7 +83,9 @@ export default defineConfig({
     locale: "zh-CN",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  ...(enabled
+  // Deletes only the run-scoped temp directory; see the comment on `createRunScope`.
+  globalTeardown: "./e2e/global-teardown.ts",
+  ...(runScope
     ? {
         webServer: [
           {
@@ -49,8 +99,8 @@ export default defineConfig({
               APP_FAKE_ADAPTERS: "1",
               APP_ENV: "development",
               APP_SECRET_KEY: "e2e-secret-key-not-for-production",
-              APP_DATABASE_URL: "sqlite+aiosqlite:///./data/e2e.db",
-              APP_DATA_DIR: "./data/e2e",
+              APP_DATABASE_URL: runScope.databaseUrl,
+              APP_DATA_DIR: runScope.dataDir,
               APP_AUTH_COOKIE_SECURE: "false",
               // The dev server proxies ``/api`` with ``changeOrigin``, so the backend sees
               // its own ``:8000`` origin while the browser sends ``Origin: :5173``. Without
