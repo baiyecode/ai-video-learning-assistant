@@ -5,7 +5,16 @@
  *
  * A new Markdown file in ``frontend/content/articles`` is the only thing needed
  * to publish an Article; this module is where bad content fails the build.
+ *
+ * Money and Quota claims are written as build-time placeholders
+ * (``{{MONTHLY_PRICE_USD}}`` / ``{{DAILY_FREE_QUOTA}}``) and resolved here, in the
+ * one place the frontmatter title/description and the body pass through, so a
+ * repricing deploy moves the Articles with the rest of the site. The description
+ * length rule is checked after interpolation, on the text a crawler actually reads.
+ * Frontmatter tags are literal labels: a placeholder there fails the build instead
+ * of leaking its raw token into ``article:tag``.
  */
+import { DAILY_FREE_ANALYSIS_LIMIT, PRICE_HEADLINE } from "@/lib/billing";
 import {
   DESCRIPTION_MAX_LENGTH,
   DESCRIPTION_MIN_LENGTH,
@@ -58,6 +67,158 @@ export class ArticleContentError extends Error {
   constructor(fileName: string, reason: string) {
     super(`Article ${fileName}: ${reason}`);
     this.name = "ArticleContentError";
+  }
+}
+
+/**
+ * The two build-time placeholders an Article source may use for a money or Quota
+ * claim, with their values taken from the single ``VITE_`` mirror chain (issue #45):
+ * ``PRICE_HEADLINE`` is already the ``$X.XX/月`` form and the Quota mirror refuses a
+ * fractional or junk deploy arg, so an Article can never render ``$NaN/月``.
+ * Reading them here keeps the interpolation pure — no env access, no DOM, one
+ * implementation shared by the client bundle, the prerender and the tests.
+ */
+export const PLACEHOLDER_NAMES = ["MONTHLY_PRICE_USD", "DAILY_FREE_QUOTA"] as const;
+type PlaceholderName = (typeof PLACEHOLDER_NAMES)[number];
+
+const PLACEHOLDER_VALUES: Record<PlaceholderName, string> = {
+  MONTHLY_PRICE_USD: PRICE_HEADLINE,
+  DAILY_FREE_QUOTA: String(DAILY_FREE_ANALYSIS_LIMIT),
+};
+
+function placeholderToken(name: PlaceholderName): string {
+  return `{{${name}}}`;
+}
+
+const ALLOWED_PLACEHOLDER_HINT =
+  `the only allowed placeholders are ${PLACEHOLDER_NAMES.map(placeholderToken).join(" and ")}`;
+
+/** A well-formed ``{{NAME}}`` token: no nesting, no stray braces inside. */
+const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
+
+/**
+ * An unclosed ``{{`` left after resolution, reported up to the first space or brace
+ * so a build log stays readable. A lone ``}}`` is ordinary text — Markdown prose and
+ * code fences may contain one — and deliberately stays legal.
+ */
+const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*/;
+
+/** The known tokens, derived from the one name list, blanked before guarding. */
+const KNOWN_PLACEHOLDER_TOKEN_PATTERN = new RegExp(
+  `\\{\\{(?:${PLACEHOLDER_NAMES.join("|")})\\}\\}`,
+  "g",
+);
+
+/**
+ * Hand-written monthly-price claims in the source, tolerating spaces and
+ * full-width digits. Three shapes: a currency amount with a monthly suffix
+ * (``$9.99/月``, ``＄９.９９／月``, ``$9.99/mo``, ``$9.99 每月``), a ``每月``
+ * prefix before the amount (``每月 $9.99``), and a ``美元``/``美金`` amount with
+ * a monthly suffix (``4.99 美元/月``). Interpolated placeholders are masked out
+ * before this runs, so only un-templated literals are caught.
+ */
+const LITERAL_PRICE_PATTERNS = [
+  /[＄$]\s*[\d０-９][\d０-９.,，]*\s*(?:[\/／]\s*(?:月|mo(?:nth)?\b)|每月)/u,
+  /每月\s*(?:[＄$]\s*[\d０-９][\d０-９.,，]*|[\d０-９]+[.,，][\d０-９]+|[\d０-９]+\s*(?:美元|美金))/u,
+  /[\d０-９][\d０-９.,，]*\s*(?:美元|美金)\s*(?:[\/／]\s*月|每月)/u,
+];
+
+/**
+ * A hand-written daily-quota claim in the source: a daily prefix (``每日``,
+ * ``每天``, ``自然日`` or ``一天``), an optional qualifier, then a count (Arabic or
+ * Chinese numerals) and ``次``, any spacing. The prefix is part of the pattern on
+ * purpose — ``消耗 1 次`` or ``1 次 Quota`` describe a single consumption unit, not
+ * the daily allowance, and stay legal.
+ */
+const LITERAL_QUOTA_PATTERN =
+  /(?:每日|每天|自然日|一天)\s*(?:最多|至少|可|上限为?)?\s*(?:[\d０-９]+|[零一二三四五六七八九十百千万两]+)\s*次/u;
+
+interface ClaimGuard {
+  label: string;
+  patterns: RegExp[];
+  remedy: string;
+}
+
+const CLAIM_GUARDS: ClaimGuard[] = [
+  {
+    label: "literal monthly price",
+    patterns: LITERAL_PRICE_PATTERNS,
+    remedy: `money claims must use the placeholder ${placeholderToken("MONTHLY_PRICE_USD")}, not hand-written numbers`,
+  },
+  {
+    label: "literal daily quota",
+    patterns: [LITERAL_QUOTA_PATTERN],
+    remedy: `quota claims must use the placeholder ${placeholderToken("DAILY_FREE_QUOTA")} (as in "每日 ${placeholderToken("DAILY_FREE_QUOTA")} 次"), not hand-written numbers`,
+  },
+];
+
+/**
+ * The strict literal-claim guard (issue #45): refuse a field whose SOURCE —
+ * with the known placeholder tokens masked out — still spells a money or quota
+ * claim by hand. Checking the masked source instead of the interpolated text is
+ * what makes the two rules mutually clear: the resolved ``$4.99/月`` of a legal
+ * placeholder never trips it, while an Article mixing placeholders and
+ * hand-written numbers fails naming the file and the offending snippet.
+ * A bare ``数字 次`` without a daily prefix is not a Quota claim (``消耗 1 次``
+ * and ``1 次 Quota`` describe one consumption unit and stay legal), so the
+ * quota guard keys on the daily prefix, not the count.
+ */
+function assertNoUntemplatedClaims(fileName: string, raw: string): void {
+  const untemplated = raw.replace(KNOWN_PLACEHOLDER_TOKEN_PATTERN, "");
+
+  for (const guard of CLAIM_GUARDS) {
+    for (const pattern of guard.patterns) {
+      const literal = pattern.exec(untemplated)?.[0];
+      if (literal) {
+        throw new ArticleContentError(fileName, `${guard.label} "${literal}": ${guard.remedy}`);
+      }
+    }
+  }
+}
+
+/**
+ * Resolve every ``{{PLACEHOLDER}}`` in one Article field to its build-time value,
+ * then run the literal-claim guard on the same field's source. Ordering is part
+ * of the contract: an unknown or unclosed placeholder fails first with its own
+ * message (P4-1 behavior), so a field only reaches the guard once its
+ * placeholders are valid.
+ */
+function resolveArticleField(fileName: string, text: string): string {
+  const resolved = text.replace(PLACEHOLDER_PATTERN, (token, name: string) => {
+    const value = (PLACEHOLDER_VALUES as Record<string, string | undefined>)[name];
+    if (value === undefined) {
+      throw new ArticleContentError(
+        fileName,
+        `unknown placeholder "${token}": ${ALLOWED_PLACEHOLDER_HINT}`,
+      );
+    }
+    return value;
+  });
+
+  const residual = RESIDUAL_PLACEHOLDER_PATTERN.exec(resolved)?.[0];
+  if (residual) {
+    throw new ArticleContentError(
+      fileName,
+      `unclosed placeholder "${residual}": ${ALLOWED_PLACEHOLDER_HINT}`,
+    );
+  }
+
+  assertNoUntemplatedClaims(fileName, text);
+  return resolved;
+}
+
+/**
+ * Tags are literal labels (``article:tag`` and the visible tag list), so they are
+ * never interpolated: a ``{{`` opener there would leak its raw token. Fail
+ * through the same build-time error instead. A lone ``}}`` has nothing to
+ * resolve and stays legal, matching the body rule.
+ */
+function assertNoPlaceholderSyntax(fileName: string, value: string): void {
+  if (value.includes("{{")) {
+    throw new ArticleContentError(
+      fileName,
+      `tags must not contain placeholders: ${ALLOWED_PLACEHOLDER_HINT}`,
+    );
   }
 }
 
@@ -258,8 +419,11 @@ export function parseArticle(fileName: string, source: string): Article {
     }
   }
 
-  const title = unquote(fields.get("title") ?? "");
-  const description = unquote(fields.get("description") ?? "");
+  const title = resolveArticleField(fileName, unquote(fields.get("title") ?? ""));
+  const description = resolveArticleField(
+    fileName,
+    unquote(fields.get("description") ?? ""),
+  );
   const published = unquote(fields.get("published") ?? "");
 
   const updatedRaw = fields.get("updated");
@@ -275,6 +439,10 @@ export function parseArticle(fileName: string, source: string): Article {
   }
 
   const tagsRaw = fields.get("tags");
+  if (tagsRaw) {
+    assertNoPlaceholderSyntax(fileName, tagsRaw);
+    assertNoUntemplatedClaims(fileName, tagsRaw);
+  }
   const tags = tagsRaw ? parseTags(fileName, tagsRaw) : [];
   const draftRaw = fields.get("draft");
   const draft = draftRaw ? parseDraft(fileName, draftRaw) : false;
@@ -294,7 +462,7 @@ export function parseArticle(fileName: string, source: string): Article {
     );
   }
 
-  const trimmedBody = body.trim();
+  const trimmedBody = resolveArticleField(fileName, body.trim());
   const bodyCharacters = countBodyCharacters(trimmedBody);
   if (bodyCharacters < BODY_MIN_CHARACTERS) {
     throw new ArticleContentError(

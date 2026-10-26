@@ -7,6 +7,12 @@
  */
 
 import { readBuildEnvNumber } from "@/lib/build-env";
+import {
+  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
+  DEFAULT_MONTHLY_PRICE_USD,
+} from "@/lib/billing-defaults";
+
+export { DEFAULT_DAILY_FREE_ANALYSIS_LIMIT, DEFAULT_MONTHLY_PRICE_USD };
 
 export interface MembershipDto {
   status: string;
@@ -32,21 +38,6 @@ export const ACTIVE_STATUS = "active";
 export const PAST_DUE_STATUS = "past_due";
 export const TRIAL_ENDING_STATUS = "trial_ending";
 export const CANCELED_STATUS = "canceled";
-
-/**
- * Committed fallbacks for the display price and free Quota, used only when neither the
- * runtime ``GET /me/membership`` payload nor the deploy-time ``VITE_`` injection is
- * available (prerendered marketing pages, plain ``npm run build``, unit tests).
- * The knob itself is ``Settings.subscription_monthly_usd`` / ``analysis_daily_quota``
- * in ``backend/app/config.py``: the running server reports those values on the
- * membership read (see ``MONTHLY_PRICE_USD`` below), and docker-compose mirrors the same
- * env pair into the frontend build args so the prerendered Marketing Pages, sitemap and
- * llms.txt move with them. These fallbacks must equal the backend ``Settings`` defaults;
- * ``billing.test.ts`` reads ``backend/app/config.py`` and fails loudly if they drift, so
- * the discovery layer can never silently lie.
- */
-export const DEFAULT_MONTHLY_PRICE_USD = 4.99;
-export const DEFAULT_DAILY_FREE_ANALYSIS_LIMIT = 3;
 
 /**
  * The single monthly plan (spec: "$4.99/月、Analysis 不限次").

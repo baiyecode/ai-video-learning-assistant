@@ -1,5 +1,10 @@
 import { defineConfig, devices } from "@playwright/test";
 
+import {
+  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
+  DEFAULT_MONTHLY_PRICE_USD,
+} from "./src/lib/billing-defaults";
+
 /**
  * Golden paths only (see e2e/golden-path*.spec.ts). Both servers start
  * automatically with deterministic adapters when PLAYWRIGHT_E2E=1.
@@ -78,7 +83,15 @@ export default defineConfig({
             url: "http://127.0.0.1:5173",
             timeout: 120_000,
             reuseExistingServer: false,
-            env: { ...inheritedEnv, VITE_SENTRY_DSN: "" },
+            env: {
+              ...inheritedEnv,
+              VITE_SENTRY_DSN: "",
+              // Pin the display mirrors so the golden-path assertions on the seeded
+              // copy stay deterministic even when the caller's shell exports a
+              // repriced build.
+              VITE_SUBSCRIPTION_MONTHLY_USD: String(DEFAULT_MONTHLY_PRICE_USD),
+              VITE_ANALYSIS_DAILY_QUOTA: String(DEFAULT_DAILY_FREE_ANALYSIS_LIMIT),
+            },
           },
         ],
       }

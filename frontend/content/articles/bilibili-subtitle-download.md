@@ -46,14 +46,14 @@ B 站上的 Subtitle 来源不同，导出的文本质量也不同：
 - 单个 视频 最长 2 小时、最大 2 GB，超出范围会直接拒绝。
 - 下载链接 15 分钟内有效，服务端文件最多保留 1 小时；过期后重新解析即可。
 - 不做 ASR：视频 没有可用 Subtitle 时，无法导出字幕，也无法发起 Analysis。
-- 免费 Account 每个自然日 3 次 Analysis；VIP Membership 为 $4.99/月，Analysis 不限次。价格与扣款以结账页为准，规则见 [价格页](/pricing)。
+- 免费 Account 每个自然日 {{DAILY_FREE_QUOTA}} 次 Analysis；VIP Membership 为 {{MONTHLY_PRICE_USD}}，Analysis 不限次。价格与扣款以结账页为准，规则见 [价格页](/pricing)。
 - 不支持播放列表、直播、DRM 与会员专属内容；使用边界与举报入口见 [使用条款](/terms)。
 
 ## 把字幕变成学习笔记
 
 导出 TXT 后，可以直接搜索关键词、整理成问答，或者把字幕交给 Analysis 生成简体中文摘要与思维导图。Analysis 只以 Subtitle 为文本依据，所以字幕是否完整决定了摘要的质量；没有字幕的视频不会「猜」内容。
 
-Quota 在成功创建 Analysis 时消耗，失败会退回；查看已有 Analysis 不消耗 Quota。免费 Account 每天 3 次，VIP 会员不限次，是否升级可以先用满免费 Quota 再判断。
+Quota 在成功创建 Analysis 时消耗，失败会退回；查看已有 Analysis 不消耗 Quota。免费 Account 每天 {{DAILY_FREE_QUOTA}} 次，VIP Membership 不限次，是否升级可以先用满免费 Quota 再判断。
 
 ## 常见问题
 

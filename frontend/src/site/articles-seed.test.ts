@@ -11,13 +11,16 @@ import path from "node:path";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { extractInternalLinks } from "@/site/articles";
-import { defaultArticleCollection } from "@/site/article-sources";
+import { PLACEHOLDER_NAMES, extractInternalLinks, parseArticle } from "@/site/articles";
+import { defaultArticleCollection, defaultArticleSources } from "@/site/article-sources";
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
 import { pageDescriptors } from "@/site/seo";
 
 const ORIGIN = "https://example.com";
+
+/** The placeholder tokens, derived from the content model's one name list. */
+const PLACEHOLDER_TOKENS = PLACEHOLDER_NAMES.map((name) => `{{${name}}}`);
 
 /** The published set, newest first. Dates are part of the contract. */
 const SEED_ARTICLES = [
@@ -140,6 +143,46 @@ describe("seed Article collection", () => {
         expect(source, `${article.fileName} contains ${phrase}`).not.toContain(phrase);
       }
     }
+  });
+});
+
+/**
+ * The literal-claim guard (ticket #48) asserted on the real content sources:
+ * every money or quota claim in the four seed Markdown files goes through a
+ * placeholder, so the strict build-time guard passes out of the box — and the
+ * legitimate ``1 次 Quota`` / ``消耗 1 次`` lines (a consumption unit, not a
+ * daily quota claim) prove the guard does not over-flag bare counts.
+ */
+describe("seed Article sources pass the literal-claim guard", () => {
+  it("each of the four real sources parses under the guard", () => {
+    expect(defaultArticleSources).toHaveLength(4);
+    for (const { fileName, source } of defaultArticleSources) {
+      expect(fileName).toMatch(/\.md$/);
+      expect(() => parseArticle(fileName, source), `${fileName} trips the guard`).not.toThrow();
+    }
+  });
+
+  it("the real sources carry templated claims", () => {
+    for (const { fileName, source } of defaultArticleSources) {
+      expect(
+        PLACEHOLDER_TOKENS.some((token) => source.includes(token)),
+        `${fileName} uses at least one placeholder`,
+      ).toBe(true);
+      const withoutKnownTokens = PLACEHOLDER_TOKENS.reduce(
+        (text, token) => text.split(token).join(""),
+        source,
+      );
+      expect(withoutKnownTokens, `${fileName} leaks no raw placeholder`).not.toMatch(/\{\{|\}\}/);
+    }
+  });
+
+  it("the mindmap source keeps its legal single-consumption counts", () => {
+    const mindmap = defaultArticleSources.find(
+      ({ fileName }) => fileName === "ai-video-summary-mindmap.md",
+    );
+    expect(mindmap?.source).toContain("1 次 Quota");
+    expect(mindmap?.source).toContain("消耗 1 次");
+    expect(() => parseArticle(mindmap!.fileName, mindmap!.source)).not.toThrow();
   });
 });
 

@@ -63,7 +63,7 @@ tags: [抖音, 灰度, 解析]
 - 不支持播放列表与直播；DRM 与会员专属内容会被拒绝。
 - 不做 ASR：没有 Subtitle 就不能导出字幕，也不能 Analysis。
 - Visitor 可以解析与 Download；发起 Analysis 需要 Account、邮箱验证与 Quota。
-- 免费 Account 每个 Asia/Shanghai 自然日 3 次 Analysis；VIP Membership 为 $4.99/月，Analysis 不限次。
+- 免费 Account 每个 Asia/Shanghai 自然日 {{DAILY_FREE_QUOTA}} 次 Analysis；VIP Membership 为 {{MONTHLY_PRICE_USD}}，Analysis 不限次。
 
 版权边界与举报入口见 [使用条款](/terms)，价格与取消规则见 [价格页](/pricing)，其他 Platform 的字幕细节见 [B 站字幕下载指南](/articles/bilibili-subtitle-download)。
 
