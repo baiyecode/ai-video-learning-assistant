@@ -15,9 +15,16 @@ export default defineConfig({
   },
   server: {
     port: 5173,
+    /**
+     * Keep the browser's Host (``changeOrigin`` stays false, its default) so the backend
+     * derives the same own-origin the browser sends, exactly like the production nginx
+     * ``proxy_set_header Host $host``. Cookie-authenticated POSTs (refresh/logout) then
+     * pass the origin check in development without an ``APP_CORS_ORIGINS`` allowance.
+     * The Origin header is forwarded untouched.
+     */
     proxy: {
-      "/api": { target: apiTarget, changeOrigin: true },
-      "/health": { target: apiTarget, changeOrigin: true },
+      "/api": { target: apiTarget },
+      "/health": { target: apiTarget },
     },
   },
   build: {

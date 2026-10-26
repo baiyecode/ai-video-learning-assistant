@@ -186,7 +186,7 @@ docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 - 开关与订阅：`APP_DOUYIN_ENABLED`（默认 `false`，灰度/回滚见 `docs/ops/douyin-gray-release.md`）；`APP_SUBSCRIPTION_MONTHLY_USD=4.99` 是标价与免费配额的唯一来源，既进 `/api/me/membership` 的响应，也由 compose 镜像成前端 `VITE_` 构建参数（见「构建/预渲染」一节），**实际扣款以支付方（Stripe）配置为准**。
 - 邮件验证：`APP_EMAIL_VERIFICATION_TOKEN_TTL_HOURS=24`；`APP_FRONTEND_BASE_URL` 必须指向用户浏览器实际访问的地址（compose 默认 `http://localhost:8080`，正式域名部署时改为公网 origin，否则验证邮件里的链接打不开）。
 - 限流：`APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR=3`（发信防滥用）。
-- CORS：compose 栈是同源部署（nginx 代理 `/api`），`APP_CORS_ORIGINS` 保持 `[]`；仅当浏览器直连 API 时才配置，本地 Vite 开发放行 5173 的方式见 `.env.example` 注释。
+- CORS：compose 栈是同源部署（nginx 代理 `/api`），`APP_CORS_ORIGINS` 保持 `[]`；仅当浏览器直连 API 或前端与 API 不同 origin 时才配置。本地 Vite 开发无需配置：开发代理保留浏览器的 Host，后端算出的自身 origin 与浏览器一致，登录后刷新与退出登录按与生产相同的同源路径工作。
 - 从 P1 部署升级：先 `docker compose up -d api`，再执行一次 `docker compose exec api python -m scripts.migrate_p2`（无 Alembic，`create_all` 不给既有表加列；新库无需执行）。
 
 ### 生产部署清单（P3 新增项：静态站点与站点地址）
