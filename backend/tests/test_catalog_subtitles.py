@@ -10,8 +10,12 @@ import re
 
 import pytest
 from app.container import Adapters
+from app.modules.catalog import subtitles
+from app.modules.catalog.models import Video
 from app.ports import ResolvedVideo, SubtitlePayload, SubtitleTrack, VideoFormat
+from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy.exc import IntegrityError
 
 YOUTUBE_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
@@ -263,3 +267,29 @@ async def test_repeated_resolve_keeps_one_selection_and_refreshes_changed_track(
     body = (await client.get(f"/api/videos/{video_id}/subtitles")).json()
     assert body["language"] == "en"
     assert body["text"] == "english content"
+
+
+async def test_unexpected_integrity_error_is_not_swallowed(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """Only the ``subtitles.video_id`` identity conflict is recoverable.
+
+    A Subtitle whose Video row does not exist violates the foreign key instead; that
+    IntegrityError must surface, not be mistaken for the concurrent-resolve race.
+    """
+    track = manual("zh-Hans")
+    adapters.video_source.subtitles = {  # type: ignore[attr-defined]
+        ("dQw4w9WgXcQ", "zh-Hans"): payload(track, [(0.0, 1.0, "内容")]),
+    }
+    orphan = Video(
+        id="orphan-video",
+        platform="youtube",
+        platform_video_id="orphan",
+        title="孤儿视频",
+        duration_seconds=1,
+        webpage_url=YOUTUBE_URL,
+    )
+
+    async with app.state.sessionmaker() as session:
+        with pytest.raises(IntegrityError):
+            await subtitles.sync_selection(session, adapters.video_source, orphan, video_with(track))  # type: ignore[arg-type]

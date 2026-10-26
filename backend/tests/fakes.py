@@ -204,6 +204,18 @@ class FakeVideoSource:
     resolve_calls: list[str] = field(default_factory=list)
     subtitle_calls: list[tuple[str, str]] = field(default_factory=list)
 
+    # Deterministic concurrency controls for ``fetch_subtitle`` (see the module docstring
+    # rule "extend, never fork"). Every call waits on ``subtitle_barrier`` before
+    # returning, so a test can hold two concurrent resolves past their "no Subtitle yet"
+    # read. ``subtitle_entered`` is set as soon as a call starts; ``subtitle_fail_on_call``
+    # picks the 1-based call that raises, waiting for ``subtitle_fail_gate`` first so the
+    # other request can commit the winning row.
+    subtitle_barrier: asyncio.Barrier | None = None
+    subtitle_entered: asyncio.Event | None = None
+    subtitle_fail_on_call: int | None = None
+    subtitle_fail_gate: asyncio.Event | None = None
+    subtitle_error: Exception | None = None
+
     async def resolve(self, url: str) -> ResolvedVideo:
         self.resolve_calls.append(url)
         if self.resolve_error is not None:
@@ -219,6 +231,15 @@ class FakeVideoSource:
 
     async def fetch_subtitle(self, video: ResolvedVideo, track: SubtitleTrack) -> SubtitlePayload:
         self.subtitle_calls.append((video.platform_video_id, track.language))
+        call_number = len(self.subtitle_calls)
+        if self.subtitle_entered is not None:
+            self.subtitle_entered.set()
+        if self.subtitle_barrier is not None:
+            await self.subtitle_barrier.wait()
+        if self.subtitle_fail_on_call == call_number:
+            if self.subtitle_fail_gate is not None:
+                await self.subtitle_fail_gate.wait()
+            raise self.subtitle_error or RuntimeError("synthetic subtitle fetch failure")
         payload = self.subtitles.get((video.platform_video_id, track.language))
         if payload is not None:
             return payload
