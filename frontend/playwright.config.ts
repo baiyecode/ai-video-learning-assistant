@@ -102,11 +102,9 @@ export default defineConfig({
               APP_DATABASE_URL: runScope.databaseUrl,
               APP_DATA_DIR: runScope.dataDir,
               APP_AUTH_COOKIE_SECURE: "false",
-              // The dev server proxies ``/api`` with ``changeOrigin``, so the backend sees
-              // its own ``:8000`` origin while the browser sends ``Origin: :5173``. Without
-              // this allowance the cookie refresh (``POST /auth/refresh``) would be refused
-              // and every page reload would drop the Session.
-              APP_CORS_ORIGINS: '["http://127.0.0.1:5173"]',
+              // No APP_CORS_ORIGINS: the dev server proxies ``/api`` and keeps the
+              // browser's Host, so the backend's own origin matches the one the browser
+              // sends and the same-origin path (no CORS allowance) is what is tested.
               // The fake mailer's verification link must open in this very browser
               // session, so the backend builds it against the dev-server origin.
               APP_FRONTEND_BASE_URL: "http://127.0.0.1:5173",

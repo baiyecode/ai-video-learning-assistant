@@ -15,9 +15,10 @@ services:
       APP_DATABASE_URL: sqlite+aiosqlite:////data/app.db
       APP_DATA_DIR: /data
       APP_MEDIA_ROOT: /media
-      # Same-origin deployment: nginx (web) reverse-proxies /api, so the browser never
-      # crosses an origin and this stays empty. Local Vite development (no compose)
-      # allows http://localhost:5173 through the environment instead.
+      # Same-origin deployment: nginx (web) reverse-proxies /api and forwards the
+      # original Host, so the browser never crosses an origin and this stays empty.
+      # Local Vite development needs no entry either: its dev proxy also keeps the
+      # browser's Host, so the API's own origin matches the browser's.
       APP_CORS_ORIGINS: "[]"
       # The compose stack is served over plain HTTP locally; set true behind HTTPS.
       APP_AUTH_COOKIE_SECURE: ${APP_AUTH_COOKIE_SECURE:-false}
