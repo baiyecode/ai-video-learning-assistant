@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app import messages
@@ -124,9 +125,16 @@ async def sync_selection(
 
     Returns whether a Subtitle is now available. A failing adapter must not break
     Video resolution, so fetch errors are logged and treated as "no Subtitle".
+
+    Concurrent resolves of the same new Video can both observe "no Subtitle yet" and
+    both insert ``subtitles.video_id``. The loser of that unique constraint adopts the
+    winner's row instead of failing, mirroring ``_upsert_video``.
     """
+    # Capture the identity up front: a rollback expires ``video``, and touching an
+    # expired instance would trigger lazy IO outside the async greenlet.
+    video_id = video.id
     track = select_track(resolved.subtitles)
-    existing = await _find(session, video.id)
+    existing = await _find(session, video_id)
 
     if track is None:
         if existing is not None:
@@ -151,12 +159,14 @@ async def sync_selection(
             "subtitle_fetch_failed",
             extra={
                 "event": "subtitle_fetch_failed",
-                "video_id": video.id,
+                "video_id": video_id,
                 "language": track.language,
                 "error_type": type(exc).__name__,
             },
         )
-        return existing is not None
+        # A concurrent resolve may have persisted a Subtitle while this fetch ran; report
+        # the persisted row, not the pre-fetch observation.
+        return await _find(session, video_id) is not None
 
     if not cues and not text:
         if existing is not None:
@@ -164,15 +174,44 @@ async def sync_selection(
             await session.commit()
         return False
 
-    row = existing if existing is not None else Subtitle(video_id=video.id)
+    row = existing if existing is not None else Subtitle(video_id=video_id)
+    _apply_track(row, track, source_type, cues, text)
+    if existing is None:
+        session.add(row)
+    try:
+        await session.commit()
+    except IntegrityError as exc:
+        # A concurrent resolve inserted the one Subtitle for this Video first.
+        await session.rollback()
+        if not _is_subtitle_identity_conflict(exc):
+            raise
+        winner = await _find(session, video_id)
+        if winner is None:
+            raise
+        _apply_track(winner, track, source_type, cues, text)
+        await session.commit()
+        # The rollback expired ``video``; reload it so the response reflects the DB.
+        await session.refresh(video)
+    return True
+
+
+def _is_subtitle_identity_conflict(exc: IntegrityError) -> bool:
+    """Whether ``exc`` is the expected concurrent insert on ``subtitles.video_id``."""
+    message = str(getattr(exc, "orig", exc)).lower()
+    return "unique" in message and "subtitles.video_id" in message
+
+
+def _apply_track(
+    row: Subtitle,
+    track: SubtitleTrack,
+    source_type: str,
+    cues: list[dict[str, Any]],
+    text: str,
+) -> None:
     row.language = track.language
     row.source_type = source_type
     row.cues_json = cues
     row.text = text
-    if existing is None:
-        session.add(row)
-    await session.commit()
-    return True
 
 
 async def has_subtitle(session: AsyncSession, video_id: str) -> bool:
