@@ -58,7 +58,7 @@ const QUOTA_PLACEHOLDER = "{{DAILY_FREE_QUOTA}}";
  * (``会员 $4.99/月，每日 3 次 Analysis，`` = 27 characters, plus the filler).
  */
 const PLACEHOLDER_DESCRIPTION = `会员 ${PRICE_PLACEHOLDER}，每日 ${QUOTA_PLACEHOLDER} 次 Analysis，${"详".repeat(63)}`;
-const PLACEHOLDER_BODY = `${BODY}\n\n免费会员每月 ${PRICE_PLACEHOLDER}，免费账号自然日 ${QUOTA_PLACEHOLDER} 次 Analysis。`;
+const PLACEHOLDER_BODY = `${BODY}\n\n免费 Account 每月 ${PRICE_PLACEHOLDER}，免费账号自然日 ${QUOTA_PLACEHOLDER} 次 Analysis。`;
 
 /**
  * Parse with the given ``VITE_`` build args, the same way a repricing deploy does:
@@ -71,7 +71,7 @@ async function parseWithBuildArgs(
 ): Promise<Article> {
   vi.resetModules();
   for (const [key, value] of Object.entries(env)) {
-    vi.stubEnv(key as "VITE_ANALYSIS_DAILY_QUOTA", value);
+    vi.stubEnv(key, value);
   }
   const fresh = await import("@/site/articles");
   return fresh.parseArticle(fileName, source);
@@ -183,11 +183,20 @@ describe("article price placeholder interpolation", () => {
       validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
     );
 
-    expect(article.body).toContain("免费会员每月 $4.99/月");
+    expect(article.body).toContain("免费 Account 每月 $4.99/月");
     expect(article.body).toContain("免费账号自然日 3 次 Analysis");
     expect(article.description).toContain("会员 $4.99/月，每日 3 次 Analysis");
     expect(article.body).not.toContain("{{");
     expect(article.description).not.toContain("{{");
+  });
+
+  it("interpolates the title through the same mirror", () => {
+    const article = parseArticle(
+      "title-placeholder.md",
+      validSource({ title: `会员 ${PRICE_PLACEHOLDER} 开通指南` }, PLACEHOLDER_BODY),
+    );
+
+    expect(article.title).toBe("会员 $4.99/月 开通指南");
   });
 
   it("renders the injected build-time price and quota instead of the defaults", async () => {
@@ -197,7 +206,7 @@ describe("article price placeholder interpolation", () => {
       validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
     );
 
-    expect(article.body).toContain("免费会员每月 $8.50/月");
+    expect(article.body).toContain("免费 Account 每月 $8.50/月");
     expect(article.body).toContain("免费账号自然日 7 次 Analysis");
     expect(article.description).toContain("会员 $8.50/月，每日 7 次 Analysis");
   });
@@ -235,16 +244,11 @@ describe("article price placeholder interpolation", () => {
     );
   });
 
-  it("rejects an unclosed or leftover placeholder left after resolution", () => {
+  it("rejects an unclosed placeholder left after resolution", () => {
     expectFailure(
       "unclosed-placeholder.md",
       validSource({}, `${BODY}\n\n会员每月 {{MONTHLY_PRICE_USD 即可解锁。`),
       /unclosed placeholder "\{\{MONTHLY_PRICE_USD"/,
-    );
-    expectFailure(
-      "stray-brace.md",
-      validSource({}, `${BODY}\n\n会员每月 4.99/月}} 即可解锁。`),
-      /stray placeholder closer "\}\}"/,
     );
     expectFailure(
       "doubled-brace.md",
@@ -256,6 +260,15 @@ describe("article price placeholder interpolation", () => {
     );
   });
 
+  it("keeps a lone }} legal: it is ordinary Markdown text, not a broken placeholder", () => {
+    const article = parseArticle(
+      "stray-closer-text.md",
+      validSource({}, `${BODY}\n\n写法说明：正文里单独的 }} 只是普通字符。`),
+    );
+
+    expect(article.body).toContain("}}");
+  });
+
   it("renders the committed defaults for a junk price or a fractional quota", async () => {
     // Mirror fallback semantics (``readBuildEnvNumber``): a fractional Quota and an
     // unparseable price are refused, so an Article never renders ``$NaN/月``.
@@ -265,7 +278,7 @@ describe("article price placeholder interpolation", () => {
       validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
     );
 
-    expect(article.body).toContain("免费会员每月 $4.99/月");
+    expect(article.body).toContain("免费 Account 每月 $4.99/月");
     expect(article.body).toContain("免费账号自然日 3 次 Analysis");
     expect(article.body).not.toContain("NaN");
     expect(article.description).toContain("会员 $4.99/月，每日 3 次 Analysis");
@@ -347,7 +360,7 @@ describe("article literal-claim guard", () => {
     );
   });
 
-  it("guards the frontmatter description and the tags, not only the body", () => {
+  it("guards every frontmatter field, not only the body", () => {
     expectFailure(
       "literal-in-description.md",
       validSource({
@@ -360,6 +373,46 @@ describe("article literal-claim guard", () => {
       validSource({ tags: `[视频总结, 每日 5 次, 字幕]` }),
       /literal daily quota "每日 5 次"/,
     );
+    expectFailure(
+      "literal-in-title.md",
+      validSource({ title: "会员 $9.99/月 开通指南" }),
+      /literal monthly price "\$9\.99\/月"/,
+    );
+    expectFailure(
+      "unknown-placeholder-in-title.md",
+      validSource({ title: "会员 {{FOO}} 开通指南" }),
+      /unknown placeholder "\{\{FOO\}\}"/,
+    );
+  });
+
+  it("rejects placeholder syntax in tags instead of leaking the raw token", () => {
+    expectFailure(
+      "placeholder-in-tags.md",
+      validSource({ tags: `[视频总结, ${QUOTA_PLACEHOLDER}]` }),
+      /tags must not contain placeholders/,
+    );
+    expectFailure(
+      "unknown-placeholder-in-tags.md",
+      validSource({ tags: "[视频总结, {{FOO}}]" }),
+      /tags must not contain placeholders/,
+    );
+  });
+
+  it("catches spacing, full-width and natural-language literal variants", () => {
+    for (const literal of ["$9.99 /月", "＄９.９９／月", "$9.99 每月", "$9.99/mo"]) {
+      expectFailure(
+        "literal-price-variant.md",
+        validSource({}, `${BODY}\n\n会员 ${literal}。`),
+        /literal monthly price/,
+      );
+    }
+    for (const literal of ["每日最多 3 次", "每天三次", "每日３次", "一天 3 次"]) {
+      expectFailure(
+        "literal-quota-variant.md",
+        validSource({}, `${BODY}\n\n免费 ${literal} Analysis。`),
+        /literal daily quota/,
+      );
+    }
   });
 
   it("keeps a bare 数字 次 legal: it is a consumption unit, not a daily quota claim", () => {

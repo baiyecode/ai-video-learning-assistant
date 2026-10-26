@@ -8,9 +8,11 @@
  *
  * Money and Quota claims are written as build-time placeholders
  * (``{{MONTHLY_PRICE_USD}}`` / ``{{DAILY_FREE_QUOTA}}``) and resolved here, in the
- * one place both the body and the frontmatter description pass through, so a
+ * one place the frontmatter title/description and the body pass through, so a
  * repricing deploy moves the Articles with the rest of the site. The description
  * length rule is checked after interpolation, on the text a crawler actually reads.
+ * Frontmatter tags are literal labels: a placeholder there fails the build instead
+ * of leaking its raw token into ``article:tag``.
  */
 import { DAILY_FREE_ANALYSIS_LIMIT, PRICE_HEADLINE } from "@/lib/billing";
 import {
@@ -76,43 +78,46 @@ export class ArticleContentError extends Error {
  * Reading them here keeps the interpolation pure — no env access, no DOM, one
  * implementation shared by the client bundle, the prerender and the tests.
  */
-const PLACEHOLDER_VALUES: Record<string, string> = {
-  MONTHLY_PRICE_USD: PRICE_HEADLINE,
-  DAILY_FREE_QUOTA: String(DAILY_FREE_ANALYSIS_LIMIT),
-};
+const PLACEHOLDER_VALUES = new Map<string, string>([
+  ["MONTHLY_PRICE_USD", PRICE_HEADLINE],
+  ["DAILY_FREE_QUOTA", String(DAILY_FREE_ANALYSIS_LIMIT)],
+]);
+
+const ALLOWED_PLACEHOLDER_HINT =
+  "the only allowed placeholders are {{MONTHLY_PRICE_USD}} and {{DAILY_FREE_QUOTA}}";
 
 /** A well-formed ``{{NAME}}`` token: no nesting, no stray braces inside. */
 const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
 
 /**
- * Anything that still looks like a broken placeholder once the known tokens are
- * resolved: an unclosed ``{{`` (reported up to the first space or brace, so a build
- * log stays readable) or a stray ``}}`` closer with no opener, which gets its own
- * message because the two mistakes need different fixes.
+ * An unclosed ``{{`` left after resolution, reported up to the first space or brace
+ * so a build log stays readable. A lone ``}}`` is ordinary text — Markdown prose and
+ * code fences may contain one — and deliberately stays legal.
  */
-const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*|\}\}/;
+const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*/;
 
 /** The two known tokens, blanked out before the literal-claim guard runs. */
 const KNOWN_PLACEHOLDER_TOKEN_PATTERN = /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/g;
 
 /**
- * A hand-written monthly-price claim in the source (``$9.99/月``, or any
- * ``$数字.数字/月`` shape, including thousands separators like ``$1,000.00/月``).
+ * A hand-written monthly-price claim in the source: a ``$``/``＄`` followed by
+ * digits (thousands separators allowed) and a monthly suffix (``/月``, ``／月``,
+ * ``/mo``, ``/month`` or ``每月``), tolerating spaces and full-width digits.
  * Interpolated placeholders are masked out before this runs, so only un-templated
  * literals are caught.
- * Exported so the seed-content test asserts the real content against this exact
- * pattern instead of a hand-copied one.
  */
-export const LITERAL_PRICE_PATTERN = /\$[\d.,]+\/月/u;
+const LITERAL_PRICE_PATTERN =
+  /[＄$]\s*[\d０-９][\d０-９.,，]*\s*(?:[\/／]\s*(?:月|mo(?:nth)?\b)|每月)/u;
 
 /**
  * A hand-written daily-quota claim in the source: a daily prefix (``每日``,
- * ``每天`` or ``自然日``) followed by a bare number and ``次``, any spacing.
- * The prefix is part of the pattern on purpose — ``消耗 1 次`` or ``1 次 Quota``
- * describe a single consumption unit, not the daily allowance, and stay legal.
- * Exported for the same reason as ``LITERAL_PRICE_PATTERN``.
+ * ``每天``, ``自然日`` or ``一天``), an optional qualifier, then a count (Arabic or
+ * Chinese numerals) and ``次``, any spacing. The prefix is part of the pattern on
+ * purpose — ``消耗 1 次`` or ``1 次 Quota`` describe a single consumption unit, not
+ * the daily allowance, and stay legal.
  */
-export const LITERAL_QUOTA_PATTERN = /(?:每日|每天|自然日)\s*\d+\s*次/u;
+const LITERAL_QUOTA_PATTERN =
+  /(?:每日|每天|自然日|一天)\s*(?:最多|至少|可|上限为?)?\s*(?:[\d０-９]+|[零一二三四五六七八九十百千万两]+)\s*次/u;
 
 /**
  * The strict literal-claim guard (issue #45): refuse a field whose SOURCE —
@@ -154,13 +159,11 @@ function assertNoUntemplatedClaims(fileName: string, raw: string): void {
  */
 function interpolatePlaceholders(fileName: string, text: string): string {
   const resolved = text.replace(PLACEHOLDER_PATTERN, (token, name: string) => {
-    const value = Object.prototype.hasOwnProperty.call(PLACEHOLDER_VALUES, name)
-      ? PLACEHOLDER_VALUES[name]
-      : undefined;
+    const value = PLACEHOLDER_VALUES.get(name);
     if (value === undefined) {
       throw new ArticleContentError(
         fileName,
-        `unknown placeholder "${token}": the only allowed placeholders are {{MONTHLY_PRICE_USD}} and {{DAILY_FREE_QUOTA}}`,
+        `unknown placeholder "${token}": ${ALLOWED_PLACEHOLDER_HINT}`,
       );
     }
     return value;
@@ -170,14 +173,26 @@ function interpolatePlaceholders(fileName: string, text: string): string {
   if (residual) {
     throw new ArticleContentError(
       fileName,
-      residual.startsWith("{{")
-        ? `unclosed placeholder "${residual}": expected the form {{MONTHLY_PRICE_USD}} or {{DAILY_FREE_QUOTA}}`
-        : `stray placeholder closer "${residual}": a lone }} has no opening {{; the only allowed placeholders are {{MONTHLY_PRICE_USD}} and {{DAILY_FREE_QUOTA}}`,
+      `unclosed placeholder "${residual}": ${ALLOWED_PLACEHOLDER_HINT}`,
     );
   }
 
   assertNoUntemplatedClaims(fileName, text);
   return resolved;
+}
+
+/**
+ * Tags are literal labels (``article:tag`` and the visible tag list), so they are
+ * never interpolated: placeholder syntax there would leak its raw token. Fail
+ * through the same build-time error instead.
+ */
+function assertNoPlaceholderSyntax(fileName: string, value: string): void {
+  if (/\{\{|\}\}/.test(value)) {
+    throw new ArticleContentError(
+      fileName,
+      `tags must not contain placeholders: ${ALLOWED_PLACEHOLDER_HINT}`,
+    );
+  }
 }
 
 const REQUIRED_FIELDS = ["title", "description", "published"] as const;
@@ -377,7 +392,7 @@ export function parseArticle(fileName: string, source: string): Article {
     }
   }
 
-  const title = unquote(fields.get("title") ?? "");
+  const title = interpolatePlaceholders(fileName, unquote(fields.get("title") ?? ""));
   const description = interpolatePlaceholders(
     fileName,
     unquote(fields.get("description") ?? ""),
@@ -397,7 +412,10 @@ export function parseArticle(fileName: string, source: string): Article {
   }
 
   const tagsRaw = fields.get("tags");
-  if (tagsRaw) assertNoUntemplatedClaims(fileName, tagsRaw);
+  if (tagsRaw) {
+    assertNoPlaceholderSyntax(fileName, tagsRaw);
+    assertNoUntemplatedClaims(fileName, tagsRaw);
+  }
   const tags = tagsRaw ? parseTags(fileName, tagsRaw) : [];
   const draftRaw = fields.get("draft");
   const draft = draftRaw ? parseDraft(fileName, draftRaw) : false;

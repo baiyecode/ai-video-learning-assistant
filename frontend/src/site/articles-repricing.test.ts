@@ -122,6 +122,13 @@ describe("repriced Article artifacts", () => {
       );
       expect(offer?.price).toBe(8.5);
 
+      // GEO artifact: llms.txt quotes the same interpolated facts, so an answer
+      // engine cannot read a stale price or Quota out of it.
+      const llms = await readFile(path.join(outDir, "llms.txt"), "utf8");
+      expect(llms).toContain("$8.50/月");
+      expect(llms).toContain("每日 5 次");
+      expect(llms).not.toContain("$4.99/月");
+
       // The identical injected string appears verbatim on an Article page and the
       // pricing page — one knob, one price everywhere.
       const articleText = mindmap.body.textContent ?? "";

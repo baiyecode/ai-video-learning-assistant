@@ -78,7 +78,15 @@ export default defineConfig({
             url: "http://127.0.0.1:5173",
             timeout: 120_000,
             reuseExistingServer: false,
-            env: { ...inheritedEnv, VITE_SENTRY_DSN: "" },
+            env: {
+              ...inheritedEnv,
+              VITE_SENTRY_DSN: "",
+              // Pin the display mirrors so the golden-path assertions on the seeded
+              // copy stay deterministic even when the caller's shell exports a
+              // repriced build.
+              VITE_SUBSCRIPTION_MONTHLY_USD: "4.99",
+              VITE_ANALYSIS_DAILY_QUOTA: "3",
+            },
           },
         ],
       }
