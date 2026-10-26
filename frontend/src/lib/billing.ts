@@ -12,8 +12,6 @@ import {
   DEFAULT_MONTHLY_PRICE_USD,
 } from "@/lib/billing-defaults";
 
-export { DEFAULT_DAILY_FREE_ANALYSIS_LIMIT, DEFAULT_MONTHLY_PRICE_USD };
-
 export interface MembershipDto {
   status: string;
   period_end: string | null;

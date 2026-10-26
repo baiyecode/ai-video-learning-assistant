@@ -1,6 +1,6 @@
 ---
 title: 长视频的 AI 摘要与思维导图：分块归并、Quota 与限制
-description: 长视频的 AI 摘要与思维导图怎么做：Analysis 读取 Subtitle 分块归并，没有字幕则无法生成。本文说明免费 Account 每日 {{DAILY_FREE_QUOTA}} 次、VIP {{MONTHLY_PRICE_USD}} 不限次、失败不消耗 Quota 与结果仅本人可见。
+description: 长视频的 AI 摘要与思维导图怎么做：Analysis 读取 Subtitle 分块归并，没有字幕则无法生成。本文说明免费 Account 每日 {{DAILY_FREE_QUOTA}} 次、VIP {{MONTHLY_PRICE_USD}}不限次、失败不消耗 Quota 与结果仅本人可见。
 published: 2026-10-23
 updated: 2026-10-23
 tags: [AI 摘要, 思维导图, Analysis]

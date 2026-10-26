@@ -269,19 +269,26 @@ describe("article price placeholder interpolation", () => {
     expect(article.body).toContain("}}");
   });
 
-  it("renders the committed defaults for a junk price or a fractional quota", async () => {
-    // Mirror fallback semantics (``readBuildEnvNumber``): a fractional Quota and an
-    // unparseable price are refused, so an Article never renders ``$NaN/月``.
-    const article = await parseWithBuildArgs(
-      { VITE_SUBSCRIPTION_MONTHLY_USD: "not-a-number", VITE_ANALYSIS_DAILY_QUOTA: "2.5" },
-      "junk-build-args.md",
-      validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
-    );
+  it("renders the committed defaults for a junk price or quota, never NaN", async () => {
+    // Mirror fallback semantics (``readBuildEnvNumber``): a fractional Quota and a
+    // non-positive or unparseable price are refused, so an Article never renders
+    // ``$NaN/月`` or a negative amount even when the deploy arg is poisoned.
+    for (const [price, quota] of [
+      ["not-a-number", "2.5"],
+      ["0", "0"],
+      ["-4.99", "-1"],
+    ] as const) {
+      const article = await parseWithBuildArgs(
+        { VITE_SUBSCRIPTION_MONTHLY_USD: price, VITE_ANALYSIS_DAILY_QUOTA: quota },
+        "junk-build-args.md",
+        validSource({ description: PLACEHOLDER_DESCRIPTION }, PLACEHOLDER_BODY),
+      );
 
-    expect(article.body).toContain("免费 Account 每月 $4.99/月");
-    expect(article.body).toContain("免费账号自然日 3 次 Analysis");
-    expect(article.body).not.toContain("NaN");
-    expect(article.description).toContain("会员 $4.99/月，每日 3 次 Analysis");
+      expect(article.body).toContain("免费 Account 每月 $4.99/月");
+      expect(article.body).toContain("免费账号自然日 3 次 Analysis");
+      expect(article.body).not.toContain("NaN");
+      expect(article.description).toContain("会员 $4.99/月，每日 3 次 Analysis");
+    }
   });
 
   it("interpolates through the collection so every consumer reads the same text", () => {
@@ -411,10 +418,14 @@ describe("article literal-claim guard", () => {
     for (const literal of [
       "$9.99 /月",
       "＄９.９９／月",
+      "¥9.99/月",
+      "￥９.９９／月",
       "$9.99 每月",
       "$9.99/mo",
       "每月 $9.99",
       "4.99 美元/月",
+      "9.99 元/月",
+      "每月 9.99 元",
     ]) {
       expectFailure(
         "literal-price-variant.md",
@@ -422,7 +433,17 @@ describe("article literal-claim guard", () => {
         /literal monthly price/,
       );
     }
-    for (const literal of ["每日最多 3 次", "每天三次", "每日３次", "一天 3 次"]) {
+    for (const literal of [
+      "每日最多 3 次",
+      "每天三次",
+      "每日３次",
+      "一天 3 次",
+      "每日免费 3 次",
+      "每天仅 3 次",
+      "每天只需 3 次",
+      "3 次/天",
+      "３次／日",
+    ]) {
       expectFailure(
         "literal-quota-variant.md",
         validSource({}, `${BODY}\n\n免费 ${literal} Analysis。`),
