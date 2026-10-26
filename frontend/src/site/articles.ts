@@ -78,13 +78,20 @@ export class ArticleContentError extends Error {
  * Reading them here keeps the interpolation pure — no env access, no DOM, one
  * implementation shared by the client bundle, the prerender and the tests.
  */
-const PLACEHOLDER_VALUES = new Map<string, string>([
-  ["MONTHLY_PRICE_USD", PRICE_HEADLINE],
-  ["DAILY_FREE_QUOTA", String(DAILY_FREE_ANALYSIS_LIMIT)],
-]);
+export const PLACEHOLDER_NAMES = ["MONTHLY_PRICE_USD", "DAILY_FREE_QUOTA"] as const;
+type PlaceholderName = (typeof PLACEHOLDER_NAMES)[number];
+
+const PLACEHOLDER_VALUES: Record<PlaceholderName, string> = {
+  MONTHLY_PRICE_USD: PRICE_HEADLINE,
+  DAILY_FREE_QUOTA: String(DAILY_FREE_ANALYSIS_LIMIT),
+};
+
+function placeholderToken(name: PlaceholderName): string {
+  return `{{${name}}}`;
+}
 
 const ALLOWED_PLACEHOLDER_HINT =
-  "the only allowed placeholders are {{MONTHLY_PRICE_USD}} and {{DAILY_FREE_QUOTA}}";
+  `the only allowed placeholders are ${PLACEHOLDER_NAMES.map(placeholderToken).join(" and ")}`;
 
 /** A well-formed ``{{NAME}}`` token: no nesting, no stray braces inside. */
 const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
@@ -96,18 +103,25 @@ const PLACEHOLDER_PATTERN = /\{\{([^{}]*)\}\}/g;
  */
 const RESIDUAL_PLACEHOLDER_PATTERN = /\{\{[^\s{}]*/;
 
-/** The two known tokens, blanked out before the literal-claim guard runs. */
-const KNOWN_PLACEHOLDER_TOKEN_PATTERN = /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/g;
+/** The known tokens, derived from the one name list, blanked before guarding. */
+const KNOWN_PLACEHOLDER_TOKEN_PATTERN = new RegExp(
+  `\\{\\{(?:${PLACEHOLDER_NAMES.join("|")})\\}\\}`,
+  "g",
+);
 
 /**
- * A hand-written monthly-price claim in the source: a ``$``/``＄`` followed by
- * digits (thousands separators allowed) and a monthly suffix (``/月``, ``／月``,
- * ``/mo``, ``/month`` or ``每月``), tolerating spaces and full-width digits.
- * Interpolated placeholders are masked out before this runs, so only un-templated
- * literals are caught.
+ * Hand-written monthly-price claims in the source, tolerating spaces and
+ * full-width digits. Three shapes: a currency amount with a monthly suffix
+ * (``$9.99/月``, ``＄９.９９／月``, ``$9.99/mo``, ``$9.99 每月``), a ``每月``
+ * prefix before the amount (``每月 $9.99``), and a ``美元``/``美金`` amount with
+ * a monthly suffix (``4.99 美元/月``). Interpolated placeholders are masked out
+ * before this runs, so only un-templated literals are caught.
  */
-const LITERAL_PRICE_PATTERN =
-  /[＄$]\s*[\d０-９][\d０-９.,，]*\s*(?:[\/／]\s*(?:月|mo(?:nth)?\b)|每月)/u;
+const LITERAL_PRICE_PATTERNS = [
+  /[＄$]\s*[\d０-９][\d０-９.,，]*\s*(?:[\/／]\s*(?:月|mo(?:nth)?\b)|每月)/u,
+  /每月\s*(?:[＄$]\s*[\d０-９][\d０-９.,，]*|[\d０-９]+[.,，][\d０-９]+|[\d０-９]+\s*(?:美元|美金))/u,
+  /[\d０-９][\d０-９.,，]*\s*(?:美元|美金)\s*(?:[\/／]\s*月|每月)/u,
+];
 
 /**
  * A hand-written daily-quota claim in the source: a daily prefix (``每日``,
@@ -118,6 +132,25 @@ const LITERAL_PRICE_PATTERN =
  */
 const LITERAL_QUOTA_PATTERN =
   /(?:每日|每天|自然日|一天)\s*(?:最多|至少|可|上限为?)?\s*(?:[\d０-９]+|[零一二三四五六七八九十百千万两]+)\s*次/u;
+
+interface ClaimGuard {
+  label: string;
+  patterns: RegExp[];
+  remedy: string;
+}
+
+const CLAIM_GUARDS: ClaimGuard[] = [
+  {
+    label: "literal monthly price",
+    patterns: LITERAL_PRICE_PATTERNS,
+    remedy: `money claims must use the placeholder ${placeholderToken("MONTHLY_PRICE_USD")}, not hand-written numbers`,
+  },
+  {
+    label: "literal daily quota",
+    patterns: [LITERAL_QUOTA_PATTERN],
+    remedy: `quota claims must use the placeholder ${placeholderToken("DAILY_FREE_QUOTA")} (as in "每日 ${placeholderToken("DAILY_FREE_QUOTA")} 次"), not hand-written numbers`,
+  },
+];
 
 /**
  * The strict literal-claim guard (issue #45): refuse a field whose SOURCE —
@@ -133,20 +166,13 @@ const LITERAL_QUOTA_PATTERN =
 function assertNoUntemplatedClaims(fileName: string, raw: string): void {
   const untemplated = raw.replace(KNOWN_PLACEHOLDER_TOKEN_PATTERN, "");
 
-  const literalPrice = LITERAL_PRICE_PATTERN.exec(untemplated)?.[0];
-  if (literalPrice) {
-    throw new ArticleContentError(
-      fileName,
-      `literal monthly price "${literalPrice}": money claims must use the placeholder {{MONTHLY_PRICE_USD}}, not hand-written numbers`,
-    );
-  }
-
-  const literalQuota = LITERAL_QUOTA_PATTERN.exec(untemplated)?.[0];
-  if (literalQuota) {
-    throw new ArticleContentError(
-      fileName,
-      `literal daily quota "${literalQuota}": quota claims must use the placeholder {{DAILY_FREE_QUOTA}} (as in "每日 {{DAILY_FREE_QUOTA}} 次"), not hand-written numbers`,
-    );
+  for (const guard of CLAIM_GUARDS) {
+    for (const pattern of guard.patterns) {
+      const literal = pattern.exec(untemplated)?.[0];
+      if (literal) {
+        throw new ArticleContentError(fileName, `${guard.label} "${literal}": ${guard.remedy}`);
+      }
+    }
   }
 }
 
@@ -157,9 +183,9 @@ function assertNoUntemplatedClaims(fileName: string, raw: string): void {
  * message (P4-1 behavior), so a field only reaches the guard once its
  * placeholders are valid.
  */
-function interpolatePlaceholders(fileName: string, text: string): string {
+function resolveArticleField(fileName: string, text: string): string {
   const resolved = text.replace(PLACEHOLDER_PATTERN, (token, name: string) => {
-    const value = PLACEHOLDER_VALUES.get(name);
+    const value = (PLACEHOLDER_VALUES as Record<string, string | undefined>)[name];
     if (value === undefined) {
       throw new ArticleContentError(
         fileName,
@@ -183,11 +209,12 @@ function interpolatePlaceholders(fileName: string, text: string): string {
 
 /**
  * Tags are literal labels (``article:tag`` and the visible tag list), so they are
- * never interpolated: placeholder syntax there would leak its raw token. Fail
- * through the same build-time error instead.
+ * never interpolated: a ``{{`` opener there would leak its raw token. Fail
+ * through the same build-time error instead. A lone ``}}`` has nothing to
+ * resolve and stays legal, matching the body rule.
  */
 function assertNoPlaceholderSyntax(fileName: string, value: string): void {
-  if (/\{\{|\}\}/.test(value)) {
+  if (value.includes("{{")) {
     throw new ArticleContentError(
       fileName,
       `tags must not contain placeholders: ${ALLOWED_PLACEHOLDER_HINT}`,
@@ -392,8 +419,8 @@ export function parseArticle(fileName: string, source: string): Article {
     }
   }
 
-  const title = interpolatePlaceholders(fileName, unquote(fields.get("title") ?? ""));
-  const description = interpolatePlaceholders(
+  const title = resolveArticleField(fileName, unquote(fields.get("title") ?? ""));
+  const description = resolveArticleField(
     fileName,
     unquote(fields.get("description") ?? ""),
   );
@@ -435,7 +462,7 @@ export function parseArticle(fileName: string, source: string): Article {
     );
   }
 
-  const trimmedBody = interpolatePlaceholders(fileName, body.trim());
+  const trimmedBody = resolveArticleField(fileName, body.trim());
   const bodyCharacters = countBodyCharacters(trimmedBody);
   if (bodyCharacters < BODY_MIN_CHARACTERS) {
     throw new ArticleContentError(

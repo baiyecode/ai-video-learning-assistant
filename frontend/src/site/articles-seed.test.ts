@@ -11,13 +11,16 @@ import path from "node:path";
 import { JSDOM } from "jsdom";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { extractInternalLinks, parseArticle } from "@/site/articles";
+import { PLACEHOLDER_NAMES, extractInternalLinks, parseArticle } from "@/site/articles";
 import { defaultArticleCollection, defaultArticleSources } from "@/site/article-sources";
 import { buildSite } from "@/site/build-site";
 import { renderRoute } from "@/site/entry-server";
 import { pageDescriptors } from "@/site/seo";
 
 const ORIGIN = "https://example.com";
+
+/** The placeholder tokens, derived from the content model's one name list. */
+const PLACEHOLDER_TOKENS = PLACEHOLDER_NAMES.map((name) => `{{${name}}}`);
 
 /** The published set, newest first. Dates are part of the contract. */
 const SEED_ARTICLES = [
@@ -161,12 +164,13 @@ describe("seed Article sources pass the literal-claim guard", () => {
 
   it("the real sources carry templated claims", () => {
     for (const { fileName, source } of defaultArticleSources) {
-      expect(source, `${fileName} uses at least one placeholder`).toMatch(
-        /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/,
-      );
-      const withoutKnownTokens = source.replace(
-        /\{\{(?:MONTHLY_PRICE_USD|DAILY_FREE_QUOTA)\}\}/g,
-        "",
+      expect(
+        PLACEHOLDER_TOKENS.some((token) => source.includes(token)),
+        `${fileName} uses at least one placeholder`,
+      ).toBe(true);
+      const withoutKnownTokens = PLACEHOLDER_TOKENS.reduce(
+        (text, token) => text.split(token).join(""),
+        source,
       );
       expect(withoutKnownTokens, `${fileName} leaks no raw placeholder`).not.toMatch(/\{\{|\}\}/);
     }

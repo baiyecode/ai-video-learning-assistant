@@ -53,7 +53,7 @@ B 站上的 Subtitle 来源不同，导出的文本质量也不同：
 
 导出 TXT 后，可以直接搜索关键词、整理成问答，或者把字幕交给 Analysis 生成简体中文摘要与思维导图。Analysis 只以 Subtitle 为文本依据，所以字幕是否完整决定了摘要的质量；没有字幕的视频不会「猜」内容。
 
-Quota 在成功创建 Analysis 时消耗，失败会退回；查看已有 Analysis 不消耗 Quota。免费 Account 每天 {{DAILY_FREE_QUOTA}} 次，VIP 会员不限次，是否升级可以先用满免费 Quota 再判断。
+Quota 在成功创建 Analysis 时消耗，失败会退回；查看已有 Analysis 不消耗 Quota。免费 Account 每天 {{DAILY_FREE_QUOTA}} 次，VIP Membership 不限次，是否升级可以先用满免费 Quota 再判断。
 
 ## 常见问题
 

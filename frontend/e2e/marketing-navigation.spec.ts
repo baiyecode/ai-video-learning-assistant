@@ -1,5 +1,9 @@
 import { expect, test } from "@playwright/test";
 
+import {
+  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
+  DEFAULT_MONTHLY_PRICE_USD,
+} from "../src/lib/billing-defaults";
 import { DEMO_YOUTUBE_TITLE, DEMO_YOUTUBE_URL, resolveOnHome } from "./goldenPath";
 
 /**
@@ -107,8 +111,12 @@ test.describe("article reading", () => {
 
     // Ticket #47: the client bundle interpolates the price/quota placeholders from
     // the same build-time mirror, so the SPA shows what the prerendered artifact shows.
-    await expect(page.getByRole("article")).toContainText("$4.99/月");
-    await expect(page.getByRole("article")).toContainText("自然日 3 次");
+    await expect(page.getByRole("article")).toContainText(
+      `$${DEFAULT_MONTHLY_PRICE_USD.toFixed(2)}/月`,
+    );
+    await expect(page.getByRole("article")).toContainText(
+      `自然日 ${DEFAULT_DAILY_FREE_ANALYSIS_LIMIT} 次`,
+    );
 
     const toc = page.getByRole("navigation", { name: "文章目录" });
     await expect(toc).toBeVisible();

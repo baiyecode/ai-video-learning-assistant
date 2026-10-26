@@ -141,14 +141,23 @@ describe("repriced Article artifacts", () => {
 describe("Article SSR/client rendering parity", () => {
   it("renders the interpolated Article text verbatim the same in SSR and a client mount", async () => {
     vi.resetModules();
-    const [{ renderRoute }, { defaultArticleCollection }, vue, { createPinia }, { createMemoryHistory }] =
-      await Promise.all([
-        import("@/site/entry-server"),
-        import("@/site/article-sources"),
-        import("vue"),
-        import("pinia"),
-        import("vue-router"),
-      ]);
+    const [
+      { renderRoute },
+      { buildArticleCollection },
+      { defaultArticleSources },
+      { pageDescriptors },
+      vue,
+      { createPinia },
+      { createMemoryHistory },
+    ] = await Promise.all([
+      import("@/site/entry-server"),
+      import("@/site/articles"),
+      import("@/site/article-sources"),
+      import("@/site/seo"),
+      import("vue"),
+      import("pinia"),
+      import("vue-router"),
+    ]);
     const [{ default: App }, { createAppRouter }, { ARTICLES_KEY }] = await Promise.all([
       import("@/App.vue"),
       import("@/router"),
@@ -156,8 +165,13 @@ describe("Article SSR/client rendering parity", () => {
     ]);
 
     const routePath = "/articles/ai-video-summary-mindmap";
-    const collection = defaultArticleCollection();
-    const { html } = await renderRoute(routePath, collection);
+    // Build each side independently: handing one collection to both renders would
+    // compare an object with itself and could not catch the prerender and client
+    // resolution drifting apart.
+    const publicRoutes = pageDescriptors.map((descriptor) => descriptor.path);
+    const ssrCollection = buildArticleCollection(defaultArticleSources, { publicRoutes });
+    const clientCollection = buildArticleCollection(defaultArticleSources, { publicRoutes });
+    const { html } = await renderRoute(routePath, ssrCollection);
     const ssrArticle = parse(`<div id="app">${html}</div>`).querySelector("article");
     expect(ssrArticle).not.toBeNull();
 
@@ -172,7 +186,7 @@ describe("Article SSR/client rendering parity", () => {
     }
     const app = vue.createApp(App);
     app.use(createPinia());
-    app.provide(ARTICLES_KEY, collection);
+    app.provide(ARTICLES_KEY, clientCollection);
     const router = createAppRouter(createMemoryHistory(), { updateHead: false });
     app.use(router);
     await router.push(routePath);

@@ -253,7 +253,7 @@ describe("article price placeholder interpolation", () => {
     expectFailure(
       "doubled-brace.md",
       validSource(
-        { description: `会员 ${PRICE_PLACEHOLDER}，每日 ${QUOTA_PLACEHOLDER} 次 Analysis，${"详".repeat(63)}` },
+        { description: PLACEHOLDER_DESCRIPTION },
         `{{{${PRICE_PLACEHOLDER}}}}\n\n${BODY}`,
       ),
       /unclosed placeholder/,
@@ -398,8 +398,24 @@ describe("article literal-claim guard", () => {
     );
   });
 
+  it("keeps a lone }} in tags legal: it is literal label text", () => {
+    const article = parseArticle(
+      "stray-closer-tag.md",
+      validSource({ tags: "[视频总结, }}]" }),
+    );
+
+    expect(article.tags).toContain("}}");
+  });
+
   it("catches spacing, full-width and natural-language literal variants", () => {
-    for (const literal of ["$9.99 /月", "＄９.９９／月", "$9.99 每月", "$9.99/mo"]) {
+    for (const literal of [
+      "$9.99 /月",
+      "＄９.９９／月",
+      "$9.99 每月",
+      "$9.99/mo",
+      "每月 $9.99",
+      "4.99 美元/月",
+    ]) {
       expectFailure(
         "literal-price-variant.md",
         validSource({}, `${BODY}\n\n会员 ${literal}。`),
@@ -424,6 +440,15 @@ describe("article literal-claim guard", () => {
       ),
     );
     expect(article.body).toContain("消耗 1 次");
+  });
+
+  it("does not read a 每月 count as a price claim", () => {
+    const article = parseArticle(
+      "monthly-count.md",
+      validSource({}, `${BODY}\n\n每月 3 次复盘即可。`),
+    );
+
+    expect(article.body).toContain("每月 3 次");
   });
 
   it("does not trip on a correctly templated claim", () => {

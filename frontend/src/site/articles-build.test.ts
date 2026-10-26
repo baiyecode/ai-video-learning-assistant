@@ -355,4 +355,28 @@ describe("article artifacts", () => {
       /hand-quota\.md.*literal daily quota "每日 5 次"/,
     );
   });
+
+  it("fails the prerender build on unknown and unclosed placeholders", async () => {
+    const outDir = await tempDir();
+
+    const unknown: ArticleSource[] = [
+      {
+        fileName: "unknown-placeholder.md",
+        source: fixtureSource("未知占位符的文章", "未知占位符的文章", {}, "\n\n会员 {{MONTHLY_PRICE}} 即可解锁。"),
+      },
+    ];
+    await expect(build(outDir, unknown)).rejects.toThrow(
+      /unknown-placeholder\.md.*unknown placeholder "\{\{MONTHLY_PRICE\}\}"/,
+    );
+
+    const unclosed: ArticleSource[] = [
+      {
+        fileName: "unclosed-placeholder.md",
+        source: fixtureSource("未闭合占位符的文章", "未闭合占位符的文章", {}, "\n\n会员 {{MONTHLY_PRICE_USD 即可解锁。"),
+      },
+    ];
+    await expect(build(outDir, unclosed)).rejects.toThrow(
+      /unclosed-placeholder\.md.*unclosed placeholder/,
+    );
+  });
 });
