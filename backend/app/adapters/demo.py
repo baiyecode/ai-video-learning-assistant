@@ -41,6 +41,9 @@ _DEMO_SUBTITLE = (
     "坚持记录复习结果，让算法根据掌握程度调整下一次出现的时间。"
 )
 
+#: Pretend network time for the fake caption fetch; see ``DemoVideoSource.fetch_subtitle``.
+_SUBTITLE_FETCH_DELAY_SECONDS = 0.05
+
 
 class DemoVideoSource:
     """Resolves any supported URL to canned, deterministic content.
@@ -68,6 +71,12 @@ class DemoVideoSource:
         )
 
     async def fetch_subtitle(self, video: ResolvedVideo, track: SubtitleTrack) -> SubtitlePayload:
+        # The real adapter fetches captions over the network; that round-trip is the
+        # window in which two concurrent resolves of one new Video both read "no
+        # Subtitle yet". Yielding here keeps the browser-level concurrent-resolve
+        # regression able to reproduce the historical duplicate-insert 500 instead of
+        # passing by scheduling luck; that spec asserts the two requests overlap.
+        await asyncio.sleep(_SUBTITLE_FETCH_DELAY_SECONDS)
         return SubtitlePayload(
             track=track,
             cues=[

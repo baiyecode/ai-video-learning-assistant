@@ -35,7 +35,7 @@ frontend/                Vue 3 + Vite + TypeScript + Tailwind + Pinia + vue-rout
   content/articles/      Markdown + frontmatter 文章源（文件名即 slug）
   public/brand/          品牌图标与 1200x630 分享卡
   scripts/prerender.mjs  预渲染入口：读取客户端构建外壳与 SSR bundle，逐路由写出静态 HTML
-  e2e/                   Playwright 黄金路径与营销导航（默认跳过）
+  e2e/                   Playwright 黄金路径、并发解析回归与营销导航（默认跳过）
 docker-compose.yml       api + web（nginx 托管 SPA 并代理 /api、/health）
 ```
 
@@ -113,6 +113,10 @@ Playwright 用例默认跳过。设置 `PLAYWRIGHT_E2E=1` 时它会用假适配�
    抖音地址的解析与下载，以及 `/verify-email` 验证页。
 3. `marketing-navigation.spec.ts`：首页解析后隐藏营销区块、`/features → /guide → /faq → /articles → 文章详情 → /` 静态导航、
    文章目录锚点跳转、私有路由 noindex 与 `/account` 登录跳转、未知路径 404，以及 375px 小屏不横向溢出。
+4. `concurrent-resolve.spec.ts`：两个独立浏览器上下文同时解析同一个全新 Video，两侧都 200 并指向同一条 Video。
+
+spec 文件默认并行执行（不设 `workers: 1`）；每次运行使用独立的空临时数据库与数据目录，测试只创建运行内唯一的数据，
+结束后由 teardown 删除该目录。
 
 假邮件收件箱通过 `GET /api/demo/inbox`（仅 `APP_FAKE_ADAPTERS=1` 暴露）交回一次性验证链接，
 支付成功用与产品同一个 `POST /api/billing/webhook`（以 `whsec_demo` 签名）注入，因此不开任何真实端口。
@@ -186,7 +190,7 @@ docker compose up --build # 前端 http://127.0.0.1:8080 ，健康检查 /health
 - 开关与订阅：`APP_DOUYIN_ENABLED`（默认 `false`，灰度/回滚见 `docs/ops/douyin-gray-release.md`）；`APP_SUBSCRIPTION_MONTHLY_USD=4.99` 是标价与免费配额的唯一来源，既进 `/api/me/membership` 的响应，也由 compose 镜像成前端 `VITE_` 构建参数（见「构建/预渲染」一节），**实际扣款以支付方（Stripe）配置为准**。
 - 邮件验证：`APP_EMAIL_VERIFICATION_TOKEN_TTL_HOURS=24`；`APP_FRONTEND_BASE_URL` 必须指向用户浏览器实际访问的地址（compose 默认 `http://localhost:8080`，正式域名部署时改为公网 origin，否则验证邮件里的链接打不开）。
 - 限流：`APP_RATE_LIMIT_VERIFICATION_REQUEST_PER_HOUR=3`（发信防滥用）。
-- CORS：compose 栈是同源部署（nginx 代理 `/api`），`APP_CORS_ORIGINS` 保持 `[]`；仅当浏览器直连 API 时才配置，本地 Vite 开发放行 5173 的方式见 `.env.example` 注释。
+- CORS：compose 栈是同源部署（nginx 代理 `/api`），`APP_CORS_ORIGINS` 保持 `[]`；仅当浏览器直连 API 或前端与 API 不同 origin 时才配置。本地 Vite 开发无需配置：开发代理保留浏览器的 Host，后端算出的自身 origin 与浏览器一致，登录后刷新与退出登录按与生产相同的同源路径工作。
 - 从 P1 部署升级：先 `docker compose up -d api`，再执行一次 `docker compose exec api python -m scripts.migrate_p2`（无 Alembic，`create_all` 不给既有表加列；新库无需执行）。
 
 ### 生产部署清单（P3 新增项：静态站点与站点地址）

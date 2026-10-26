@@ -6,12 +6,27 @@ import logging
 from typing import Any
 
 from sqlalchemy import event
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from .config import Settings
 
 logger = logging.getLogger("app.db")
+
+
+def is_unique_conflict(exc: IntegrityError, *columns: str) -> bool:
+    """Whether ``exc`` is a UNIQUE violation naming all of these ``table.column`` items.
+
+    SQLite is the only supported engine (ADR-0001) and its UNIQUE error text lists the
+    offending columns (``UNIQUE constraint failed: subtitles.video_id``), so the column
+    list is what separates the concurrent insert a caller may adopt from any other
+    constraint violation - the latter is a bug and must surface, not be swallowed.
+    """
+    if getattr(exc.orig, "sqlite_errorname", "") != "SQLITE_CONSTRAINT_UNIQUE":
+        return False
+    message = str(getattr(exc, "orig", exc)).lower()
+    return all(column.lower() in message for column in columns)
 
 
 class Base(DeclarativeBase):

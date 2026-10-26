@@ -1,9 +1,13 @@
 import { defineConfig, devices } from "@playwright/test";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 
 import {
   DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
   DEFAULT_MONTHLY_PRICE_USD,
 } from "./src/lib/billing-defaults";
+import { RUN_ROOT_MARKER, RUN_ROOT_PREFIX } from "./e2e/run-scope";
 
 /**
  * Golden paths only (see e2e/golden-path*.spec.ts). Both servers start
@@ -17,14 +21,66 @@ const inheritedEnv = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );
 
+type RunScope = {
+  databaseUrl: string;
+  dataDir: string;
+  mediaRoot: string;
+};
+
+/** Absolute SQLite URL with forward slashes, e.g. `sqlite+aiosqlite:///C:/tmp/x/e2e.db`. */
+function sqliteUrl(filePath: string): string {
+  return `sqlite+aiosqlite:///${filePath.replace(/\\/g, "/")}`;
+}
+
+/**
+ * Run-scoped, empty database and data directory.
+ *
+ * Every `PLAYWRIGHT_E2E=1` run gets its own directory under the OS temp directory
+ * (`fs.mkdtempSync` never reuses a name). The database is constructed as empty by
+ * the run itself: nothing is copied, and nothing has to be deleted beforehand -
+ * the first backend connection creates `e2e.db` and the app's startup hook creates
+ * the schema. A crashed or failed previous run therefore cannot leak state into
+ * this one. `e2e/global-teardown.ts` removes only the directory created here.
+ *
+ * `E2E_RUN_ROOT` is the hand-off to Playwright worker processes, which inherit the
+ * main process environment and re-evaluate this config: only the evaluation that
+ * creates the directory logs it and writes the ownership marker; workers reuse the
+ * existing path. If the variable is already set (e.g. by a debugging shell), that
+ * directory is used as-is and, having been created by someone else, carries no
+ * marker - so teardown leaves it, and everything inside it, alone.
+ */
+function createRunScope(): RunScope {
+  const existingRoot = process.env.E2E_RUN_ROOT;
+  const created = !existingRoot;
+  const root = existingRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), RUN_ROOT_PREFIX));
+  process.env.E2E_RUN_ROOT = root;
+  if (created) {
+    fs.writeFileSync(path.join(root, RUN_ROOT_MARKER), "");
+  }
+
+  const dataDir = path.join(root, "data");
+  fs.mkdirSync(dataDir, { recursive: true });
+  const databaseUrl = sqliteUrl(path.join(root, "e2e.db"));
+
+  if (created) {
+    console.log(`[e2e] fresh run-scoped database: ${databaseUrl}`);
+  }
+  return { databaseUrl, dataDir, mediaRoot: path.join(dataDir, "media") };
+}
+
+const runScope = enabled ? createRunScope() : undefined;
+
 export default defineConfig({
   testDir: "./e2e",
+  // Tests inside one spec file stay in declaration order: the golden paths walk a
+  // single browser session through register -> resolve -> analyse -> upgrade, so a
+  // later step depends on the row the previous step wrote. Spec *files* do run in
+  // parallel (Playwright's default worker count) and share one fake-adapter backend
+  // and one run-scoped SQLite file. The shared rows are the canned demo Videos
+  // (`demoP1Video`, `demoDouyinVideo`): concurrent resolves of one Video are idempotent
+  // by design (ticket #54) - e2e/concurrent-resolve.spec.ts covers exactly that. New
+  // tests that need their own Video pass a run-unique platform video id.
   fullyParallel: false,
-  // One worker: spec files share the fake-adapter backend and its SQLite file.
-  // Two files resolving the same brand-new Video at once hit a known backend
-  // race (duplicate Subtitle insert on the losing side -> 500), which is out of
-  // this ticket's scope; serialising keeps the required local run deterministic.
-  workers: 1,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,
@@ -35,7 +91,10 @@ export default defineConfig({
     locale: "zh-CN",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  ...(enabled
+  // Registered only for a real run, matching where `createRunScope` is called: the
+  // hook deletes the run-scoped temp directory and has nothing to do otherwise.
+  globalTeardown: enabled ? "./e2e/global-teardown.ts" : undefined,
+  ...(runScope
     ? {
         webServer: [
           {
@@ -49,15 +108,19 @@ export default defineConfig({
               APP_FAKE_ADAPTERS: "1",
               APP_ENV: "development",
               APP_SECRET_KEY: "e2e-secret-key-not-for-production",
-              APP_DATABASE_URL: "sqlite+aiosqlite:///./data/e2e.db",
-              APP_DATA_DIR: "./data/e2e",
+              APP_DATABASE_URL: runScope.databaseUrl,
+              APP_DATA_DIR: runScope.dataDir,
+              // Pin the media root too: it defaults to `<APP_DATA_DIR>/media`, but an
+              // exported APP_MEDIA_ROOT in the caller's shell would otherwise send
+              // downloaded demo media outside the run directory teardown owns.
+              APP_MEDIA_ROOT: runScope.mediaRoot,
               APP_AUTH_COOKIE_SECURE: "false",
-              // The dev server proxies ``/api`` with ``changeOrigin``, so the backend sees
-              // its own ``:8000`` origin while the browser sends ``Origin: :5173``. Without
-              // this allowance the cookie refresh (``POST /auth/refresh``) would be refused
-              // and every page reload would drop the Session.
-              APP_CORS_ORIGINS: '["http://127.0.0.1:5173"]',
-              // The fake mailer's verification link must open in this very browser
+              APP_CORS_ORIGINS: "[]",
+              // Pin the CORS allowance off: an exported APP_CORS_ORIGINS in the caller's
+              // shell must not silently restore it. The dev server proxies ``/api`` and
+              // keeps the browser's Host, so the backend's own origin matches the one the
+              // browser sends and the same-origin path (no CORS allowance) is what is
+              // tested. The fake mailer's verification link must open in this very browser
               // session, so the backend builds it against the dev-server origin.
               APP_FRONTEND_BASE_URL: "http://127.0.0.1:5173",
               // P2-09's second golden path covers 抖音 parsing + Download, so the
