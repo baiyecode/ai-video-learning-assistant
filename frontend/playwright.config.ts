@@ -68,11 +68,12 @@ const runScope = enabled ? createRunScope() : undefined;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
-  // One worker: spec files share the fake-adapter backend and its SQLite file.
-  // Two files resolving the same brand-new Video at once hit a known backend
-  // race (duplicate Subtitle insert on the losing side -> 500), which is out of
-  // this ticket's scope; serialising keeps the required local run deterministic.
-  workers: 1,
+  // Spec files run in parallel (Playwright's default worker count) against one
+  // fake-adapter backend and one run-scoped SQLite file. That is deliberate: resolving
+  // a Video is idempotent (#54), and every test creates run-unique data (Accounts,
+  // platform video ids). e2e/concurrent-resolve.spec.ts pins the empty-database race
+  // that used to force a single worker. `fullyParallel: false` still keeps the tests
+  // inside one file in declaration order.
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,
