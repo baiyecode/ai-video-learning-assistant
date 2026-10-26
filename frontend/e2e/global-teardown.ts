@@ -15,8 +15,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-/** Must match the ``fs.mkdtempSync`` prefix in ``playwright.config.ts``. */
-const RUN_ROOT_PREFIX = "ai-video-e2e-";
+import { RUN_ROOT_PREFIX } from "./run-scope";
 
 function removeRunRoot(runRoot: string): void {
   const options = { recursive: true, force: true, maxRetries: 5, retryDelay: 100 } as const;

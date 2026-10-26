@@ -172,7 +172,9 @@ async def sync_selection(
         if existing is not None:
             await session.delete(existing)
             await session.commit()
-        return False
+        # Parent #51: report the row this request leaves persisted, not the pre-fetch
+        # observation - a concurrent resolve may have committed the winning Subtitle.
+        return await _find(session, video_id) is not None
 
     row = existing if existing is not None else Subtitle(video_id=video_id)
     _apply_track(row, track, source_type, cues, text)
@@ -197,8 +199,12 @@ async def sync_selection(
 
 def _is_subtitle_identity_conflict(exc: IntegrityError) -> bool:
     """Whether ``exc`` is the expected concurrent insert on ``subtitles.video_id``."""
+    # SQLite is the only supported engine (ADR-0001), so require its UNIQUE errorname;
+    # the column check stays because it names the one identity this recovery may adopt.
+    if getattr(exc.orig, "sqlite_errorname", "") != "SQLITE_CONSTRAINT_UNIQUE":
+        return False
     message = str(getattr(exc, "orig", exc)).lower()
-    return "unique" in message and "subtitles.video_id" in message
+    return "subtitles.video_id" in message
 
 
 def _apply_track(

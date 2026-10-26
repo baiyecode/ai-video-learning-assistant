@@ -7,6 +7,7 @@ import {
   DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
   DEFAULT_MONTHLY_PRICE_USD,
 } from "./src/lib/billing-defaults";
+import { RUN_ROOT_PREFIX } from "./e2e/run-scope";
 
 /**
  * Golden paths only (see e2e/golden-path*.spec.ts). Both servers start
@@ -19,9 +20,6 @@ const enabled = process.env.PLAYWRIGHT_E2E === "1";
 const inheritedEnv = Object.fromEntries(
   Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
 );
-
-/** Prefix for the per-run temp directory; ``e2e/global-teardown.ts`` relies on it. */
-const RUN_ROOT_PREFIX = "ai-video-e2e-";
 
 type RunScope = {
   databaseUrl: string;
@@ -68,12 +66,11 @@ const runScope = enabled ? createRunScope() : undefined;
 export default defineConfig({
   testDir: "./e2e",
   fullyParallel: false,
-  // Spec files run in parallel (Playwright's default worker count) against one
-  // fake-adapter backend and one run-scoped SQLite file. That is deliberate: resolving
-  // a Video is idempotent (#54), and every test creates run-unique data (Accounts,
-  // platform video ids). e2e/concurrent-resolve.spec.ts pins the empty-database race
-  // that used to force a single worker. `fullyParallel: false` still keeps the tests
-  // inside one file in declaration order.
+  // Spec files run in parallel (Playwright's default worker count). They share one
+  // fake-adapter backend and one run-scoped SQLite file; that is safe because resolving
+  // a Video is idempotent and every test creates run-unique data (Accounts, platform
+  // video ids). e2e/concurrent-resolve.spec.ts covers concurrent resolve explicitly.
+  // `fullyParallel: false` still keeps the tests inside one file in declaration order.
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
   timeout: 60_000,
@@ -103,10 +100,12 @@ export default defineConfig({
               APP_DATABASE_URL: runScope.databaseUrl,
               APP_DATA_DIR: runScope.dataDir,
               APP_AUTH_COOKIE_SECURE: "false",
-              // No APP_CORS_ORIGINS: the dev server proxies ``/api`` and keeps the
-              // browser's Host, so the backend's own origin matches the one the browser
-              // sends and the same-origin path (no CORS allowance) is what is tested.
-              // The fake mailer's verification link must open in this very browser
+              APP_CORS_ORIGINS: "[]",
+              // Pin the CORS allowance off: an exported APP_CORS_ORIGINS in the caller's
+              // shell must not silently restore it. The dev server proxies ``/api`` and
+              // keeps the browser's Host, so the backend's own origin matches the one the
+              // browser sends and the same-origin path (no CORS allowance) is what is
+              // tested. The fake mailer's verification link must open in this very browser
               // session, so the backend builds it against the dev-server origin.
               APP_FRONTEND_BASE_URL: "http://127.0.0.1:5173",
               // P2-09's second golden path covers 抖音 parsing + Download, so the

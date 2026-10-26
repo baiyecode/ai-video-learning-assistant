@@ -1,6 +1,6 @@
 import { expect, test, type Page, type Response } from "@playwright/test";
 
-import { DEMO_YOUTUBE_TITLE, demoYouTubeUrl } from "./goldenPath";
+import { DEMO_SUBTITLE_LINE, DEMO_YOUTUBE_TITLE, demoYouTubeUrl } from "./goldenPath";
 
 /**
  * Regression for the empty-database resolve race (tickets #51/#52/#54/#56).
@@ -16,8 +16,6 @@ import { DEMO_YOUTUBE_TITLE, demoYouTubeUrl } from "./goldenPath";
  * left something behind. YouTube ids are exactly 11 characters of `[A-Za-z0-9_-]`.
  */
 const enabled = process.env.PLAYWRIGHT_E2E === "1";
-
-const SUBTITLE_LINE = "间隔重复是一种利用遗忘曲线安排复习的学习方法。";
 
 function runUniqueVideoId(): string {
   // `c` + 6 base-36 ticks + 4 base-36 random chars = the 11 characters a YouTube id has.
@@ -81,7 +79,7 @@ test.describe("concurrent resolve", () => {
         await expect(
           page.getByRole("heading", { level: 2, name: DEMO_YOUTUBE_TITLE }),
         ).toBeVisible();
-        await expect(page.getByText(SUBTITLE_LINE)).toBeVisible();
+        await expect(page.getByText(DEMO_SUBTITLE_LINE)).toBeVisible();
       }
     } finally {
       await firstContext.close();

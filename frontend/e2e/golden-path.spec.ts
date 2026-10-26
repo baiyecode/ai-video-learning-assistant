@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test";
 
 import {
+  DEMO_SUBTITLE_LINE,
   DEMO_YOUTUBE_TITLE,
   DEMO_YOUTUBE_URL,
   randomEmail,
@@ -43,9 +44,7 @@ test.describe("golden path", () => {
     await page.getByRole("button", { name: "解析视频" }).click();
 
     await expect(page.getByRole("heading", { level: 2, name: VIDEO_TITLE })).toBeVisible();
-    await expect(
-      page.getByText("间隔重复是一种利用遗忘曲线安排复习的学习方法。"),
-    ).toBeVisible();
+    await expect(page.getByText(DEMO_SUBTITLE_LINE)).toBeVisible();
 
     // --- Visitor: export the Subtitle --------------------------------------
     const subtitleDownload = page.waitForEvent("download");

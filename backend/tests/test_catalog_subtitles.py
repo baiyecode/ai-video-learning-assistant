@@ -269,13 +269,14 @@ async def test_repeated_resolve_keeps_one_selection_and_refreshes_changed_track(
     assert body["text"] == "english content"
 
 
-async def test_unexpected_integrity_error_is_not_swallowed(
+async def test_foreign_key_integrity_error_is_not_swallowed(
     client: AsyncClient, adapters: Adapters, app: FastAPI
 ) -> None:
     """Only the ``subtitles.video_id`` identity conflict is recoverable.
 
     A Subtitle whose Video row does not exist violates the foreign key instead; that
-    IntegrityError must surface, not be mistaken for the concurrent-resolve race.
+    IntegrityError must surface, not be mistaken for the concurrent-resolve race. This
+    case is tested below the HTTP seam because no HTTP path can create an orphan Video.
     """
     track = manual("zh-Hans")
     adapters.video_source.subtitles = {  # type: ignore[attr-defined]

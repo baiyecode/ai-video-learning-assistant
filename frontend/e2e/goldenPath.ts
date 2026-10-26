@@ -19,6 +19,8 @@ export const PASSWORD = "e2e-password-123";
 
 export const DEMO_YOUTUBE_URL = "https://www.youtube.com/watch?v=demoP1Video";
 export const DEMO_YOUTUBE_TITLE = "演示视频：从零理解间隔重复";
+/** The demo adapter's first Subtitle line, shown on the resolved Video card. */
+export const DEMO_SUBTITLE_LINE = "间隔重复是一种利用遗忘曲线安排复习的学习方法。";
 
 /** Quota-burning / post-upgrade Analyses each need their own Video, so each gets its own id. */
 export function demoYouTubeUrl(platformVideoId: string): string {

@@ -426,3 +426,70 @@ async def test_subtitle_fetch_failure_adopts_the_concurrently_persisted_subtitle
     assert failed.json()["video"]["id"] == succeeding.json()["video"]["id"]
     assert await _video_row_count(app, "youtube", "dQw4w9WgXcQ") == 1
     assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 1
+
+
+async def test_empty_caption_result_reports_the_concurrently_persisted_subtitle(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """An empty captions payload must report the row that ends up persisted (#54/#51).
+
+    The empty side reads "no Subtitle yet", waits while the other resolve commits the
+    winning row, then answers empty. Its answer must reflect the final persisted row,
+    not the pre-fetch observation.
+    """
+    source = adapters.video_source
+    source.videos = {YOUTUBE_URL: youtube_video()}  # type: ignore[attr-defined]
+    entered = asyncio.Event()
+    release = asyncio.Event()
+    source.subtitle_entered = entered  # type: ignore[attr-defined]
+    source.subtitle_empty_on_call = 1  # type: ignore[attr-defined]
+    source.subtitle_empty_gate = release  # type: ignore[attr-defined]
+
+    empty = asyncio.create_task(_resolve(client, YOUTUBE_URL))
+    await asyncio.wait_for(entered.wait(), timeout=10)  # the empty side is inside fetch
+
+    succeeding = await _resolve(client, YOUTUBE_URL)
+    assert succeeding.status_code == 200, succeeding.text
+    assert succeeding.json()["can_analyze"] is True
+
+    release.set()
+    emptied = await asyncio.wait_for(empty, timeout=10)
+
+    assert emptied.status_code == 200, emptied.text
+    assert emptied.json()["can_analyze"] is True
+    assert emptied.json()["video"]["id"] == succeeding.json()["video"]["id"]
+    assert await _video_row_count(app, "youtube", "dQw4w9WgXcQ") == 1
+    assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 1
+
+    exported = await client.get(
+        f"/api/videos/{succeeding.json()['video']['id']}/subtitles?format=srt"
+    )
+    assert exported.status_code == 200
+    assert "示例字幕" in exported.text
+
+
+async def test_concurrent_resolve_of_url_variants_shares_one_video_and_subtitle(
+    client: AsyncClient, adapters: Adapters, app: FastAPI
+) -> None:
+    """Two URL variants of one new Video racing: both succeed on one Video/Subtitle row."""
+    source = adapters.video_source
+    source.videos = {YOUTUBE_URL: youtube_video()}  # type: ignore[attr-defined]
+    # Both variants normalise to YOUTUBE_URL, so the fake sees one Video; the barrier
+    # holds both requests past their "no Subtitle yet" read before either inserts.
+    source.subtitle_barrier = asyncio.Barrier(2)  # type: ignore[attr-defined]
+    short_link = "https://youtu.be/dQw4w9WgXcQ?si=share"
+    watch_link = "https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=PL123&index=4"
+
+    responses = await asyncio.wait_for(
+        asyncio.gather(_resolve(client, short_link), _resolve(client, watch_link)), timeout=10
+    )
+
+    assert [response.status_code for response in responses] == [200, 200], [
+        response.text for response in responses
+    ]
+    bodies = [response.json() for response in responses]
+    assert bodies[0]["video"]["id"] == bodies[1]["video"]["id"]
+    assert bodies[0]["can_analyze"] is True
+    assert bodies[1]["can_analyze"] is True
+    assert await _video_row_count(app, "youtube", "dQw4w9WgXcQ") == 1
+    assert await _subtitle_row_count(app, "dQw4w9WgXcQ") == 1

@@ -209,12 +209,15 @@ class FakeVideoSource:
     # returning, so a test can hold two concurrent resolves past their "no Subtitle yet"
     # read. ``subtitle_entered`` is set as soon as a call starts; ``subtitle_fail_on_call``
     # picks the 1-based call that raises, waiting for ``subtitle_fail_gate`` first so the
-    # other request can commit the winning row.
+    # other request can commit the winning row. ``subtitle_empty_on_call`` picks the
+    # 1-based call that answers with empty cues/text, waiting for ``subtitle_empty_gate``
+    # so a test can let the winning request commit before it answers.
     subtitle_barrier: asyncio.Barrier | None = None
     subtitle_entered: asyncio.Event | None = None
     subtitle_fail_on_call: int | None = None
     subtitle_fail_gate: asyncio.Event | None = None
-    subtitle_error: Exception | None = None
+    subtitle_empty_on_call: int | None = None
+    subtitle_empty_gate: asyncio.Event | None = None
 
     async def resolve(self, url: str) -> ResolvedVideo:
         self.resolve_calls.append(url)
@@ -239,7 +242,11 @@ class FakeVideoSource:
         if self.subtitle_fail_on_call == call_number:
             if self.subtitle_fail_gate is not None:
                 await self.subtitle_fail_gate.wait()
-            raise self.subtitle_error or RuntimeError("synthetic subtitle fetch failure")
+            raise RuntimeError("synthetic subtitle fetch failure")
+        if self.subtitle_empty_on_call == call_number:
+            if self.subtitle_empty_gate is not None:
+                await self.subtitle_empty_gate.wait()
+            return SubtitlePayload(track=track, cues=[], text="")
         payload = self.subtitles.get((video.platform_video_id, track.language))
         if payload is not None:
             return payload
