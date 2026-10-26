@@ -112,26 +112,37 @@ const KNOWN_PLACEHOLDER_TOKEN_PATTERN = new RegExp(
 /**
  * Hand-written monthly-price claims in the source, tolerating spaces and
  * full-width digits. Three shapes: a currency amount with a monthly suffix
- * (``$9.99/月``, ``＄９.９９／月``, ``$9.99/mo``, ``$9.99 每月``), a ``每月``
- * prefix before the amount (``每月 $9.99``), and a ``美元``/``美金`` amount with
- * a monthly suffix (``4.99 美元/月``). Interpolated placeholders are masked out
- * before this runs, so only un-templated literals are caught.
+ * (``$9.99/月``, ``＄９.９９／月``, ``¥9.99/月``, ``$9.99/mo``, ``$9.99 每月``), a
+ * ``每月`` prefix before the amount (``每月 $9.99``), and a ``美元``/``美金``/``元``
+ * amount with a monthly suffix (``4.99 美元/月``, ``9.99 元/月``). Interpolated
+ * placeholders are masked out before this runs, so only un-templated literals are
+ * caught.
  */
 const LITERAL_PRICE_PATTERNS = [
-  /[＄$]\s*[\d０-９][\d０-９.,，]*\s*(?:[\/／]\s*(?:月|mo(?:nth)?\b)|每月)/u,
-  /每月\s*(?:[＄$]\s*[\d０-９][\d０-９.,，]*|[\d０-９]+[.,，][\d０-９]+|[\d０-９]+\s*(?:美元|美金))/u,
-  /[\d０-９][\d０-９.,，]*\s*(?:美元|美金)\s*(?:[\/／]\s*月|每月)/u,
+  /[＄$¥￥]\s*[\d０-９][\d０-９.,，]*\s*(?:[\/／]\s*(?:月|mo(?:nth)?\b)|每月)/u,
+  /每月\s*(?:[＄$¥￥]\s*[\d０-９][\d０-９.,，]*|[\d０-９]+[.,，][\d０-９]+|[\d０-９][\d０-９.,，]*\s*(?:美元|美金|元))/u,
+  /[\d０-９][\d０-９.,，]*\s*(?:美元|美金|元)\s*(?:[\/／]\s*月|每月)/u,
 ];
+
+const DAILY_QUOTA_PREFIX = "(?:每日|每天|自然日|一天)";
+const DAILY_QUOTA_QUALIFIER = "(?:免费|仅|只需|只|最多|至少|可|上限为?)";
+const QUOTA_COUNT = "(?:[\\d０-９]+|[零一二三四五六七八九十百千万两]+)";
 
 /**
  * A hand-written daily-quota claim in the source: a daily prefix (``每日``,
- * ``每天``, ``自然日`` or ``一天``), an optional qualifier, then a count (Arabic or
- * Chinese numerals) and ``次``, any spacing. The prefix is part of the pattern on
- * purpose — ``消耗 1 次`` or ``1 次 Quota`` describe a single consumption unit, not
- * the daily allowance, and stay legal.
+ * ``每天``, ``自然日`` or ``一天``), an optional qualifier (``免费``, ``仅``, ``最多``…),
+ * then a count (Arabic or Chinese numerals) and ``次``, any spacing — or the same
+ * claim in rate form (``3 次/天``). The prefix is part of the pattern on purpose —
+ * ``消耗 1 次`` or ``1 次 Quota`` describe a single consumption unit, not the daily
+ * allowance, and stay legal.
  */
-const LITERAL_QUOTA_PATTERN =
-  /(?:每日|每天|自然日|一天)\s*(?:最多|至少|可|上限为?)?\s*(?:[\d０-９]+|[零一二三四五六七八九十百千万两]+)\s*次/u;
+const LITERAL_QUOTA_PATTERNS = [
+  new RegExp(
+    `${DAILY_QUOTA_PREFIX}\\s*${DAILY_QUOTA_QUALIFIER}?\\s*${QUOTA_COUNT}\\s*次`,
+    "u",
+  ),
+  new RegExp(`${QUOTA_COUNT}\\s*次\\s*[\\/／]\\s*(?:天|日)`, "u"),
+];
 
 interface ClaimGuard {
   label: string;
@@ -147,7 +158,7 @@ const CLAIM_GUARDS: ClaimGuard[] = [
   },
   {
     label: "literal daily quota",
-    patterns: [LITERAL_QUOTA_PATTERN],
+    patterns: LITERAL_QUOTA_PATTERNS,
     remedy: `quota claims must use the placeholder ${placeholderToken("DAILY_FREE_QUOTA")} (as in "每日 ${placeholderToken("DAILY_FREE_QUOTA")} 次"), not hand-written numbers`,
   },
 ];

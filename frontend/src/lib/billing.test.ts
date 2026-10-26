@@ -5,11 +5,13 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
+  DEFAULT_MONTHLY_PRICE_USD,
+} from "@/lib/billing-defaults";
+import {
   ACTIVE_STATUS,
   CANCELED_STATUS,
   DAILY_FREE_ANALYSIS_LIMIT,
-  DEFAULT_DAILY_FREE_ANALYSIS_LIMIT,
-  DEFAULT_MONTHLY_PRICE_USD,
   FREE_DAILY_ANALYSIS_LABEL,
   FREE_STATUS,
   MONTHLY_PRICE_USD,

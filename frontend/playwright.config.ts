@@ -64,7 +64,10 @@ export default defineConfig({
               // feature switch ships open in fake-adapter mode. The 429 leg counts on
               // the default free allowance; Stripe keys stay empty (demo gateway).
               APP_DOUYIN_ENABLED: "1",
-              APP_ANALYSIS_DAILY_QUOTA: "3",
+              // Pin both sides of the price mirror to the same committed defaults, so a
+              // repriced shell cannot make /me/membership and the Articles disagree.
+              APP_SUBSCRIPTION_MONTHLY_USD: String(DEFAULT_MONTHLY_PRICE_USD),
+              APP_ANALYSIS_DAILY_QUOTA: String(DEFAULT_DAILY_FREE_ANALYSIS_LIMIT),
               // Rate limits and the visitor hourly cap would make repeat runs flaky;
               // the backend suite covers them at the HTTP seam.
               APP_RATE_LIMIT_RESOLVE_PER_MINUTE: "0",
