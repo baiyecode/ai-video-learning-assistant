@@ -1,16 +1,23 @@
 """Video resolve acceptance tests, exercised through the in-process HTTP seam.
 
-Every test uses ``FakeVideoSource``: no sockets and no real platform calls.
+HTTP tests use ``FakeVideoSource``; production metadata checks replace only the
+subprocess boundary. No sockets and no real platform calls.
 """
 
 from __future__ import annotations
 
 import asyncio
+import json
 from dataclasses import replace
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
-from app import db
+from app import db, messages
+from app.adapters.ytdlp_source import YtDlpVideoSource
+from app.config import Settings
 from app.container import Adapters
+from app.errors import AppError
 from app.modules.catalog.models import Subtitle, Video
 from app.ports import ResolvedVideo, SubtitleTrack, VideoFormat, VideoUnavailableError
 from fastapi import FastAPI
@@ -240,6 +247,28 @@ async def test_unsupported_and_live_urls_are_rejected(client: AsyncClient, url: 
     body = response.json()["error"]
     assert body["code"] == "unsupported_url"
     assert body["message"]
+
+
+@pytest.mark.parametrize(
+    "live_flags",
+    [{"is_live": True}, {"live_status": "is_live"}, {"live_status": "is_upcoming"}],
+)
+async def test_live_metadata_reuses_the_same_rejection_message_as_live_urls(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, live_flags: dict,
+) -> None:
+    metadata = {"id": "dQw4w9WgXcQ", "extractor_key": "Youtube", **live_flags}
+    process = SimpleNamespace(
+        returncode=0, communicate=AsyncMock(return_value=(json.dumps(metadata).encode(), b"")),
+    )
+    monkeypatch.setattr("shutil.which", lambda executable: executable)
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", AsyncMock(return_value=process))
+
+    with pytest.raises(AppError) as raised:
+        await YtDlpVideoSource(settings).resolve(YOUTUBE_URL)
+
+    assert raised.value.status == 422
+    assert raised.value.code == "unsupported_url"
+    assert raised.value.message == messages.LIVE_NOT_SUPPORTED
 
 
 async def test_unavailable_video_is_rejected(client: AsyncClient, adapters: Adapters) -> None:

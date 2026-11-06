@@ -7,6 +7,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH"
 
 COPY --from=ghcr.io/astral-sh/uv:0.12.16 /uv /uvx /bin/
+COPY --from=denoland/deno:bin-2.9.8 /deno /usr/local/bin/deno
+
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
@@ -22,6 +27,8 @@ RUN useradd --create-home --uid 10001 appuser \
     && chown -R appuser:appuser /data /media /backups /app
 
 USER appuser
+
+RUN yt-dlp --version && ffmpeg -version && ffprobe -version && deno --version
 
 ENV APP_ENV=production \
     APP_DATA_DIR=/data \

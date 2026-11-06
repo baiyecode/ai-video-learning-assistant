@@ -6,6 +6,7 @@
  * rebuilds the text from the replay instead of duplicating it.
  */
 
+import { formatShanghaiMinute } from "@/lib/shanghaiTime";
 import type { SseMessage } from "@/lib/sse";
 import type { UiError } from "@/lib/uiError";
 
@@ -189,22 +190,7 @@ export function formatQuota(quota: QuotaDto | null | undefined): string {
 
 /** `2026-01-16T00:00:00+08:00` → `01-16 00:00` (always rendered in Asia/Shanghai). */
 export function formatShanghaiDateTime(iso: string | null | undefined): string {
-  if (!iso) return "";
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return "";
-
-  const parts = new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const part = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((item) => item.type === type)?.value ?? "";
-
-  return `${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+  return formatShanghaiMinute(iso) ?? "";
 }
 
 export function formatQuotaReset(resetsAt: string | null | undefined): string {

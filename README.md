@@ -49,6 +49,7 @@ uv sync
 uv run uvicorn app.main:app --reload --port 8000
 ```
 
+- 真实解析与下载：`uv sync` 安装锁定的 `yt-dlp` 及默认依赖；本地另需将 `ffmpeg`、`ffprobe` 和 Deno 加入 `PATH`。Docker 镜像包含这些工具，并在构建时检查版本命令。
 - 健康检查：`curl http://127.0.0.1:8000/health`（200 正常，503 降级）
 - API 文档：`http://127.0.0.1:8000/api/docs`
 - 配置来自 `APP_*` 环境变量或 `backend/.env`（参考根目录 `.env.example`）。

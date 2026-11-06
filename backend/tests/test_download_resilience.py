@@ -8,16 +8,20 @@ ordering and concurrency are deterministic (no sleeps asserting timing).
 from __future__ import annotations
 
 import asyncio
+import json
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
+from unittest.mock import AsyncMock
 
 import httpx
+import pytest
 from app.config import Settings
 from app.container import Adapters
+from app.logging_setup import JsonFormatter
 from app.main import create_app
 from app.modules.media.manager import DownloadManager
 from app.modules.media.models import Download, DownloadStatus
@@ -25,7 +29,8 @@ from app.ports import ResolvedVideo, VideoFormat
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
-from sqlalchemy import func, select
+from sqlalchemy import event, func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from tests.auth_flows import logged_in_account
 from tests.fakes import make_fake_adapters, sample_video
@@ -494,8 +499,9 @@ async def test_file_endpoint_supports_range_resume(settings: Settings) -> None:
 # --------------------------------------------------------- retention / cleanup
 
 
+@pytest.mark.parametrize("read_after_expiry", [False, True])
 async def test_cleanup_expired_removes_the_file_and_marks_the_task_expired(
-    settings: Settings,
+    settings: Settings, read_after_expiry: bool,
 ) -> None:
     store = BlockingMediaStore()
     store.release.set()
@@ -514,6 +520,10 @@ async def test_cleanup_expired_removes_the_file_and_marks_the_task_expired(
         assert retained.is_file()  # noqa: ASYNC240 - tiny test artifact
 
         adapters.clock.advance(seconds=3601)  # type: ignore[attr-defined]
+        if read_after_expiry:
+            gone = await client.get(f"/api/downloads/{created.json()['id']}")
+            assert gone.status_code == 410
+            assert gone.json()["error"]["code"] == "file_expired"
         manager = app.state.download_manager
         assert await manager.cleanup_expired() == 1
 
@@ -530,6 +540,194 @@ async def test_cleanup_expired_removes_the_file_and_marks_the_task_expired(
 
         # Idempotent: nothing left to clean.
         assert await manager.cleanup_expired() == 0
+
+
+async def test_retry_after_expired_get_removes_old_file_even_if_new_download_fails(
+    settings: Settings,
+) -> None:
+    adapters = make_fake_adapters()
+    async with _client_for(settings, adapters) as (client, app):
+        video_id = await _resolve(client, adapters)
+        created = await _create(client, video_id)
+        download_id = created.json()["id"]
+        await _wait_idle(app)
+        retained = next((settings.media_dir / download_id).iterdir())
+        assert retained.is_file()  # noqa: ASYNC240 - tiny test artifact
+        adapters.clock.advance(seconds=3601)  # type: ignore[attr-defined]
+        assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+        adapters.media_store.fail_with = RuntimeError("upstream unavailable")  # type: ignore[attr-defined]
+
+        retried = await client.post(f"/api/downloads/{download_id}/retry")
+        assert retried.status_code == 202
+        assert retried.json()["attempts"] == 1
+        await _wait_idle(app)
+
+        assert (await _get(client, download_id))["status"] == "failed"
+        assert not retained.exists()  # noqa: ASYNC240 - old file must not be orphaned
+        assert await app.state.download_manager.cleanup_expired() == 0
+
+
+async def test_restart_after_queued_retry_still_cleans_the_expired_file(settings: Settings) -> None:
+    settings = _fast_settings(settings, download_cleanup_interval_seconds=0)
+    adapters = make_fake_adapters()
+    async with _client_for(settings, adapters) as (client, app):
+        video_id = await _resolve(client, adapters)
+        download_id = (await _create(client, video_id)).json()["id"]
+        await _wait_idle(app)
+        retained = next((settings.media_dir / download_id).iterdir())
+
+    adapters.clock.advance(seconds=3601)  # type: ignore[attr-defined]
+    paused = settings.model_copy(update={"download_global_concurrency": 0})
+    async with _client_for(paused, adapters) as (client, _app):
+        assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+        retried = await client.post(f"/api/downloads/{download_id}/retry")
+        assert retried.status_code == 202
+        assert (await _get(client, download_id))["status"] == "queued"
+
+    async with _client_for(settings, adapters) as (client, app):
+        assert (await _get(client, download_id))["status"] == "failed"
+        assert await app.state.download_manager.cleanup_expired() == 1
+        assert not retained.exists()
+        assert await app.state.download_manager.cleanup_expired() == 0
+        assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+
+
+@pytest.mark.parametrize("file_state", ["missing", "locked", "outside", "traversal", "outside_symlink"])
+async def test_cleanup_preserves_failed_references_and_never_deletes_outside_media(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, file_state: str,
+) -> None:
+    adapters = make_fake_adapters()
+    async with _client_for(settings, adapters) as (client, app):
+        video_id = await _resolve(client, adapters)
+        download_id = (await _create(client, video_id)).json()["id"]
+        await _wait_idle(app)
+        retained = next((settings.media_dir / download_id).iterdir())
+        assert await app.state.download_manager.cleanup_expired() == 0
+        if file_state == "missing":
+            retained.unlink()
+        elif file_state in {"outside", "traversal", "outside_symlink"}:
+            external = settings.data_dir / "user-file.mp4"
+            external.write_bytes(b"not managed media")
+            if file_state == "outside_symlink":
+                # Windows symlink creation requires privileges unavailable in this test.
+                target = retained
+                resolve = Path.resolve
+
+                def resolve_link(path: Path, *args, **kwargs):
+                    return target if path == external else resolve(path, *args, **kwargs)
+
+                monkeypatch.setattr(Path, "resolve", resolve_link)
+            retained = (
+                settings.media_dir / ".." / "user-file.mp4" if file_state == "traversal"
+                else external
+            )
+            async with app.state.sessionmaker() as session:
+                row = await session.get(Download, download_id)
+                row.file_path = str(retained)
+                await session.commit()
+
+        unlink = Path.unlink
+
+        def locked_unlink(path: Path, *args, **kwargs):
+            if path == retained:
+                raise PermissionError("file temporarily in use")
+            return unlink(path, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            if file_state == "locked":
+                patch.setattr(Path, "unlink", locked_unlink)
+            adapters.clock.advance(seconds=3601)  # type: ignore[attr-defined]
+            assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+            cleaned = await app.state.download_manager.cleanup_expired()
+            assert cleaned == (1 if file_state == "missing" else 0)
+            async with app.state.sessionmaker() as session:
+                row = await session.get(Download, download_id)
+                assert row.status == DownloadStatus.EXPIRED
+                assert row.file_path == (None if file_state == "missing" else str(retained))
+            assert retained.exists() is (file_state != "missing")
+
+        if file_state == "locked":
+            assert await app.state.download_manager.cleanup_expired() == 1
+            assert not retained.exists()
+        assert await app.state.download_manager.cleanup_expired() == 0
+
+
+async def test_cleanup_does_not_delete_a_retry_completed_after_its_scan(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapters = make_fake_adapters()
+    settings = _fast_settings(settings, download_cleanup_interval_seconds=0)
+    async with _client_for(settings, adapters) as (client, app):
+        video_id = await _resolve(client, adapters)
+        download_id = (await _create(client, video_id)).json()["id"]
+        await _wait_idle(app)
+        adapters.clock.advance(seconds=3601)  # type: ignore[attr-defined]
+        assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+
+        scanned = asyncio.Event()
+        release_scan = asyncio.Event()
+        scalars = AsyncSession.scalars
+
+        async def pause_scan(session, statement, *args, **kwargs):
+            result = await scalars(session, statement, *args, **kwargs)
+            scanned.set()
+            await release_scan.wait()
+            return result
+
+        with monkeypatch.context() as patch:
+            patch.setattr(AsyncSession, "scalars", pause_scan)
+            cleanup = asyncio.create_task(app.state.download_manager.cleanup_expired())
+            try:
+                await asyncio.wait_for(scanned.wait(), timeout=5)
+                retried = await client.post(f"/api/downloads/{download_id}/retry")
+                assert retried.status_code == 202
+                await _wait_idle(app)
+            finally:
+                release_scan.set()
+                cleaned = await asyncio.wait_for(cleanup, timeout=5)
+
+        assert cleaned == 0  # The old scan must not expire the new rendition.
+        ready = await _get(client, download_id)
+        assert ready["status"] == "ready"
+        assert (await client.get(ready["download_url"])).content == b"fake-media-bytes"
+
+
+async def test_retry_keeps_old_file_cleanable_when_deletion_fails(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    adapters = make_fake_adapters()
+    async with _client_for(settings, adapters) as (client, app):
+        video_id = await _resolve(client, adapters)
+        download_id = (await _create(client, video_id)).json()["id"]
+        await _wait_idle(app)
+        retained = next((settings.media_dir / download_id).iterdir())
+        adapters.clock.advance(seconds=3601)  # type: ignore[attr-defined]
+        assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+        unlink = Path.unlink
+
+        def locked_unlink(path: Path, *args, **kwargs):
+            if path == retained:
+                raise PermissionError("file temporarily in use")
+            return unlink(path, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "unlink", locked_unlink)
+            retried = await client.post(f"/api/downloads/{download_id}/retry")
+            assert retried.status_code == 202
+            assert retried.json()["attempts"] == 1
+            await _wait_idle(app)
+            assert (await client.get(f"/api/downloads/{download_id}")).status_code == 410
+            assert await app.state.download_manager.cleanup_expired() == 0
+            assert retained.is_file()
+
+        assert await app.state.download_manager.cleanup_expired() == 1
+        assert not retained.exists()
+        assert await app.state.download_manager.cleanup_expired() == 0
+        retried = await client.post(f"/api/downloads/{download_id}/retry")
+        assert retried.status_code == 202
+        assert retried.json()["attempts"] == 2
+        await _wait_idle(app)
+        assert (await _get(client, download_id))["status"] == "ready"
 
 
 async def test_periodic_cleanup_runs_without_an_explicit_call(settings: Settings) -> None:
@@ -628,6 +826,56 @@ async def test_manager_start_marks_interrupted_downloads_failed(settings: Settin
         async with app.state.sessionmaker() as session:
             row = await session.get(Download, new_id)
             assert row is not None and row.status == DownloadStatus.QUEUED
+
+
+async def test_download_job_crash_has_a_stable_code_in_json_logs(
+    settings: Settings, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture,
+) -> None:
+    adapters = make_fake_adapters()
+    # The media port returns a file that disappeared before its size could be read.
+    monkeypatch.setattr(
+        adapters.media_store, "download",
+        AsyncMock(return_value=settings.media_dir / "missing.mp4"),
+    )
+    async with _client_for(settings, adapters) as (client, app):
+        video_id = await _resolve(client, adapters)
+        assert (await _create(client, video_id)).status_code == 202
+        await _wait_idle(app)
+
+    record = next(record for record in caplog.records if record.message == "download_job_crashed")
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["level"] == "error"
+    assert payload["event"] == "download_job_crashed"
+    assert payload["error_code"] == "download_failed"
+    assert "FileNotFoundError" in payload["exception"]
+
+
+async def test_cleanup_crash_has_a_stable_code_in_json_logs(
+    settings: Settings, caplog: pytest.LogCaptureFixture,
+) -> None:
+    settings = _fast_settings(settings, download_cleanup_interval_seconds=0.01)
+    async with _client_for(settings, make_fake_adapters()) as (_client, app):
+        def fail_download_read(conn, cursor, statement, parameters, context, executemany):
+            if statement.startswith("SELECT downloads."):
+                raise OSError("database temporarily unavailable")
+
+        engine = app.state.engine.sync_engine
+        event.listen(engine, "before_cursor_execute", fail_download_read)
+        try:
+            await _wait_until(
+                lambda: any(record.message == "download_cleanup_failed" for record in caplog.records),
+                label="cleanup error log",
+            )
+        finally:
+            event.remove(engine, "before_cursor_execute", fail_download_read)
+        assert await app.state.download_manager.cleanup_expired() == 0
+
+    record = next(record for record in caplog.records if record.message == "download_cleanup_failed")
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["level"] == "error"
+    assert payload["event"] == "download_cleanup_failed"
+    assert payload["error_code"] == "internal_error"
+    assert "OSError" in payload["exception"]
 
 
 # ----------------------------------------------------------------------- retries

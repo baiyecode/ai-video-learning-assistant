@@ -38,6 +38,33 @@ describe("verificationResendNotice", () => {
     expect(verificationResendNotice({ retry_after: 5 })).toContain("1 分钟");
   });
 
+  it.each([undefined, null, "", "not-a-date", "2026-13-01T00:00:00Z", 123, {}])(
+    "omits invalid reset instant %s while preserving optional retry minutes",
+    (resetAt) => {
+      expect(verificationResendNotice({ reset_at: resetAt })).toBe(
+        "发送验证邮件过于频繁，请稍后再试。",
+      );
+      expect(verificationResendNotice({ reset_at: resetAt, retry_after: 61 })).toBe(
+        "发送验证邮件过于频繁，请约 2 分钟后再试。",
+      );
+    },
+  );
+
+  it.each([
+    ["2025-12-31T15:59:59Z", "12-31 23:59"],
+    ["2025-12-31T16:00:00Z", "01-01 00:00"],
+    ["2024-02-29T16:00:00Z", "03-01 00:00"],
+    ["2026-01-01T00:00:00+14:00", "12-31 18:00"],
+    ["2026-01-15T16:15:00-08:00", "01-16 08:15"],
+  ])("renders the reset instant %s as Shanghai time %s", (resetAt, label) => {
+    expect(verificationResendNotice({ reset_at: resetAt })).toBe(
+      `发送验证邮件过于频繁，${label} 后可重试。`,
+    );
+    expect(verificationResendNotice({ reset_at: resetAt, retry_after: 120 })).toBe(
+      `发送验证邮件过于频繁，请约 2 分钟后再试（${label} 后可重试）。`,
+    );
+  });
+
   it("degrades gracefully when envelope details are missing", () => {
     expect(verificationResendNotice({})).toBe("发送验证邮件过于频繁，请稍后再试。");
     expect(verificationResendNotice({ reset_at: "not-a-date" })).toBe(

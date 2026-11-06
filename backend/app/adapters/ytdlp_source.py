@@ -52,7 +52,7 @@ class YtDlpVideoSource:
         if info.get("_type") == "playlist":
             raise AppError(422, ErrorCode.PLAYLIST_NOT_SUPPORTED, messages.PLAYLIST_NOT_SUPPORTED)
         if info.get("is_live") or info.get("live_status") in {"is_live", "is_upcoming"}:
-            raise AppError(422, ErrorCode.UNSUPPORTED_URL, "暂不支持直播链接，请提供已发布的单个视频")
+            raise AppError(422, ErrorCode.UNSUPPORTED_URL, messages.LIVE_NOT_SUPPORTED)
 
         availability = str(info.get("availability") or "")
         if availability in {"private", "needs_auth", "login_required"}:
@@ -238,10 +238,31 @@ def _has_drm(info: dict[str, Any]) -> bool:
 
 
 def _formats_of(info: dict[str, Any]) -> tuple[VideoFormat, ...]:
+    raw_formats = [
+        raw
+        for raw in info.get("formats") or []
+        if isinstance(raw, dict)
+        and not raw.get("has_drm")
+        and str(raw.get("format_id") or "").strip()
+    ]
+    # Freeze the audio ID; prefer M4A for MP4, then quality and a stable tie-breaker.
+    audio = max(
+        (
+            raw
+            for raw in raw_formats
+            if raw.get("vcodec") in (None, "none")
+            and raw.get("acodec") not in (None, "none")
+        ),
+        key=lambda raw: (
+            raw.get("ext") == "m4a",
+            _int_or_none(raw.get("abr")) or 0,
+            _int_or_none(raw.get("asr")) or 0,
+            str(raw["format_id"]),
+        ),
+        default=None,
+    )
     formats: list[VideoFormat] = []
-    for raw in info.get("formats") or []:
-        if not isinstance(raw, dict) or raw.get("has_drm"):
-            continue
+    for raw in raw_formats:
         vcodec = raw.get("vcodec")
         acodec = raw.get("acodec")
         has_video = vcodec not in (None, "none")
@@ -249,16 +270,26 @@ def _formats_of(info: dict[str, Any]) -> tuple[VideoFormat, ...]:
         if not has_video and not has_audio:
             continue
         format_id = str(raw.get("format_id") or "").strip()
-        if not format_id:
-            continue
+        filesize = _int_or_none(raw.get("filesize") or raw.get("filesize_approx"))
+        ext = str(raw.get("ext") or "mp4")
+        if has_video and not has_audio and audio is not None:
+            format_id = f"{format_id}+{str(audio['format_id']).strip()}"
+            has_audio = True
+            ext = "mp4"  # FsMediaStore's merge container, not the source video container.
+            audio_size = _int_or_none(audio.get("filesize") or audio.get("filesize_approx"))
+            filesize = (
+                filesize + audio_size
+                if filesize is not None and filesize > 0 and audio_size is not None and audio_size > 0
+                else None
+            )
         formats.append(
             VideoFormat(
                 format_id=format_id,
                 label=_format_label(raw, has_video=has_video, has_audio=has_audio),
-                ext=str(raw.get("ext") or "mp4"),
+                ext=ext,
                 width=_int_or_none(raw.get("width")),
                 height=_int_or_none(raw.get("height")),
-                filesize=_int_or_none(raw.get("filesize") or raw.get("filesize_approx")),
+                filesize=filesize,
                 has_video=has_video,
                 has_audio=has_audio,
             )

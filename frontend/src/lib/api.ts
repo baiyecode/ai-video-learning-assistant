@@ -63,11 +63,19 @@ export async function apiErrorFromResponse(response: Response): Promise<ApiError
 }
 
 let accessToken: string | null = null;
+// A rotation can return the same token string; track its version, not just its value.
+let tokenVersion = 0;
+// Explicit login/logout invalidates work belonging to the previous local Session.
+let sessionVersion = 0;
+let refreshPromise: Promise<boolean> | null = null;
 let refreshHandler: () => Promise<string | null> = refreshAccessToken;
 let unauthorizedHandler: (() => void) | null = null;
 
 export function setAccessToken(token: string | null): void {
   accessToken = token;
+  sessionVersion += 1;
+  tokenVersion += 1;
+  refreshPromise = null;
 }
 
 export function getAccessToken(): string | null {
@@ -99,15 +107,41 @@ export async function refreshAccessToken(): Promise<string | null> {
   }
 }
 
-async function refreshSession(): Promise<boolean> {
-  try {
-    const token = await refreshHandler();
-    if (!token) return false;
-    accessToken = token;
-    return true;
-  } catch {
-    return false;
+function refreshSession(): Promise<boolean> {
+  if (!refreshPromise) {
+    const startedSessionVersion = sessionVersion;
+    const pending = (async () => {
+      try {
+        const token = await refreshHandler();
+        if (!token || sessionVersion !== startedSessionVersion) return false;
+        accessToken = token;
+        tokenVersion += 1;
+        return true;
+      } catch {
+        return false;
+      }
+    })().finally(() => {
+      // A replaced Session may already have started its own refresh.
+      if (refreshPromise === pending) refreshPromise = null;
+    });
+    refreshPromise = pending;
   }
+  return refreshPromise;
+}
+
+/** Cancelling one caller must not cancel the Session rotation shared by others. */
+function waitForRefresh(signal?: AbortSignal): Promise<boolean> {
+  signal?.throwIfAborted();
+  const pending = refreshSession();
+  if (!signal) return pending;
+
+  return new Promise<boolean>((resolve, reject) => {
+    const onAbort = () => reject(signal.reason);
+    signal.addEventListener("abort", onAbort, { once: true });
+    void pending.then(resolve, reject).finally(() => {
+      signal.removeEventListener("abort", onAbort);
+    });
+  });
 }
 
 export interface ApiRequestOptions {
@@ -152,15 +186,26 @@ async function send(path: string, options: ApiRequestOptions): Promise<Response>
 }
 
 export async function apiFetch<T>(path: string, options: ApiRequestOptions = {}): Promise<T> {
+  const requestTokenVersion = tokenVersion;
+  const requestSessionVersion = sessionVersion;
   let response = await send(path, options);
+  options.signal?.throwIfAborted();
 
-  if (response.status === 401 && options.retryOn401 !== false) {
-    const refreshed = await refreshSession();
-    if (refreshed) {
+  if (
+    response.status === 401 && options.retryOn401 !== false
+    && sessionVersion === requestSessionVersion
+  ) {
+    // Another request may already have rotated the cookie before this 401 arrived.
+    const refreshed = (accessToken !== null && tokenVersion !== requestTokenVersion)
+      || await waitForRefresh(options.signal);
+    options.signal?.throwIfAborted();
+    if (refreshed && sessionVersion === requestSessionVersion) {
       response = await send(path, { ...options, retryOn401: false });
-      // The Session may have been revoked between refresh and retry.
-      if (response.status === 401) unauthorizedHandler?.();
-    } else {
+      options.signal?.throwIfAborted();
+    }
+    // Do not let an old failure clear a newly logged-in Session.
+    if (response.status === 401 && sessionVersion === requestSessionVersion) {
+      setAccessToken(null);
       unauthorizedHandler?.();
     }
   }

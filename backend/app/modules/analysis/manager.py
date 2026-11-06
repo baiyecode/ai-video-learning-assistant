@@ -147,7 +147,11 @@ class AnalysisManager:
         except Exception:  # noqa: BLE001 - a crash must still settle the row and Quota
             logger.exception(
                 "analysis_generation_crashed",
-                extra={"event": "analysis_generation_crashed", "analysis_id": analysis_id},
+                extra={
+                    "event": "analysis_generation_crashed",
+                    "analysis_id": analysis_id,
+                    "error_code": ErrorCode.ANALYSIS_FAILED.value,
+                },
             )
             await self._fail(analysis_id)
 

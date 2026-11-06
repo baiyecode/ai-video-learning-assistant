@@ -17,6 +17,7 @@ dependencies = [
     "stripe>=16.0.0",
     "tzdata>=2024.1",
     "uvicorn[standard]>=0.30",
+    "yt-dlp[default]>=2026.10.26",
 ]
 
 [dependency-groups]

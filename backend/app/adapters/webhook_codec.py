@@ -80,14 +80,27 @@ def _decode_event(payload: bytes) -> WebhookEvent:
     metadata = obj.get("metadata") or {}
     raw_status = obj.get("status")
     raw_cancel = obj.get("cancel_at_period_end")
+    # These events carry a Subscription itself; Checkout/Invoice carry a reference.
+    subscription_event = event_type in (
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    )
+    period_end = _epoch_to_utc(obj.get("current_period_end"))
+    if subscription_event and period_end is None:
+        # Basil+ stores the period on the sole SubscriptionItem created by Checkout.
+        items = obj.get("items") or {}
+        data = items.get("data") or []
+        if len(data) == 1 and not items.get("has_more"):
+            period_end = _epoch_to_utc(data[0].get("current_period_end"))
     return WebhookEvent(
         event_id=event_id,
         type=event_type,
         created=datetime.fromtimestamp(created, tz=UTC),
         account_id=obj.get("client_reference_id") or metadata.get("account_id"),
         provider_customer_id=obj.get("customer"),
-        provider_subscription_id=obj.get("subscription"),
-        current_period_end=_epoch_to_utc(obj.get("current_period_end")),
+        provider_subscription_id=obj.get("id") if subscription_event else obj.get("subscription"),
+        current_period_end=period_end,
         price_id=metadata.get("price_id"),
         subscription_status=raw_status if isinstance(raw_status, str) else None,
         cancel_at_period_end=raw_cancel if isinstance(raw_cancel, bool) else None,

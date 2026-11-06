@@ -168,25 +168,38 @@ async def test_event_older_than_the_latest_record_never_rolls_state_back(
 async def test_unknown_event_type_is_recorded_but_never_moves_state(
     client: AsyncClient, app: FastAPI
 ) -> None:
-    """Lifecycle events beyond this ticket's scope are audited, acknowledged, ignored."""
+    """Unhandled event types stay audit-only, even when they name an active subscription."""
     response = await register(client, email="mystery@example.com")
     account_id = response.json()["account"]["id"]
     auth = bearer(response)
+    checkout = checkout_completed_body(
+        "evt_before_unknown", account_id, created=_dt(EVENT_CREATED), period_end=_dt(PERIOD_END)
+    )
+    assert (await _post_event(client, checkout)).status_code == 200
+    before = (await client.get("/api/me/membership", headers=auth)).json()
 
     body = webhook_event_body(
         "evt_future_1",
-        "customer.subscription.deleted",
-        _dt(EVENT_CREATED),
-        {"subscription": "sub_fake_1", "metadata": {"account_id": account_id}},
+        "customer.subscription.paused",
+        _dt("2026-01-15T10:00:00+00:00"),
+        {
+            "id": "sub_fake_1",
+            "object": "subscription",
+            "metadata": {"account_id": account_id},
+            "status": "paused",
+            "cancel_at_period_end": True,
+        },
     )
     webhook = await _post_event(client, body)
 
     assert webhook.status_code == 200, webhook.text
     membership = await client.get("/api/me/membership", headers=auth)
-    assert membership.json()["status"] == "free"
+    assert membership.json() == before
 
     rows = await _audit_rows(app, "evt_future_1")
-    assert [(row.type, row.applied) for row in rows] == [("customer.subscription.deleted", False)]
+    assert [(row.type, row.applied, row.provider_subscription_id) for row in rows] == [
+        ("customer.subscription.paused", False, None)
+    ]
 
 
 class _CaptureHandler(logging.Handler):

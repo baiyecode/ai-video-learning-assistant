@@ -1,4 +1,5 @@
 /** Chinese user-facing messages for stable auth error codes. */
+import { formatShanghaiMinute } from "@/lib/shanghaiTime";
 import { EMAIL_NOT_VERIFIED_MESSAGE } from "@/lib/uiError";
 
 const AUTH_MESSAGES: Record<string, string> = {
@@ -38,7 +39,7 @@ export function verificationResendNotice(details: RateLimitDetails): string {
       ? Math.ceil(details.retry_after / 60)
       : null;
   const resetAt = typeof details.reset_at === "string" ? details.reset_at : null;
-  const day = resetAt ? shanghaiMinute(resetAt) : null;
+  const day = formatShanghaiMinute(resetAt);
   if (retryAfter !== null && day) {
     return `发送验证邮件过于频繁，请约 ${retryAfter} 分钟后再试（${day} 后可重试）。`;
   }
@@ -47,21 +48,4 @@ export function verificationResendNotice(details: RateLimitDetails): string {
   }
   if (day) return `发送验证邮件过于频繁，${day} 后可重试。`;
   return "发送验证邮件过于频繁，请稍后再试。";
-}
-
-/** `2026-01-16T02:15:00+00:00` → `01-16 10:15` in Asia/Shanghai. */
-function shanghaiMinute(iso: string): string | null {
-  const date = new Date(iso);
-  if (Number.isNaN(date.getTime())) return null;
-  const parts = new Intl.DateTimeFormat("zh-CN", {
-    timeZone: "Asia/Shanghai",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  }).formatToParts(date);
-  const part = (type: Intl.DateTimeFormatPartTypes): string =>
-    parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
 }

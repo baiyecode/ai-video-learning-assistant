@@ -13,13 +13,16 @@ import json
 from typing import Any
 
 import httpx
+import pytest
 from app.config import Settings
 from app.container import Adapters
+from app.logging_setup import JsonFormatter
 from app.main import create_app
 from app.modules.catalog.models import Video
 from asgi_lifespan import LifespanManager
 from fastapi import FastAPI
 from httpx import AsyncClient
+from sqlalchemy import event
 
 from tests.auth_flows import login as _login_flow
 from tests.auth_flows import verified_account
@@ -114,6 +117,35 @@ async def _wait_terminal(
             return body
         await asyncio.sleep(0.01)
     raise AssertionError(f"analysis {analysis_id} did not reach a terminal status")
+
+
+async def test_analysis_settlement_crash_has_a_stable_code_in_json_logs(
+    client: AsyncClient, adapters: Adapters, app: FastAPI, caplog: pytest.LogCaptureFixture,
+) -> None:
+    headers = await _register(adapters, client)
+    video_id = await _resolve(client, adapters)
+
+    def fail_completion_write(conn, cursor, statement, parameters, context, executemany):
+        if statement.startswith("UPDATE analyses") and "completed" in parameters:
+            raise OSError("database completion write failed")
+
+    engine = app.state.engine.sync_engine
+    event.listen(engine, "before_cursor_execute", fail_completion_write)
+    try:
+        created = await _create(client, headers, video_id)
+        assert created.status_code == 201, created.text
+        await asyncio.wait_for(app.state.analysis_manager.wait_idle(), timeout=5)
+    finally:
+        event.remove(engine, "before_cursor_execute", fail_completion_write)
+
+    assert (await _get(client, headers, created.json()["id"]))["status"] == "failed"
+    assert (await _me(client, headers))["used"] == 0
+    record = next(record for record in caplog.records if record.message == "analysis_generation_crashed")
+    payload = json.loads(JsonFormatter().format(record))
+    assert payload["level"] == "error"
+    assert payload["event"] == "analysis_generation_crashed"
+    assert payload["error_code"] == "analysis_failed"
+    assert "OSError" in payload["exception"]
 
 
 def _parse_events(text: str) -> list[tuple[str, dict[str, Any]]]:

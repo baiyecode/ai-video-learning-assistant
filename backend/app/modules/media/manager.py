@@ -27,7 +27,7 @@ from collections.abc import Collection
 from dataclasses import dataclass
 from pathlib import Path
 
-from sqlalchemy import select, update
+from sqlalchemy import and_, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app import messages
@@ -220,7 +220,11 @@ class DownloadManager:
         except Exception:  # noqa: BLE001 - one bad job must not kill the pool
             logger.exception(
                 "download_job_crashed",
-                extra={"event": "download_job_crashed", "download_id": job.download_id},
+                extra={
+                    "event": "download_job_crashed",
+                    "download_id": job.download_id,
+                    "error_code": ErrorCode.DOWNLOAD_FAILED.value,
+                },
             )
         finally:
             self._active.pop(job.download_id, None)
@@ -233,6 +237,20 @@ class DownloadManager:
             download = await session.get(Download, download_id)
             if download is None or download.status != DownloadStatus.QUEUED:
                 return
+            if download.file_path:
+                removed = await asyncio.to_thread(
+                    _remove_file, Path(download.file_path), self._settings.media_dir
+                )
+                if not removed:
+                    # Preserve the old file reference instead of overwriting an undeletable file.
+                    download.status = DownloadStatus.EXPIRED
+                    download.error_code = ErrorCode.DOWNLOAD_FAILED.value
+                    download.error_message = messages.DOWNLOAD_FAILED
+                    download.updated_at = self._clock.now()
+                    await session.commit()
+                    return
+                download.file_path = None
+                download.file_expires_at = None
             video = await session.get(Video, download.video_id)
             if video is None:
                 await self._mark_failed(session, download, _MESSAGE_VIDEO_GONE)
@@ -365,7 +383,15 @@ class DownloadManager:
         async with self._sessionmaker() as session:
             rows = (
                 await session.scalars(
-                    select(Download).where(Download.status == DownloadStatus.READY)
+                    select(Download).where(
+                        or_(
+                            Download.status == DownloadStatus.READY,
+                            and_(
+                                Download.status.in_([DownloadStatus.EXPIRED, DownloadStatus.FAILED]),
+                                Download.file_path.is_not(None),
+                            ),
+                        )
+                    )
                 )
             ).all()
             expired = [
@@ -373,22 +399,38 @@ class DownloadManager:
                 for row in rows
                 if (expires := as_utc(row.file_expires_at)) is not None and expires <= now
             ]
+            cleaned = 0
             for download in expired:
-                if download.file_path:
-                    await asyncio.to_thread(
-                        _remove_file, Path(download.file_path), self._settings.media_dir
+                # Claim this version under a write lock so a retry cannot replace it mid-delete.
+                claimed = await session.execute(
+                    update(Download)
+                    .where(
+                        Download.id == download.id,
+                        Download.status == download.status,
+                        Download.file_path == download.file_path,
+                        Download.file_expires_at == download.file_expires_at,
                     )
+                    .values(status=DownloadStatus.EXPIRED, updated_at=now)
+                    .execution_options(synchronize_session=False)
+                )
+                if claimed.rowcount != 1:
+                    continue
                 download.status = DownloadStatus.EXPIRED
-                download.file_path = None
                 download.updated_at = now
+                if download.file_path and not await asyncio.to_thread(
+                    _remove_file, Path(download.file_path), self._settings.media_dir
+                ):
+                    continue  # Retain the reference for a later cleanup attempt.
+                download.file_path = None
+                cleaned += 1
             if expired:
                 await session.commit()
-        if expired:
+        if cleaned:
             logger.info(
                 "downloads_expired",
-                extra={"event": "downloads_expired", "count": len(expired)},
+                extra={"event": "downloads_expired", "count": cleaned},
             )
-        return len(expired)
+        return cleaned
 
     async def _cleanup_loop(self, interval: float) -> None:
         try:
@@ -397,7 +439,13 @@ class DownloadManager:
                 try:
                     await self.cleanup_expired()
                 except Exception:  # noqa: BLE001 - cleanup must not die on one bad row
-                    logger.exception("download_cleanup_failed", extra={"event": "download_cleanup_failed"})
+                    logger.exception(
+                        "download_cleanup_failed",
+                        extra={
+                            "event": "download_cleanup_failed",
+                            "error_code": ErrorCode.INTERNAL_ERROR.value,
+                        },
+                    )
         except asyncio.CancelledError:
             raise
 
@@ -450,21 +498,29 @@ def _failure_message(error: Exception | None) -> str:
     return messages.DOWNLOAD_FAILED
 
 
-def _remove_file(path: Path, root: Path) -> None:
-    """Delete a retained file and, when empty, its per-download directory under ``root``."""
+def _remove_file(path: Path, root: Path) -> bool:
+    """Remove only media-root files; report failures so callers keep the reference."""
     try:
+        root = root.resolve()
+        parent = path.parent.resolve()
+        if root not in path.resolve().parents or (parent != root and root not in parent.parents):
+            logger.warning(
+                "download_file_delete_refused",
+                extra={"event": "download_file_delete_refused", "path": str(path)},
+            )
+            return False
         path.unlink(missing_ok=True)
     except OSError:
         logger.warning(
             "download_file_delete_failed",
             extra={"event": "download_file_delete_failed", "path": str(path)},
         )
-        return
-    parent = path.parent
+        return False
     try:
         if parent != root and root in parent.parents:
             parent.rmdir()  # only succeeds when the directory is empty
     except OSError:
         pass
+    return True
 
 
