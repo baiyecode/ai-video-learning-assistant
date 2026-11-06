@@ -114,6 +114,25 @@ describe("summary and quota presentation", () => {
     expect(formatQuotaReset(null)).toBe("");
   });
 
+  it.each([undefined, null, "", "not-a-date", "2026-13-01T00:00:00Z"])(
+    "keeps invalid or absent time %s empty without Quota reset copy",
+    (iso) => {
+      expect(formatShanghaiDateTime(iso)).toBe("");
+      expect(formatQuotaReset(iso)).toBe("");
+    },
+  );
+
+  it.each([
+    ["2025-12-31T15:59:59Z", "12-31 23:59"],
+    ["2025-12-31T16:00:00Z", "01-01 00:00"],
+    ["2024-02-29T16:00:00Z", "03-01 00:00"],
+    ["2026-01-01T00:00:00+14:00", "12-31 18:00"],
+    ["2026-01-15T16:15:00-08:00", "01-16 08:15"],
+  ])("renders %s on the Shanghai calendar as %s", (iso, label) => {
+    expect(formatShanghaiDateTime(iso)).toBe(label);
+    expect(formatQuotaReset(iso)).toBe(`将于 ${label} 重置`);
+  });
+
   it("labels statuses in Simplified Chinese", () => {
     expect(analysisStatusLabel("pending")).toBe("排队中");
     expect(analysisStatusLabel("streaming")).toBe("生成中");

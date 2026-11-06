@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
 from app.container import Adapters
 from httpx import AsyncClient
 
@@ -221,6 +222,26 @@ async def test_refresh_requires_a_session_cookie(client: AsyncClient) -> None:
 
     assert response.status_code == 401
     assert response.json()["error"]["code"] == "session_invalid"
+
+
+@pytest.mark.parametrize("host", ["localhost:8080", "127.0.0.1:8080"])
+async def test_refresh_and_logout_preserve_nonstandard_port_origin(
+    client: AsyncClient, host: str
+) -> None:
+    await register_and_login(client)
+    cookie = client.cookies.get("refresh_token")
+    headers = {"Host": host, "Origin": f"http://{host}", "Cookie": f"refresh_token={cookie}"}
+    rejected = await client.post(
+        "/api/auth/refresh", headers={**headers, "Origin": f"http://{host.split(':')[0]}:8081"}
+    )
+    assert rejected.status_code == 403
+    refreshed = await client.post("/api/auth/refresh", headers=headers)
+    assert refreshed.status_code == 200
+    new_cookie = refreshed.cookies.get("refresh_token")
+    assert new_cookie and new_cookie != cookie
+    headers["Cookie"] = f"refresh_token={new_cookie}"
+    assert (await client.post("/api/auth/logout", headers=headers)).status_code == 204
+    assert (await client.post("/api/auth/refresh", headers=headers)).status_code == 401
 
 
 async def test_refresh_and_logout_reject_a_foreign_origin(client: AsyncClient) -> None:

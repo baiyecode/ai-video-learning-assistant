@@ -217,11 +217,10 @@ async def prepare_retry(
     download.error_code = None
     download.error_message = None
     download.file_name = None
-    download.file_path = None
+    # Keep the old file reachable for cleanup until the worker removes it.
     download.file_size = None
     download.ready_at = None
     download.url_expires_at = None
-    download.file_expires_at = None
     download.updated_at = now
     await session.commit()
     return download

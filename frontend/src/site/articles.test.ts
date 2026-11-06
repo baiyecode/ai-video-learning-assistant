@@ -244,6 +244,23 @@ describe("article price placeholder interpolation", () => {
     );
   });
 
+  describe.each(["title", "description", "body"])("%s placeholder allowlist", (field) => {
+    it.each(["toString", "__proto__", "constructor", "hasOwnProperty", "valueOf"])(
+      "rejects the inherited key %s with the Article file name",
+      (name) => {
+        const token = `{{${name}}}`;
+        const source = field === "body"
+          ? validSource({}, `${BODY}\n\n${token}`)
+          : validSource({ [field]: field === "description" ? `${DESCRIPTION}${token}` : token });
+        expectFailure(
+          `prototype-${field}.md`,
+          source,
+          new RegExp(`unknown placeholder "\\{\\{${name}\\}\\}"`),
+        );
+      },
+    );
+  });
+
   it("rejects an unclosed placeholder left after resolution", () => {
     expectFailure(
       "unclosed-placeholder.md",

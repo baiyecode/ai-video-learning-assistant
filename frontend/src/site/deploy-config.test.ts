@@ -34,7 +34,13 @@ function block(config: string, opening: string): string {
 }
 
 describe("nginx.conf", () => {
-  it("keeps the /api/ and /health proxies exactly as before", () => {
+  it("preserves the browser Host including its port on both proxies", () => {
+    for (const opening of ["location /api/ {", "location = /health {"]) {
+      expect(block(nginx, opening)).toContain("proxy_set_header Host $http_host;");
+    }
+  });
+
+  it("keeps the API streaming and health proxy settings", () => {
     const api = block(nginx, "location /api/ {");
     expect(api).toContain("proxy_pass http://api:8000;");
     expect(api).toContain("proxy_set_header X-Request-ID $request_id;");
@@ -90,6 +96,27 @@ describe("nginx.conf", () => {
       "text/plain",
     ]) {
       expect(gzip).toContain(type);
+    }
+  });
+});
+
+describe("API environment deploy wiring", () => {
+  it("forwards every documented APP setting except deliberate container constants", () => {
+    const fixed = new Set([
+      "APP_ENV",
+      "APP_DEBUG",
+      "APP_DATABASE_URL",
+      "APP_DATA_DIR",
+      "APP_CORS_ORIGINS",
+    ]);
+    const apiEnvironment = compose.slice(
+      compose.indexOf("    environment:"),
+      compose.indexOf("    volumes:"),
+    );
+    const keys = Array.from(envExample.matchAll(/^(APP_[A-Z0-9_]+)=/gm), (match) => match[1]!);
+    expect(keys.length).toBeGreaterThan(30);
+    for (const key of keys.filter((name) => !fixed.has(name))) {
+      expect(apiEnvironment, `${key} must reach the API container`).toContain(`${key}: \${${key}`);
     }
   });
 });

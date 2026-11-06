@@ -2,10 +2,24 @@
 
 from __future__ import annotations
 
+import re
+import tomllib
 from pathlib import Path
 
 import pytest
 from app.config import Settings
+
+
+def test_production_image_installs_and_checks_media_tools() -> None:
+    backend = Path(__file__).resolve().parents[1]
+    project = tomllib.loads((backend / "pyproject.toml").read_text(encoding="utf-8"))
+    dependencies = project["project"]["dependencies"]
+    assert any(re.match(r"yt-dlp(?:\[.*?\])?(?:[<>=!~]|$)", item) for item in dependencies)
+    dockerfile = (backend / "Dockerfile").read_text(encoding="utf-8")
+    assert re.search(r"apt-get install[^;]*\bffmpeg\b", dockerfile)
+    assert "COPY --from=denoland/deno:bin-" in dockerfile
+    for command in ("yt-dlp --version", "ffmpeg -version", "ffprobe -version", "deno --version"):
+        assert command in dockerfile
 
 
 def _production(tmp_path: Path, **overrides: object) -> Settings:

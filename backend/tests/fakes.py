@@ -67,6 +67,8 @@ def checkout_completed_body(
 ) -> bytes:
     """The wire shape behind ``checkout.session.completed``: a Checkout Session object."""
     session_object: dict[str, object] = {
+        "id": f"cs_{event_id}",
+        "object": "checkout.session",
         "client_reference_id": account_id,
         "subscription": subscription_id,
         "customer": customer_id,
@@ -89,16 +91,33 @@ def lifecycle_event_body(
     subscription_status: str | None = None,
     cancel_at_period_end: bool | None = None,
 ) -> bytes:
-    """The wire shape of an invoice/subscription lifecycle event (Stripe-style object).
-
-    ``account_id`` is optional on purpose: real invoice and subscription events name
-    only Stripe ids, and the state machine must still find the local subscription.
-    """
-    obj: dict[str, object] = {"subscription": subscription_id, "customer": customer_id}
+    """Use Basil+ Subscription periods and pre-Basil Invoice references."""
+    subscription_event = event_type in (
+        "customer.subscription.created",
+        "customer.subscription.updated",
+        "customer.subscription.deleted",
+    )
+    obj: dict[str, object] = {"customer": customer_id, "metadata": {}}
+    if subscription_event:
+        obj.update({"id": subscription_id, "object": "subscription"})
+    else:
+        obj.update({"id": f"in_{event_id}", "object": "invoice", "subscription": subscription_id})
     if account_id is not None:
         obj["metadata"] = {"account_id": account_id}
     if period_end is not None:
-        obj["current_period_end"] = int(period_end.timestamp())
+        if subscription_event:
+            obj["items"] = {
+                "object": "list",
+                "has_more": False,
+                "data": [{
+                    "id": "si_fake_1",
+                    "object": "subscription_item",
+                    "subscription": subscription_id,
+                    "current_period_end": int(period_end.timestamp()),
+                }],
+            }
+        else:
+            obj["current_period_end"] = int(period_end.timestamp())
     if subscription_status is not None:
         obj["status"] = subscription_status
     if cancel_at_period_end is not None:

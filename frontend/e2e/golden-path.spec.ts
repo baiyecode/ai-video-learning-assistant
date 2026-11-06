@@ -99,6 +99,46 @@ test.describe("golden path", () => {
     await expect(page.locator('meta[name="robots"]')).toHaveAttribute("content", "noindex,nofollow");
   });
 
+  test("keeps the Session when the account page receives concurrent 401s", async ({ page }) => {
+    await page.goto("/login");
+    await signUpAndSignIn(page, randomEmail());
+    await page.waitForLoadState("networkidle");
+
+    const firstRequests = new Set<string>();
+    let release!: () => void;
+    const bothRequested = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    await page.route(/\/api\/me(?:\/membership)?$/, async (route) => {
+      const pathname = new URL(route.request().url()).pathname;
+      if (firstRequests.has(pathname)) {
+        await route.continue();
+        return;
+      }
+      firstRequests.add(pathname);
+      if (firstRequests.size === 2) release();
+      await bothRequested;
+      await route.fulfill({
+        status: 401,
+        json: { error: { code: "session_invalid", message: "登录状态已失效" } },
+      });
+    });
+    let refreshRequests = 0;
+    page.on("request", (request) => {
+      if (new URL(request.url()).pathname === "/api/auth/refresh") refreshRequests++;
+    });
+
+    await page.getByRole("link", { name: "个人中心", exact: true }).click();
+    await expect(page.getByText("Quota 剩余 3 / 3")).toBeVisible();
+    await expect(page.getByText("当前为免费版", { exact: false })).toBeVisible();
+    await expect(page.getByRole("button", { name: "退出登录" })).toBeVisible();
+    await expect(page).toHaveURL(/\/account$/);
+    expect(firstRequests.size).toBe(2);
+    expect(refreshRequests).toBe(1);
+    await page.getByRole("button", { name: "退出登录" }).click();
+    await expect(page.getByRole("link", { name: "登录", exact: true })).toBeVisible();
+  });
+
   /**
    * Ticket #57: the dev-server proxy must keep the browser's Host.
    *

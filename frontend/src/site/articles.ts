@@ -196,7 +196,9 @@ function assertNoUntemplatedClaims(fileName: string, raw: string): void {
  */
 function resolveArticleField(fileName: string, text: string): string {
   const resolved = text.replace(PLACEHOLDER_PATTERN, (token, name: string) => {
-    const value = (PLACEHOLDER_VALUES as Record<string, string | undefined>)[name];
+    const value = Object.hasOwn(PLACEHOLDER_VALUES, name)
+      ? PLACEHOLDER_VALUES[name as PlaceholderName]
+      : undefined;
     if (value === undefined) {
       throw new ArticleContentError(
         fileName,

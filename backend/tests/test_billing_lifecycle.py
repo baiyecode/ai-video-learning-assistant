@@ -32,6 +32,7 @@ from tests.fakes import (
     lifecycle_event_body,
     sample_video,
     sign_webhook,
+    webhook_event_body,
 )
 
 PASSWORD = "correct-horse"
@@ -142,12 +143,14 @@ async def test_payment_succeeded_restores_an_active_membership(client: AsyncClie
     }
 
 
-async def test_subscription_updated_backfills_the_period_end_the_checkout_omitted(
-    client: AsyncClient
+@pytest.mark.parametrize(
+    "event_type", ["customer.subscription.created", "customer.subscription.updated"]
+)
+@pytest.mark.parametrize("period_layout", ["item", "subscription"])
+async def test_subscription_event_without_account_metadata_backfills_period_and_scheduled_cancel(
+    client: AsyncClient, event_type: str, period_layout: str
 ) -> None:
-    """P2-02 leftover: a real checkout object may lack the period end; a later
-    ``customer.subscription.updated`` (status still active, i.e. cancelled-at-period-end
-    semantics) writes it in and VIP survives until then."""
+    """Both period layouts retain VIP until expiry without Account metadata."""
     response = await register(client, email="periodend@example.com")
     account_id = response.json()["account"]["id"]
     auth = bearer(response)
@@ -157,18 +160,24 @@ async def test_subscription_updated_backfills_the_period_end_the_checkout_omitte
 
     updated = lifecycle_event_body(
         "evt_lc_update_1",
-        "customer.subscription.updated",
+        event_type,
         _dt("2026-01-15T09:30:00+00:00"),
-        account_id=account_id,
         period_end=_dt(PERIOD_END),
         subscription_status="active",
+        cancel_at_period_end=True,
     )
+    if period_layout == "subscription":
+        document = json.loads(updated)
+        obj = document["data"]["object"]
+        del obj["items"]
+        obj["current_period_end"] = int(_dt(PERIOD_END).timestamp())
+        updated = json.dumps(document).encode()
     assert (await _post_event(client, updated)).status_code == 200
 
     assert await _membership(client, auth) == {
         "status": "active",
         "period_end": PERIOD_END,
-        "cancel_at_period_end": False,
+        "cancel_at_period_end": True,
         "vip_active": True,
         "portal_url": "/api/billing/portal",
         "monthly_price_usd": 4.99,
@@ -589,12 +598,23 @@ async def _resolve_video(
 async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
     client: AsyncClient, adapters: Adapters
 ) -> None:
-    """AC2: the deleted subscription needs no manual step - the very next Analysis is
-    bound by the free daily Quota again (P2-03's derived VIP lifts off automatically)."""
+    """Deletion revokes VIP without Account metadata or a Checkout period end."""
     headers = await verified_account(client, adapters, email="downgraded@example.com")
     me = await client.get("/api/me", headers=headers)
     account_id = me.json()["account"]["id"]
-    await _activate(client, account_id)
+    checkout = checkout_completed_body(
+        "evt_lc_checkout_no_end",
+        account_id,
+        created=_dt(CHECKOUT_CREATED),
+        subscription_id="sub_review",
+        customer_id="cus_review",
+    )
+    assert (await _post_event(client, checkout)).status_code == 200
+    membership = await _membership(client, headers)
+    assert membership["vip_active"] is True
+    assert membership["period_end"] is None
+    quota = (await client.get("/api/me", headers=headers)).json()["quota"]
+    assert quota["daily_limit"] == -1
 
     for index in range(4):  # four completed Analyses: past the free limit, VIP carried it
         video_id = await _resolve_video(client, adapters, headers, f"lcdown0{index:04d}")
@@ -603,23 +623,35 @@ async def test_canceled_membership_downgrades_analysis_to_the_free_quota(
         await _wait_completed(client, headers, created.json()["id"])
         adapters.clock.advance(seconds=10)
 
-    deleted = lifecycle_event_body(
+    # Independent wire payload: a Subscription's id is NOT a `subscription` field.
+    deleted = webhook_event_body(
         "evt_lc_delete_final",
         "customer.subscription.deleted",
         _dt("2026-01-15T12:00:00+00:00"),
-        account_id=account_id,
+        {
+            "id": "sub_review",
+            "object": "subscription",
+            "customer": "cus_review",
+            "metadata": {},
+            "status": "canceled",
+        },
     )
     assert (await _post_event(client, deleted)).status_code == 200
     membership = await _membership(client, headers)
     assert membership == {
         "status": "canceled",
-        "period_end": PERIOD_END,
+        "period_end": None,
         "cancel_at_period_end": False,
         "vip_active": False,
         "portal_url": "/api/billing/portal",
         "monthly_price_usd": 4.99,
         "daily_free_analysis_limit": 3,
     }
+    quota = (await client.get("/api/me", headers=headers)).json()["quota"]
+    assert quota["membership"] == "canceled"
+    assert quota["daily_limit"] == 3
+    assert quota["used"] == 4
+    assert quota["remaining"] == 0
 
     fifth = await _create_analysis(
         client, headers, await _resolve_video(client, adapters, headers, "lcdown09999")
